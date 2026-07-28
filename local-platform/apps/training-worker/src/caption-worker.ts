@@ -2,7 +2,7 @@
  * 本文件实现训练数据集自动打标消费者，逐图调用真实多模态模型并持久化可人工确认的英文 Caption。
  */
 import { Prisma } from "@prisma/client";
-import { mergeCaptionWithTriggerWords, readTrainingTags } from "@drawhime/contracts";
+import { canonicalizeTrainingCaptionTag, mergeCaptionWithTriggerWords, readTrainingTags } from "@drawhime/contracts";
 import { database } from "@drawhime/database";
 import { getObjectBuffer } from "@drawhime/service-runtime";
 import sharp from "sharp";
@@ -128,7 +128,8 @@ function readCaption(text: string): string {
 
 /** 确定性清洗 Caption，阻止空值、中文说明和多段正文进入训练数据。 */
 function normalizeCaption(value: string): string {
-  const tags = [...new Set(value.toLowerCase().replace(/[\r\n;；]+/g, ",").split(/[,，]+/).map((item) => item.trim().replace(/\s+/g, " ")).filter(Boolean))];
+  // 自动打标仅统一严格等义名称，颜色、服装和动作等真实差异保留给 LoRA 学习。
+  const tags = [...new Set(value.toLowerCase().replace(/[\r\n;；]+/g, ",").split(/[,，]+/).map((item) => canonicalizeTrainingCaptionTag(item.trim().replace(/\s+/g, " "))).filter(Boolean))];
   const caption = tags.join(", ").slice(0, 10000);
   if (!caption || /[\u3400-\u9fff]/.test(caption)) throw new Error("自动打标没有返回有效英文 Caption");
   return caption;

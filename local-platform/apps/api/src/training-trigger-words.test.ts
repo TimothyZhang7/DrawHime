@@ -3,7 +3,7 @@
  */
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mergeCaptionWithTriggerWords, summarizeTrainingTriggerWords } from "@drawhime/contracts";
+import { canonicalizeTrainingCaptionTag, mergeCaptionWithTriggerWords, summarizeTrainingTriggerWords } from "@drawhime/contracts";
 
 test("动态替换触发词保留用户标签", () => {
   assert.equal(mergeCaptionWithTriggerWords("old_token, blue hair, custom_tag", ["old_token"], ["new_token"]), "new_token, blue hair, custom_tag");
@@ -22,5 +22,12 @@ test("同义颜色和饰品写法可汇总为稳定角色共识", () => {
     "1girl, long turquoise hair, pink hair tips, heart-shaped hair ornament, blue bows",
   ], []);
   assert.deepEqual(result.commonTags, ["1girl"]);
-  assert.deepEqual(result.consensusTags, ["1girl", "blue hair", "blue hair ribbon", "heart hair feature", "pink-purple hair accent"]);
+  assert.deepEqual(result.consensusTags, ["1girl", "blue hair", "blue hair ribbon", "pink-purple hair accent", "heart-shaped ahoge"]);
+});
+
+test("自动打标统一常见同义标签名称", () => {
+  assert.equal(canonicalizeTrainingCaptionTag("long aqua blue hair"), "long aqua blue hair");
+  assert.equal(canonicalizeTrainingCaptionTag("heart ahoge"), "heart-shaped ahoge");
+  assert.equal(canonicalizeTrainingCaptionTag("seated"), "sitting");
+  assert.equal(canonicalizeTrainingCaptionTag("white thigh-high socks"), "white thighhighs");
 });

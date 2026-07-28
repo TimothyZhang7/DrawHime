@@ -37,7 +37,7 @@ export function summarizeTrainingTriggerWords(captions: readonly (string | null)
 }
 
 /**
- * 从自动打标常见的同义写法中提取稳定共识；七成图片出现即可保留，避免个别漏标导致真实角色特征被丢弃。
+ * 从自动打标常见的同义写法中提取稳定共识；半数图片出现即可保留，避免个别漏标导致真实角色特征被丢弃。
  * 返回的标签只用于辅助用户设置触发词，不会自动回写训练图片 Caption。
  */
 function summarizeConsensusTags(tagSets: readonly string[][], triggerWords: readonly string[]): string[] {
@@ -48,7 +48,7 @@ function summarizeConsensusTags(tagSets: readonly string[][], triggerWords: read
     const normalized = new Set(tags.map(canonicalizeConsensusTag));
     for (const tag of normalized) if (!triggerSet.has(tag)) appearances.set(tag, (appearances.get(tag) || 0) + 1);
   }
-  const required = Math.max(1, Math.ceil(tagSets.length * 0.7));
+  const required = tagSets.length === 1 ? 1 : Math.max(2, Math.ceil(tagSets.length * 0.5));
   return [...appearances.entries()]
     .filter(([, count]) => count >= required)
     .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
@@ -56,12 +56,25 @@ function summarizeConsensusTags(tagSets: readonly string[][], triggerWords: read
     .slice(0, 100);
 }
 
-/** 把自动打标的颜色、长度和饰品近义词收敛为可读且可复用的角色特征标签。 */
-function canonicalizeConsensusTag(tag: string): string {
-  if (/\b(?:aqua|cyan|turquoise|light blue|blue)\b.*\bhair\b/.test(tag) && !/\b(?:ribbons?|bows?|ornament|accessor)/.test(tag)) return "blue hair";
-  if (/\b(?:pink|purple|lavender)\b.*\bhair\b.*\b(?:streaks?|tips?|gradient)\b/.test(tag)) return "pink-purple hair accent";
-  if (/\bheart(?:-shaped)?\b.*\b(?:ahoge|hair|ornament|accessory|strand)\b/.test(tag)) return "heart hair feature";
-  if (/\b(?:blue|aqua|cyan|turquoise)\b.*\b(?:ribbons?|bows?)\b/.test(tag)) return "blue hair ribbon";
-  if (/\b(?:horn|antler)\b.*\b(?:headpiece|hair ornament|hair accessory|ornament)\b/.test(tag)) return "horn-like headpiece";
+/**
+ * 仅统一严格等义的训练标签，保留发色、服装和姿势的真实差异，避免 Caption 丢失有效训练信息。
+ * 自动打标与人工编辑都可复用本规则，保证同一概念使用稳定名称。
+ */
+export function canonicalizeTrainingCaptionTag(tag: string): string {
+  if (/\bheart(?:-shaped)?\b.*\bahoge\b/.test(tag)) return "heart-shaped ahoge";
+  if (/^(?:seated|sitting)$/.test(tag)) return "sitting";
+  if (/^(?:front view|facing viewer|front-facing)$/.test(tag)) return "front view";
+  if (/\bthigh(?:-| )?high(?:s| stockings| socks)?\b/.test(tag)) return tag.replace(/thigh(?:-| )?high(?: stockings| socks)?/g, "thighhighs");
   return tag;
+}
+
+/** 汇总界面专用的宽松同义归一化，用于从多图真实细节变体中识别稳定角色特征，不回写 Caption。 */
+function canonicalizeConsensusTag(tag: string): string {
+  const normalized = canonicalizeTrainingCaptionTag(tag);
+  if (/\b(?:aqua|cyan|turquoise|light blue|blue)\b.*\bhair\b/.test(normalized) && !/\b(?:ribbons?|bows?|ornament|accessor)/.test(normalized)) return "blue hair";
+  if (/\b(?:pink|purple|lavender)\b.*\bhair\b.*\b(?:streaks?|tips?|gradient)\b/.test(normalized)) return "pink-purple hair accent";
+  if (/\bheart(?:-shaped)?\b.*\b(?:hair ornament|hair accessory|hair strand)\b/.test(normalized)) return "heart hair feature";
+  if (/\b(?:blue|aqua|cyan|turquoise)\b.*\b(?:ribbons?|bows?)\b/.test(normalized)) return "blue hair ribbon";
+  if (/\b(?:horn|antler)\b.*\b(?:headpiece|hair ornament|hair accessory|ornament)\b/.test(normalized)) return "horn-like headpiece";
+  return normalized;
 }
