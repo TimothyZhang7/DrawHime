@@ -2,6 +2,7 @@
  * 本文件实现训练数据集自动打标消费者，逐图调用真实多模态模型并持久化可人工确认的英文 Caption。
  */
 import { Prisma } from "@prisma/client";
+import { mergeCaptionWithTriggerWords, readTrainingTags } from "@drawhime/contracts";
 import { database } from "@drawhime/database";
 import { getObjectBuffer } from "@drawhime/service-runtime";
 import sharp from "sharp";
@@ -49,10 +50,12 @@ async function processCaptionJob(job: ClaimedCaptionJob): Promise<void> {
       const asset = assets[index]!;
       const object = await getObjectBuffer(asset.artifact.objectKey);
       const prepared = await sharp(object.body, { failOn: "error", limitInputPixels: 100_000_000 }).rotate().resize({ width: 1280, height: 1280, fit: "inside", withoutEnlargement: true }).jpeg({ quality: 90, chromaSubsampling: "4:4:4" }).toBuffer();
-      const caption = await captionImage(prepared, mode, job.dataset.title, job.dataset.description);
+      const generatedCaption = await captionImage(prepared, mode, job.dataset.title, job.dataset.description);
+      const triggerWords = readTrainingTags(job.dataset.triggerWords);
+      const caption = mergeCaptionWithTriggerWords(generatedCaption, [], triggerWords);
       const completedAssets = index + 1;
       const writes: Prisma.PrismaPromise<unknown>[] = [
-        database.datasetAsset.update({ where: { id: asset.id }, data: { caption, metadata: { ...readObject(asset.metadata), autoCaptionJobId: job.id, autoCaptionMode: mode, autoCaptionedAt: new Date().toISOString() } as Prisma.InputJsonObject } }),
+        database.datasetAsset.update({ where: { id: asset.id }, data: { caption, appliedTriggerWords: triggerWords, metadata: { ...readObject(asset.metadata), autoCaptionJobId: job.id, autoCaptionMode: mode, autoCaptionedAt: new Date().toISOString() } as Prisma.InputJsonObject } }),
         database.trainingCaptionJob.update({ where: { id: job.id }, data: { completedAssets, progress: Math.round(completedAssets / assets.length * 100) } }),
       ];
       // 单图重新打标会改变 Caption，既有全量确认需要回到人工待确认，但无需重跑其他图片。

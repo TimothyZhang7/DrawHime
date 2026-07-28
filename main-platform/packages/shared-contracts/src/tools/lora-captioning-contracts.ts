@@ -53,6 +53,8 @@ export interface LocalCaptioningDatasetView {
   id: string;
   title: string;
   description: string | null;
+  /** 自动写入每张图片 Caption 的数据集触发词。 */
+  triggerWords: string[];
   status: 'active' | 'disabled' | 'archived';
   ownerDisplayName: string;
   assets: LocalCaptioningAssetView[];
@@ -80,6 +82,13 @@ export interface LocalCaptioningTagTranslationView {
 /** 标签翻译响应数据。 */
 export interface LocalCaptioningTranslationListView {
   translations: LocalCaptioningTagTranslationView[];
+}
+
+/** 当前数据集的触发词与全部图片共有标签汇总。 */
+export interface LocalCaptioningTriggerSummaryView {
+  triggerWords: string[];
+  commonTags: string[];
+  summaryTags: string[];
 }
 
 /** 独立平台训练集图片与同名标签压缩包的固定响应类型。 */

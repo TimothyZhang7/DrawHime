@@ -4,6 +4,11 @@
 import {
   trainingDatasetAssetUpdateRequestSchema,
   trainingDatasetArchiveMimeType,
+  trainingDatasetTriggerWordsUpdateRequestSchema,
+  mergeCaptionWithTriggerWords,
+  normalizeTrainingTags,
+  readTrainingTags,
+  summarizeTrainingTriggerWords,
   trainingCaptionJobCreateRequestSchema,
   trainingDatasetCreateRequestSchema,
   trainingTagTranslationRequestSchema,
@@ -11,6 +16,7 @@ import {
   trainingPriceQuoteRequestSchema,
   type TrainingCaptionStageView,
   type TrainingDatasetView,
+  type TrainingDatasetTriggerSummaryView,
   type TrainingJobView,
   type TrainingParameters,
 } from "@drawhime/contracts";
@@ -85,7 +91,8 @@ export function registerTrainingRoutes(router: ServiceRouter, findSession: (toke
       try {
         await database.$transaction(async (tx) => {
           await tx.jobArtifact.create({ data: { id: artifactId, kind: "DATASET_ASSET", objectKey, fileName: `${artifactId}.webp`, mimeType: "image/webp", sha256, byteSize: BigInt(rendered.data.length), width: rendered.info.width, height: rendered.info.height, metadata: { sourceContentType: request.headers["content-type"] || null } } });
-          await tx.datasetAsset.create({ data: { datasetId: dataset.id, artifactId, caption: normalizeCaptionHeader(request.headers["x-dataset-caption"]), metadata: { normalized: true } } });
+          const triggerWords = readTrainingTags(dataset.triggerWords);
+          await tx.datasetAsset.create({ data: { datasetId: dataset.id, artifactId, caption: mergeCaptionWithTriggerWords(normalizeCaptionHeader(request.headers["x-dataset-caption"]), [], triggerWords), appliedTriggerWords: triggerWords, metadata: { normalized: true } } });
           // 图片快照变化后旧打标确认必须失效，正式训练只能使用重新打标并确认的新快照。
           await tx.trainingCaptionJob.updateMany({ where: { datasetId: dataset.id, scope: "DATASET", status: { in: ["AWAITING_CONFIRMATION", "CONFIRMED"] } }, data: { status: "STALE", errorMessage: "数据集图片已变化，请重新自动打标并确认" } });
         });
@@ -101,16 +108,49 @@ export function registerTrainingRoutes(router: ServiceRouter, findSession: (toke
       ensureCaptionMutationAllowed(dataset.captionJobs[0]);
       const input = trainingDatasetAssetUpdateRequestSchema.parse(await readJsonBody<unknown>(request));
       const changed = await database.$transaction(async (tx) => {
-        const result = await tx.datasetAsset.updateMany({ where: { id: params.assetId, datasetId: params.id }, data: { caption: input.caption } });
-        if (result.count === 1) {
+        const asset = await tx.datasetAsset.findFirst({ where: { id: params.assetId, datasetId: params.id }, select: { id: true, appliedTriggerWords: true } });
+        if (asset) {
+          const triggerWords = readTrainingTags(dataset.triggerWords);
+          await tx.datasetAsset.update({ where: { id: asset.id }, data: { caption: mergeCaptionWithTriggerWords(input.caption, asset.appliedTriggerWords, triggerWords), appliedTriggerWords: triggerWords } });
           await tx.trainingCaptionJob.updateMany({ where: { datasetId: params.id, scope: "DATASET", status: "CONFIRMED" }, data: { status: "AWAITING_CONFIRMATION", confirmedAt: null, errorMessage: "Caption 已修改，请重新确认" } });
           await tx.trainingCaptionJob.updateMany({ where: { datasetId: params.id, scope: "ASSET", assetId: params.assetId, status: "CONFIRMED" }, data: { status: "STALE", confirmedAt: null, errorMessage: "Caption 已人工修改" } });
         }
-        return result;
+        return Boolean(asset);
       });
-      if (changed.count !== 1) throw new TrainingRouteError(404, "dataset_asset_not_found", "数据集图片不存在");
+      if (!changed) throw new TrainingRouteError(404, "dataset_asset_not_found", "数据集图片不存在");
       sendSuccess(response, await getDatasetView(params.id));
     } catch (error) { sendTrainingError(response, error); }
+  });
+
+  router.register("PATCH", "/v1/training/datasets/:id/trigger-words", async ({ request, response, params }) => {
+    const session = await requireSession(request, response, findSession); if (!session) return;
+    try {
+      const input = trainingDatasetTriggerWordsUpdateRequestSchema.parse(await readJsonBody<unknown>(request));
+      const dataset = await findOwnedMutableDataset(params.id, session.externalIdentity.id);
+      ensureCaptionMutationAllowed(dataset.captionJobs[0]);
+      const triggerWords = normalizeTrainingTags(input.triggerWords);
+      const assets = await database.datasetAsset.findMany({ where: { datasetId: dataset.id }, select: { id: true, caption: true, appliedTriggerWords: true } });
+      const previousTriggerWords = readTrainingTags(dataset.triggerWords);
+      const changes = assets.map((asset) => ({ id: asset.id, caption: mergeCaptionWithTriggerWords(asset.caption, asset.appliedTriggerWords, triggerWords) }));
+      const changed = JSON.stringify(previousTriggerWords) !== JSON.stringify(triggerWords) || changes.some((item, index) => item.caption !== assets[index]?.caption);
+      await database.$transaction(async (tx) => {
+        await tx.trainingDataset.update({ where: { id: dataset.id }, data: { triggerWords } });
+        await Promise.all(changes.map((item) => tx.datasetAsset.update({ where: { id: item.id }, data: { caption: item.caption, appliedTriggerWords: triggerWords } })));
+        if (changed && assets.length > 0) {
+          await tx.trainingCaptionJob.updateMany({ where: { datasetId: dataset.id, scope: "DATASET", status: "CONFIRMED" }, data: { status: "AWAITING_CONFIRMATION", confirmedAt: null, errorMessage: "触发词已更新，请重新确认" } });
+          await tx.trainingCaptionJob.updateMany({ where: { datasetId: dataset.id, scope: "ASSET", status: "CONFIRMED" }, data: { status: "STALE", confirmedAt: null, errorMessage: "触发词已更新" } });
+        }
+      });
+      sendSuccess(response, await getDatasetView(dataset.id));
+    } catch (error) { sendTrainingError(response, error); }
+  });
+
+  router.get("/v1/training/datasets/:id/trigger-words/summary", async ({ request, response, params }) => {
+    const session = await requireSession(request, response, findSession); if (!session) return;
+    const dataset = await database.trainingDataset.findFirst({ where: { id: params.id, ownerIdentityId: session.externalIdentity.id, status: "ACTIVE" }, select: { triggerWords: true, assets: { orderBy: { createdAt: "asc" }, select: { caption: true } } } });
+    if (!dataset) return sendError(response, 404, "dataset_not_found", "训练数据集不存在");
+    const summary: TrainingDatasetTriggerSummaryView = summarizeTrainingTriggerWords(dataset.assets.map((asset) => asset.caption), readTrainingTags(dataset.triggerWords));
+    sendSuccess(response, summary);
   });
 
   router.delete("/v1/training/datasets/:id/assets/:assetId", async ({ request, response, params }) => {
@@ -120,11 +160,15 @@ export function registerTrainingRoutes(router: ServiceRouter, findSession: (toke
       ensureCaptionMutationAllowed(dataset.captionJobs[0]);
       const asset = await database.datasetAsset.findFirst({ where: { id: params.assetId, datasetId: params.id }, include: { artifact: true } });
       if (!asset) throw new TrainingRouteError(404, "dataset_asset_not_found", "数据集图片不存在");
-      await database.$transaction([
-        database.datasetAsset.delete({ where: { id: asset.id } }),
-        database.jobArtifact.delete({ where: { id: asset.artifactId } }),
-        database.trainingCaptionJob.updateMany({ where: { datasetId: params.id, scope: "DATASET", status: { in: ["AWAITING_CONFIRMATION", "CONFIRMED"] } }, data: { status: "STALE", errorMessage: "数据集图片已变化，请重新自动打标并确认" } }),
-      ]);
+      await database.$transaction(async (tx) => {
+        await tx.datasetAsset.delete({ where: { id: asset.id } });
+        await tx.jobArtifact.delete({ where: { id: asset.artifactId } });
+        const remaining = await tx.datasetAsset.findMany({ where: { datasetId: params.id }, orderBy: { createdAt: "asc" }, select: { id: true } });
+        const jobs = await tx.trainingCaptionJob.findMany({ where: { datasetId: params.id, scope: "DATASET", status: { in: ["STALE", "AWAITING_CONFIRMATION", "CONFIRMED"] } }, orderBy: { createdAt: "desc" } });
+        const matching = jobs.find((job) => sameAssetSnapshot(job.assetSnapshot, remaining.map((item) => item.id)));
+        await tx.trainingCaptionJob.updateMany({ where: { datasetId: params.id, scope: "DATASET", status: { in: ["AWAITING_CONFIRMATION", "CONFIRMED"] }, ...(matching ? { NOT: { id: matching.id } } : {}) }, data: { status: "STALE", errorMessage: "数据集图片已变化，请重新自动打标并确认" } });
+        if (matching) await tx.trainingCaptionJob.update({ where: { id: matching.id }, data: { status: "AWAITING_CONFIRMATION", progress: 100, completedAssets: remaining.length, confirmedAt: null, errorMessage: "已恢复匹配的图片快照，请重新确认" } });
+      });
       await deleteObject(asset.artifact.objectKey).catch(() => undefined);
       sendSuccess(response, await getDatasetView(params.id));
     } catch (error) { sendTrainingError(response, error); }
@@ -329,7 +373,7 @@ async function getDatasetRow(id: string) { return database.trainingDataset.findU
 async function getDatasetView(id: string): Promise<TrainingDatasetView> { return toDatasetView(await getDatasetRow(id)); }
 
 /** 把数据集数据库记录转换成不暴露对象键的视图。 */
-function toDatasetView(row: DatasetRow): TrainingDatasetView { return { id: row.id, title: row.title, description: row.description, status: row.status.toLowerCase() as TrainingDatasetView["status"], ownerDisplayName: row.owner.displayName, assets: row.assets.map((asset) => ({ id: asset.id, artifactId: asset.artifactId, caption: asset.caption, width: asset.artifact.width, height: asset.artifact.height, byteSize: Number(asset.artifact.byteSize), sha256: asset.artifact.sha256, contentUrl: `/local-model-api/v1/training/datasets/${row.id}/assets/${asset.id}/content`, captionStage: asset.captionJobs[0] ? toCaptionStageView(asset.captionJobs[0]) : null, createdAt: asset.createdAt.toISOString() })), trainingJobCount: row._count.trainingJobs, captionStage: row.captionJobs[0] ? toCaptionStageView(row.captionJobs[0]) : null, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() }; }
+function toDatasetView(row: DatasetRow): TrainingDatasetView { return { id: row.id, title: row.title, description: row.description, triggerWords: readTrainingTags(row.triggerWords), status: row.status.toLowerCase() as TrainingDatasetView["status"], ownerDisplayName: row.owner.displayName, assets: row.assets.map((asset) => ({ id: asset.id, artifactId: asset.artifactId, caption: asset.caption, width: asset.artifact.width, height: asset.artifact.height, byteSize: Number(asset.artifact.byteSize), sha256: asset.artifact.sha256, contentUrl: `/local-model-api/v1/training/datasets/${row.id}/assets/${asset.id}/content`, captionStage: asset.captionJobs[0] ? toCaptionStageView(asset.captionJobs[0]) : null, createdAt: asset.createdAt.toISOString() })), trainingJobCount: row._count.trainingJobs, captionStage: row.captionJobs[0] ? toCaptionStageView(row.captionJobs[0]) : null, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() }; }
 
 /** 读取包含尝试、模型、数据集和计费镜像的训练任务视图。 */
 export async function getTrainingJobView(id: string): Promise<TrainingJobView> {

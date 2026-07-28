@@ -3,6 +3,7 @@
  * 所有契约同时提供 Zod 运行时校验与 TypeScript 静态类型。
  */
 import { z } from "zod";
+export * from "./training-trigger-words.js";
 
 /** 统一成功响应。 */
 export const successResponseSchema = <T extends z.ZodTypeAny>(data: T) =>
@@ -557,6 +558,7 @@ export const trainingDatasetViewSchema = z.object({
   id: z.string(),
   title: z.string(),
   description: z.string().nullable(),
+  triggerWords: z.array(z.string().min(1).max(200)).max(100),
   status: z.enum(["active", "disabled", "archived"]),
   ownerDisplayName: z.string(),
   assets: z.array(z.object({
@@ -579,6 +581,16 @@ export const trainingDatasetViewSchema = z.object({
 
 /** 训练数据集 Caption 更新请求。 */
 export const trainingDatasetAssetUpdateRequestSchema = z.object({ caption: z.string().trim().max(10000).nullable() });
+
+/** 训练集触发词更新请求，空数组表示移除自动注入规则。 */
+export const trainingDatasetTriggerWordsUpdateRequestSchema = z.object({ triggerWords: z.array(z.string().trim().max(200)).max(100) });
+
+/** 训练集触发词汇总结果，公共标签为每张图片 Caption 的交集。 */
+export const trainingDatasetTriggerSummaryViewSchema = z.object({
+  triggerWords: z.array(z.string()).max(100),
+  commonTags: z.array(z.string()).max(10000),
+  summaryTags: z.array(z.string()).max(10000),
+});
 
 /** 训练集图片与同名标签压缩包的固定响应类型。 */
 export const trainingDatasetArchiveMimeType = "application/zip" as const;
@@ -745,6 +757,8 @@ export type TrainingDatasetView = z.infer<typeof trainingDatasetViewSchema>;
 export type TrainingTagTranslationRequest = z.infer<typeof trainingTagTranslationRequestSchema>;
 export type TrainingTagTranslationView = z.infer<typeof trainingTagTranslationViewSchema>;
 export type TrainingDatasetAssetUpdateRequest = z.infer<typeof trainingDatasetAssetUpdateRequestSchema>;
+export type TrainingDatasetTriggerWordsUpdateRequest = z.infer<typeof trainingDatasetTriggerWordsUpdateRequestSchema>;
+export type TrainingDatasetTriggerSummaryView = z.infer<typeof trainingDatasetTriggerSummaryViewSchema>;
 export type TrainingCaptionJobCreateRequest = z.infer<typeof trainingCaptionJobCreateRequestSchema>;
 export type TrainingCaptionStageView = z.infer<typeof trainingCaptionStageViewSchema>;
 export type TrainingRuntimeSubmitRequest = z.infer<typeof trainingRuntimeSubmitRequestSchema>;

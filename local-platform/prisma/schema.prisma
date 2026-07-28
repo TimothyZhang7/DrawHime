@@ -598,6 +598,8 @@ model TrainingDataset {
   ownerIdentityId String       @db.VarChar(36)
   title           String       @db.VarChar(191)
   description     String?      @db.Text
+  /// 用户主动设定并需写入每张训练图片 Caption 的稳定触发词。
+  triggerWords    Json?
   status          RecordStatus @default(ACTIVE)
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
@@ -656,6 +658,8 @@ model DatasetAsset {
   datasetId  String   @db.VarChar(36)
   artifactId String   @db.VarChar(36)
   caption    String?  @db.LongText
+  /// 当前 Caption 中由数据集触发词规则自动注入的标签快照，用于动态替换时保留用户手工标签。
+  appliedTriggerWords Json?
   metadata   Json?
   createdAt  DateTime @default(now())
 

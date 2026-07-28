@@ -1,8 +1,8 @@
 /**
  * 本页面实现主站 LoRA 训练打标工具，训练集、图片和标签直接持久化到独立本地模型平台。
  */
-import type { LocalCaptioningAssetView, LocalCaptioningDatasetListView, LocalCaptioningDatasetView, LocalCaptioningStageView, LocalCaptioningTranslationListView } from '@aiimage/shared-contracts';
-import { ArrowLeft, Check, ChevronRight, Copy, Download, ImagePlus, Languages, LoaderCircle, Plus, RefreshCw, Save, Sparkles, Tags, Trash2, X } from 'lucide-react';
+import type { LocalCaptioningAssetView, LocalCaptioningDatasetListView, LocalCaptioningDatasetView, LocalCaptioningStageView, LocalCaptioningTranslationListView, LocalCaptioningTriggerSummaryView } from '@aiimage/shared-contracts';
+import { ArrowLeft, Check, ChevronRight, Copy, Download, ImagePlus, Languages, LoaderCircle, Plus, RefreshCw, Save, Sparkles, Tags, Trash2, WandSparkles, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, Dispatch, SetStateAction } from 'react';
 import { Link } from 'react-router-dom';
@@ -94,6 +94,10 @@ function CaptioningWorkspace({ token, dataset, translations, onTranslations, onC
   const [busy, setBusy] = useState(false);
   const [translating, setTranslating] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [triggerWordsText, setTriggerWordsText] = useState(() => dataset.triggerWords.join(', '));
+  const [triggerSummary, setTriggerSummary] = useState<LocalCaptioningTriggerSummaryView | null>(null);
+  const [savingTriggerWords, setSavingTriggerWords] = useState(false);
+  const [summarizingTriggerWords, setSummarizingTriggerWords] = useState(false);
   const [uploadText, setUploadText] = useState('添加图片');
   const automaticTranslationKeys = useRef(new Set<string>());
   const stage = dataset.captionStage;
@@ -101,6 +105,7 @@ function CaptioningWorkspace({ token, dataset, translations, onTranslations, onC
   const locked = active || dataset.trainingJobCount > 0;
   const allCaptioned = dataset.assets.length > 0 && dataset.assets.every((asset) => Boolean(asset.caption?.trim()));
   const allTags = useMemo(() => [...new Set(dataset.assets.flatMap((asset) => splitTags(asset.caption || '')))], [dataset.assets]);
+  useEffect(() => { setTriggerWordsText(dataset.triggerWords.join(', ')); setTriggerSummary(null); }, [dataset.id, dataset.triggerWords]);
 
   /** 受控并发上传本次选择的全部可容纳文件，单图失败不回滚其他成功图片。 */
   const upload = async (files: File[]) => {
@@ -144,6 +149,23 @@ function CaptioningWorkspace({ token, dataset, translations, onTranslations, onC
       onMessage(`已打包下载 ${dataset.assets.length} 张图片和对应 Tag：${fileName}`);
     } catch (error) { onMessage(errorMessage(error)); }
     finally { setDownloading(false); }
+  };
+  /** 持久化数据集触发词，并让后端原子更新每张图片的实际 Caption。 */
+  const saveTriggerWords = async () => {
+    setSavingTriggerWords(true);
+    try {
+      await localTrainingJson(`/v1/training/datasets/${dataset.id}/trigger-words`, token, { method: 'PATCH', body: JSON.stringify({ triggerWords: splitTags(triggerWordsText) }) });
+      await onChanged();
+      onMessage('已更新触发词，并同步写入每张图片的英文标签');
+    } catch (error) { onMessage(errorMessage(error)); }
+    finally { setSavingTriggerWords(false); }
+  };
+  /** 读取每张图片共有标签与用户触发词的并集，不直接改写用户设置。 */
+  const summarizeTriggerWords = async () => {
+    setSummarizingTriggerWords(true);
+    try { setTriggerSummary(await localTrainingJson<LocalCaptioningTriggerSummaryView>(`/v1/training/datasets/${dataset.id}/trigger-words/summary`, token)); }
+    catch (error) { onMessage(errorMessage(error)); }
+    finally { setSummarizingTriggerWords(false); }
   };
   /** 分批读取后端持久化翻译集，缺失标签由独立平台补全并保存。 */
   const requestTranslations = useCallback(async (tags: string[]) => {
@@ -189,6 +211,7 @@ function CaptioningWorkspace({ token, dataset, translations, onTranslations, onC
     catch (error) { onMessage(errorMessage(error)); }
   };
   return <main className="lora-captioning-workspace"><header className="lora-captioning-dataset-head"><div><span>{dataset.assets.length} / {maximumDatasetAssets} 张</span><h2>{dataset.title}</h2><p>{dataset.description || '未填写训练集说明'}</p></div><div><label><ImagePlus size={15} />{uploadText}<input type="file" accept="image/*,.avif,.heic,.heif,.webp" multiple disabled={busy || locked || dataset.assets.length >= maximumDatasetAssets} onChange={(event) => void upload(Array.from(event.target.files || []))} /></label><button className="download" title="打包当前已保存的图片和英文 Tag" disabled={downloading || dataset.assets.length === 0} onClick={() => void downloadArchive()}>{downloading ? <LoaderCircle className="spin" size={14} /> : <Download size={14} />}{downloading ? '打包中' : '打包下载'}</button><button className="danger" disabled={busy || dataset.trainingJobCount > 0} onClick={() => void archive()}><Trash2 size={14} />归档</button></div></header>
+    <section className="lora-caption-trigger-panel"><label><span>训练触发词</span><input value={triggerWordsText} disabled={locked || savingTriggerWords} onChange={(event) => setTriggerWordsText(event.target.value)} placeholder="例如 myoc, z9v_character" /><small>建议填写无意义、唯一、稳定的标签；不要填写发色、服装、画风或其他可见特征。</small></label><div><button onClick={() => void saveTriggerWords()} disabled={locked || savingTriggerWords}>{savingTriggerWords ? <LoaderCircle className="spin" size={14} /> : <Plus size={14} />}{savingTriggerWords ? '同步中' : '添加触发词'}</button><button onClick={() => void summarizeTriggerWords()} disabled={summarizingTriggerWords || dataset.assets.length === 0}>{summarizingTriggerWords ? <LoaderCircle className="spin" size={14} /> : <WandSparkles size={14} />}总结触发词</button></div>{triggerSummary && <p><strong>汇总结果</strong>{triggerSummary.summaryTags.length ? triggerSummary.summaryTags.join(', ') : '当前图片没有共同标签；已保留用户触发词。'}</p>}</section>
     <section className="lora-caption-controls"><label><span>打标重点</span><select value={mode} disabled={busy || active} onChange={(event) => setMode(event.target.value as typeof mode)}><option value="character">角色：外观、服装、姿势</option><option value="style">画风：线条、色彩、光影</option><option value="concept">概念：主体、场景、画风</option></select></label><button onClick={() => void autoCaption()} disabled={busy || active || dataset.assets.length < 1 || dataset.trainingJobCount > 0}><Sparkles size={15} />{stage ? '重新自动打标' : '自动打标'}</button><button onClick={() => void translateAll()} disabled={busy || translating || allTags.length === 0}><Languages size={15} />{translating ? '读取翻译集' : '刷新翻译'}</button><button className="confirm" onClick={() => void confirm()} disabled={busy || !allCaptioned || stage?.status !== 'awaiting_confirmation'}><Check size={15} />{stage?.status === 'confirmed' ? '已确认' : '确认标签'}</button><a href={`/local-model/?tab=training&dataset=${encodeURIComponent(dataset.id)}`}><ChevronRight size={15} />进入 LoRA 训练</a></section>
     {stage && <section className={`lora-caption-progress is-${stage.status}`}><div><Tags size={17} /><span><strong>{stageLabel(stage.status)}</strong><small>{stage.completedAssets}/{stage.totalAssets} 张 · {Math.round(stage.progress)}%</small></span></div><div><i style={{ width: `${stage.progress}%` }} /></div>{stage.errorMessage && <p>{stage.errorMessage}</p>}</section>}
     {locked && <div className="lora-captioning-lock">{active ? '自动打标正在处理当前图片快照，完成前暂不允许修改。' : '该训练集已经用于训练，标签与图片已锁定以保留审计。'}</div>}
