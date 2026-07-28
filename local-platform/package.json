@@ -22,6 +22,7 @@
     "bootstrap:anima": "node scripts/bootstrap-anima-catalog.mjs",
     "bootstrap:tag-translations": "node apps/api/dist/bootstrap-tag-translations.js",
     "sync:anima-models": "node scripts/sync-anima-base-models.mjs",
+    "desktop:resource-manifest": "node scripts/manage-desktop-resource-manifest.mjs",
     "migrate:main-loras": "node scripts/migrate-main-loras.mjs",
     "requeue:training-fast": "node scripts/requeue-active-training-fast-profile.mjs",
     "deploy:training-runtime": "node scripts/deploy-training-runtime.mjs",

@@ -36,6 +36,7 @@ import { findLoraSelectionConflict } from "./lora-selection.js";
 import { registerAdminRuntimeRoutes } from "./admin-runtime.js";
 import { registerBotRoutes } from "./bot-routes.js";
 import { registerTrainingRoutes } from "./training-routes.js";
+import { registerDesktopResourceRoutes } from "./desktop-resources.js";
 import { toInferenceJobView } from "./inference-views.js";
 import { getInferenceQueueEstimates } from "./queue-estimates.js";
 import { inferenceSubmissionCooldownRemainingSeconds, normalizeInferenceSubmissionCooldownSeconds } from "./submission-cooldown.js";
@@ -95,6 +96,7 @@ startService({
   port: Number(process.env.LOCAL_API_PORT || 7102),
   checks,
   registerRoutes(router, getReadiness) {
+    registerDesktopResourceRoutes(router);
     registerLoraLibraryRoutes(router, findLocalSessionRecord);
     registerModelLibraryRoutes(router, findLocalSessionRecord);
     registerAdminRuntimeRoutes(router, findLocalSessionRecord);

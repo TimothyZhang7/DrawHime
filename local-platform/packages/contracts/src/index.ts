@@ -666,6 +666,75 @@ export const desktopSettingsSchema = z.object({
 /** 桌面端设置更新请求与持久化视图使用同一受控字段集合。 */
 export const desktopSettingsUpdateSchema = desktopSettingsSchema;
 
+/** 桌面端资源文件的官方或主站镜像来源。 */
+export const desktopResourceSourceSchema = z.object({
+  kind: z.enum(["official", "mirror"]),
+  url: z.string().url(),
+});
+
+/** 签名清单内单个可安装资源的不可变描述。 */
+export const desktopResourceManifestItemSchema = z.object({
+  id: z.string().regex(/^[a-z0-9][a-z0-9._-]{1,127}$/),
+  kind: z.enum(["runtime", "model", "lora", "captioner", "trainer"]),
+  version: z.string().min(1).max(100),
+  os: z.literal("windows"),
+  arch: z.enum(["x86_64", "aarch64"]),
+  fileName: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]{1,254}$/),
+  byteSize: z.number().int().positive(),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  archive: z.enum(["raw", "zip"]),
+  required: z.boolean(),
+  sources: z.array(desktopResourceSourceSchema).min(1).max(8),
+});
+
+/** 服务端签名前的资源清单载荷。 */
+export const desktopResourceManifestPayloadSchema = z.object({
+  schemaVersion: z.literal(1),
+  channel: z.enum(["stable", "beta"]),
+  generatedAt: z.string().datetime(),
+  expiresAt: z.string().datetime(),
+  resources: z.array(desktopResourceManifestItemSchema).max(500),
+});
+
+/** 服务端返回的 Ed25519 签名信封，签名目标是 payload 原始字节。 */
+export const desktopResourceManifestEnvelopeSchema = z.object({
+  keyId: z.string().min(1).max(100),
+  payload: z.string().min(2).max(5 * 1024 * 1024),
+  signature: z.string().min(80).max(200),
+});
+
+/** 桌面端验签并结合本地文件状态后的资源目录。 */
+export const desktopResourceCatalogViewSchema = z.object({
+  configured: z.boolean(),
+  keyId: z.string().nullable(),
+  generatedAt: z.string().datetime().nullable(),
+  expiresAt: z.string().datetime().nullable(),
+  message: z.string(),
+  resources: z.array(z.object({
+    id: z.string(),
+    kind: desktopResourceManifestItemSchema.shape.kind,
+    version: z.string(),
+    fileName: z.string(),
+    byteSize: z.number().int().positive(),
+    sha256: z.string(),
+    required: z.boolean(),
+    downloaded: z.boolean(),
+    sourceKinds: z.array(desktopResourceSourceSchema.shape.kind),
+  })),
+});
+
+/** 桌面端资源断点下载状态和进度事件。 */
+export const desktopResourceDownloadViewSchema = z.object({
+  resourceId: z.string(),
+  status: z.enum(["queued", "downloading", "verifying", "downloaded", "failed"]),
+  sourceKind: desktopResourceSourceSchema.shape.kind.nullable(),
+  downloadedBytes: z.number().int().nonnegative(),
+  totalBytes: z.number().int().positive(),
+  bytesPerSecond: z.number().int().nonnegative(),
+  targetPath: z.string().nullable(),
+  error: z.string().nullable(),
+});
+
 /** 桌面端本地图库同步队列条目。 */
 export const desktopGallerySyncItemSchema = z.object({
   id: z.string().uuid(),
@@ -849,6 +918,12 @@ export type DesktopGalleryPrivacy = z.infer<typeof desktopGalleryPrivacySchema>;
 export type DesktopEnvironmentReport = z.infer<typeof desktopEnvironmentReportSchema>;
 export type DesktopSettings = z.infer<typeof desktopSettingsSchema>;
 export type DesktopSettingsUpdate = z.infer<typeof desktopSettingsUpdateSchema>;
+export type DesktopResourceSource = z.infer<typeof desktopResourceSourceSchema>;
+export type DesktopResourceManifestItem = z.infer<typeof desktopResourceManifestItemSchema>;
+export type DesktopResourceManifestPayload = z.infer<typeof desktopResourceManifestPayloadSchema>;
+export type DesktopResourceManifestEnvelope = z.infer<typeof desktopResourceManifestEnvelopeSchema>;
+export type DesktopResourceCatalogView = z.infer<typeof desktopResourceCatalogViewSchema>;
+export type DesktopResourceDownloadView = z.infer<typeof desktopResourceDownloadViewSchema>;
 export type DesktopGallerySyncItem = z.infer<typeof desktopGallerySyncItemSchema>;
 export type DesktopBootstrapView = z.infer<typeof desktopBootstrapViewSchema>;
 export type AdminModelUpdateRequest = z.infer<typeof adminModelUpdateRequestSchema>;

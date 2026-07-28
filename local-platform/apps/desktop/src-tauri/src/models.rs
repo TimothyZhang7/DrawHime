@@ -52,6 +52,7 @@ pub struct GpuView {
     pub utilization_percent: Option<f64>,
 }
 
+/** 签名资源清单中的单个下载来源。 */
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DiskView { pub name: String, pub file_system: String, pub total_bytes: u64, pub available_bytes: u64 }
@@ -68,6 +69,7 @@ pub struct CapabilityView { pub inference: bool, pub training: bool, pub caption
 #[serde(rename_all = "camelCase")]
 pub struct EnvironmentIssue { pub code: String, pub severity: String, pub title: String, pub message: String, pub action: String }
 
+/** 签名资源清单中的不可变资源项目。 */
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DesktopSettings {
@@ -80,6 +82,83 @@ pub struct DesktopSettings {
     pub upload_concurrency: u32,
     pub wifi_only: bool,
     pub bandwidth_limit_kib: Option<u64>,
+}
+
+/** 服务端签名前的资源清单载荷。 */
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopResourceSource { pub kind: String, pub url: String }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopResourceManifestItem {
+    pub id: String,
+    pub kind: String,
+    pub version: String,
+    pub os: String,
+    pub arch: String,
+    pub file_name: String,
+    pub byte_size: u64,
+    pub sha256: String,
+    pub archive: String,
+    pub required: bool,
+    pub sources: Vec<DesktopResourceSource>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopResourceManifestPayload {
+    pub schema_version: u32,
+    pub channel: String,
+    pub generated_at: String,
+    pub expires_at: String,
+    pub resources: Vec<DesktopResourceManifestItem>,
+}
+
+/** 服务端返回的资源清单签名信封。 */
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopResourceManifestEnvelope { pub key_id: String, pub payload: String, pub signature: String }
+
+/** 桌面界面展示的单个资源和本机缓存状态。 */
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopResourceCatalogItemView {
+    pub id: String,
+    pub kind: String,
+    pub version: String,
+    pub file_name: String,
+    pub byte_size: u64,
+    pub sha256: String,
+    pub required: bool,
+    pub downloaded: bool,
+    pub source_kinds: Vec<String>,
+}
+
+/** 桌面界面展示的已验签资源目录。 */
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopResourceCatalogView {
+    pub configured: bool,
+    pub key_id: Option<String>,
+    pub generated_at: Option<String>,
+    pub expires_at: Option<String>,
+    pub message: String,
+    pub resources: Vec<DesktopResourceCatalogItemView>,
+}
+
+/** 桌面资源下载命令与进度事件的统一视图。 */
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopResourceDownloadView {
+    pub resource_id: String,
+    pub status: String,
+    pub source_kind: Option<String>,
+    pub downloaded_bytes: u64,
+    pub total_bytes: u64,
+    pub bytes_per_second: u64,
+    pub target_path: Option<String>,
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

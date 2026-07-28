@@ -152,6 +152,14 @@ Runtime 更新不能中断运行中任务；队列空闲后切换。
 
 正式实现前必须先在 `docs/interfaces/README.md` 登记网站签名清单、镜像地址和更新协议，并在 `packages/contracts` 落地真实响应契约；客户端不内置未经登记的下载地址。
 
+资源发布顺序：
+
+1. 首次发布在隔离运维机执行 `pnpm desktop:resource-manifest generate --private-key .private/desktop-resource-signing.pem --public-key .private/desktop-resource-public.txt`，私钥只留在离线发布机。
+2. 维护人员准备符合 `DesktopResourceManifestPayload` 的 JSON，官方与镜像条目必须指向同一字节大小和 SHA-256。
+3. 执行 `pnpm desktop:resource-manifest sign --payload PAYLOAD_JSON --private-key PRIVATE_PEM --output ENVELOPE_JSON --key-id KEY_ID`；脚本先用共享契约校验，再压缩载荷、签名并自检。
+4. API 只读取 `DESKTOP_RESOURCE_MANIFEST_ENVELOPE_FILE` 指向的信封，不持有签名私钥；未发布或信封结构异常时返回 HTTP 503。
+5. 正式桌面安装包通过 `DRAWHIME_DESKTOP_RESOURCE_MANIFEST_URL`、`DRAWHIME_DESKTOP_RESOURCE_KEY_ID` 和 `DRAWHIME_DESKTOP_RESOURCE_PUBLIC_KEY` 固定清单地址与公钥；任一项缺失时资源入口明确保持未配置状态。
+
 ## 9. 本地生成、打标和训练
 
 - 生成页复用网页端模型、LoRA、画幅、提示词和任务详情语义，但数据源切换为本地仓库和 Local Scheduler。
@@ -262,6 +270,6 @@ Runtime 更新不能中断运行中任务；队列空闲后切换。
 
 ## 18. 当前实现状态
 
-当前已完成：Tauri 工程、Windows/NVIDIA 基础检测、Windows 10 1809 构建号门禁、持续环境提示、SQLite 设置及升级、主题跟随/手动切换、依赖来源偏好、环境快照、默认图库隐私、图库 outbox、响应式桌面 UI、Rust 测试和 NSIS 构建。
+当前已完成：Tauri 工程、Windows/NVIDIA 基础检测、Windows 10 1809 构建号门禁、持续环境提示、SQLite 设置及升级、主题跟随/手动切换、依赖来源偏好、环境快照、默认图库隐私、图库 outbox、响应式桌面 UI、签名资源清单契约和 API、离线签名工具、8 MiB Range 断点下载、低速切源、SHA-256 隔离、资源进度事件、Rust 测试和 NSIS 构建。正式资源包、公钥和清单尚未发布，因此当前安装包会真实显示资源通道未配置，而不会提供无效安装按钮。
 
 后续按顺序推进：设备授权 → 签名资源清单与 Runtime 安装器 → 本地模型/LoRA 仓库 → Local Scheduler → 生成/打标/训练 → 图库上传执行器 → 签名更新与完整系统矩阵验证。

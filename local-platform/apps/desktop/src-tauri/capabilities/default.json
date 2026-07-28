@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "桌面主窗口仅使用核心 IPC 和本地业务命令。",
   "windows": ["main"],
-  "permissions": ["core:default", "core:window:allow-set-theme"]
+  "permissions": ["core:default", "core:window:allow-set-theme", "core:event:allow-listen", "core:event:allow-unlisten"]
 }
