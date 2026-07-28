@@ -640,7 +640,7 @@ export const desktopEnvironmentStatusSchema = z.enum(["ready", "installable", "b
 export const desktopEnvironmentReportSchema = z.object({
   status: desktopEnvironmentStatusSchema,
   checkedAt: z.string().datetime(),
-  os: z.object({ name: z.string(), version: z.string(), arch: z.string() }),
+  os: z.object({ name: z.string(), version: z.string(), build: z.number().int().nonnegative().nullable(), arch: z.string(), supported: z.boolean() }),
   cpu: z.object({ name: z.string(), logicalCores: z.number().int().positive() }),
   memory: z.object({ totalBytes: z.number().int().nonnegative(), availableBytes: z.number().int().nonnegative(), virtualTotalBytes: z.number().int().nonnegative() }),
   gpus: z.array(z.object({ index: z.number().int().nonnegative(), uuid: z.string(), name: z.string(), vendor: z.string(), memoryTotalBytes: z.number().int().nonnegative(), memoryFreeBytes: z.number().int().nonnegative(), driverVersion: z.string(), computeCapability: z.string().nullable(), temperatureCelsius: z.number().nullable(), utilizationPercent: z.number().nullable() })),
@@ -652,6 +652,8 @@ export const desktopEnvironmentReportSchema = z.object({
 
 /** 桌面端保存在本机 SQLite 中的用户设置。 */
 export const desktopSettingsSchema = z.object({
+  themeMode: z.enum(["system", "dark", "light"]),
+  dependencySource: z.enum(["auto", "official", "mirror"]),
   defaultPrivacy: desktopGalleryPrivacySchema,
   modelRoot: z.string().min(1),
   outputRoot: z.string().min(1),

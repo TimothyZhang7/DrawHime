@@ -27,7 +27,7 @@ pub struct DesktopEnvironmentReport {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct OsView { pub name: String, pub version: String, pub arch: String }
+pub struct OsView { pub name: String, pub version: String, pub build: Option<u64>, pub arch: String, pub supported: bool }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -71,6 +71,8 @@ pub struct EnvironmentIssue { pub code: String, pub severity: String, pub title:
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DesktopSettings {
+    pub theme_mode: String,
+    pub dependency_source: String,
     pub default_privacy: String,
     pub model_root: String,
     pub output_root: String,
@@ -106,6 +108,7 @@ pub struct GallerySyncItem {
 pub struct WindowsSystemProbe {
     pub os_name: Option<String>,
     pub os_version: Option<String>,
+    pub os_build: Option<u64>,
     pub cpu_name: Option<String>,
     pub total_memory_bytes: Option<u64>,
     pub available_memory_bytes: Option<u64>,

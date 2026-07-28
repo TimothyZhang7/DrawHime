@@ -10,7 +10,7 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "windows": [{ "title": "DrawHime Desktop", "width": 1380, "height": 860, "minWidth": 980, "minHeight": 680, "center": true, "resizable": true }],
+    "windows": [{ "title": "DrawHime Desktop", "width": 1380, "height": 860, "minWidth": 720, "minHeight": 560, "center": true, "resizable": true }],
     "security": { "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost blob: data:; style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost" }
   },
   "bundle": {

@@ -11,9 +11,13 @@ const MINIMUM_GPU_MEMORY_BYTES: u64 = 6 * 1024 * MIB;
 /** 检测当前真实环境；任何缺失都转为明确问题，不使用虚构硬件数据。 */
 pub fn inspect_environment(settings: &DesktopSettings) -> DesktopEnvironmentReport {
     let system = windows_system_probe();
+    let os_supported = cfg!(target_os = "windows") && windows_build_supported(system.os_version.as_deref(), system.os_build);
     let gpus = nvidia_gpus();
     let runtime = inspect_runtime(&settings.runtime_root);
     let mut issues = Vec::new();
+    if !os_supported {
+        issues.push(issue("windows_version_unsupported", "critical", "当前 Windows 版本不在支持范围", "首版要求 Windows 10 1809 及以后版本或 Windows 11 x64。", "查看系统升级要求"));
+    }
     if gpus.is_empty() {
         issues.push(issue("gpu_missing", "critical", "未检测到可用 NVIDIA GPU", "本地生成和 LoRA 训练保持暂停；模型管理、训练集与手动标签仍可使用。", "检查 GPU 与驱动"));
     } else if gpus.iter().all(|gpu| gpu.memory_total_bytes < MINIMUM_GPU_MEMORY_BYTES) {
@@ -28,26 +32,26 @@ pub fn inspect_environment(settings: &DesktopSettings) -> DesktopEnvironmentRepo
     let gpu_supported = gpus.iter().any(|gpu| gpu.memory_total_bytes >= MINIMUM_GPU_MEMORY_BYTES);
     let runtime_ready = runtime.status == "ready";
     let low_free_memory = gpus.first().map(|gpu| gpu.memory_free_bytes < 1024 * MIB).unwrap_or(true);
-    let status = if !gpu_supported || runtime.status == "broken" { "blocked" } else if !runtime.installed { "installable" } else if !runtime_ready || low_free_memory { "degraded" } else { "ready" };
+    let status = if !os_supported || !gpu_supported || runtime.status == "broken" { "blocked" } else if !runtime.installed { "installable" } else if !runtime_ready || low_free_memory { "degraded" } else { "ready" };
     DesktopEnvironmentReport {
         status: status.into(),
         checked_at: Utc::now().to_rfc3339(),
-        os: OsView { name: system.os_name.unwrap_or_else(|| std::env::consts::OS.into()), version: system.os_version.unwrap_or_default(), arch: std::env::consts::ARCH.into() },
+        os: OsView { name: system.os_name.unwrap_or_else(|| std::env::consts::OS.into()), version: system.os_version.unwrap_or_default(), build: system.os_build, arch: std::env::consts::ARCH.into(), supported: os_supported },
         cpu: CpuView { name: system.cpu_name.unwrap_or_else(|| "未知处理器".into()), logical_cores: std::thread::available_parallelism().map(usize::from).unwrap_or(1) },
         memory: MemoryView { total_bytes: system.total_memory_bytes.unwrap_or(0), available_bytes: system.available_memory_bytes.unwrap_or(0), virtual_total_bytes: system.virtual_total_bytes.unwrap_or(0) },
         gpus,
         disks: system.disks,
         runtime,
-        capabilities: CapabilityView { inference: gpu_supported && runtime_ready && !low_free_memory, training: gpu_supported && runtime_ready && !low_free_memory, captioning: runtime_ready, model_management: true },
+        capabilities: CapabilityView { inference: os_supported && gpu_supported && runtime_ready && !low_free_memory, training: os_supported && gpu_supported && runtime_ready && !low_free_memory, captioning: os_supported && runtime_ready, model_management: true },
         issues,
     }
 }
 
 fn windows_system_probe() -> WindowsSystemProbe {
-    if cfg!(not(target_os = "windows")) { return WindowsSystemProbe { os_name: None, os_version: None, cpu_name: None, total_memory_bytes: None, available_memory_bytes: None, virtual_total_bytes: None, disks: Vec::new() }; }
-    let script = r#"[Console]::OutputEncoding=[Text.UTF8Encoding]::new();$os=Get-CimInstance Win32_OperatingSystem;$cpu=Get-CimInstance Win32_Processor|Select-Object -First 1;$disks=@(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3'|ForEach-Object{[ordered]@{name=$_.DeviceID;fileSystem=[string]$_.FileSystem;totalBytes=[uint64]$_.Size;availableBytes=[uint64]$_.FreeSpace}});[ordered]@{osName=[string]$os.Caption;osVersion=[string]$os.Version;cpuName=[string]$cpu.Name;totalMemoryBytes=[uint64]$os.TotalVisibleMemorySize*1024;availableMemoryBytes=[uint64]$os.FreePhysicalMemory*1024;virtualTotalBytes=[uint64]$os.TotalVirtualMemorySize*1024;disks=$disks}|ConvertTo-Json -Compress -Depth 4"#;
+    if cfg!(not(target_os = "windows")) { return WindowsSystemProbe { os_name: None, os_version: None, os_build: None, cpu_name: None, total_memory_bytes: None, available_memory_bytes: None, virtual_total_bytes: None, disks: Vec::new() }; }
+    let script = r#"[Console]::OutputEncoding=[Text.UTF8Encoding]::new();$os=Get-CimInstance Win32_OperatingSystem;$cpu=Get-CimInstance Win32_Processor|Select-Object -First 1;$disks=@(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3'|ForEach-Object{[ordered]@{name=$_.DeviceID;fileSystem=[string]$_.FileSystem;totalBytes=[uint64]$_.Size;availableBytes=[uint64]$_.FreeSpace}});[ordered]@{osName=[string]$os.Caption;osVersion=[string]$os.Version;osBuild=[uint64]$os.BuildNumber;cpuName=[string]$cpu.Name;totalMemoryBytes=[uint64]$os.TotalVisibleMemorySize*1024;availableMemoryBytes=[uint64]$os.FreePhysicalMemory*1024;virtualTotalBytes=[uint64]$os.TotalVirtualMemorySize*1024;disks=$disks}|ConvertTo-Json -Compress -Depth 4"#;
     let output = Command::new("powershell.exe").args(["-NoProfile", "-NonInteractive", "-Command", script]).output();
-    output.ok().filter(|result| result.status.success()).and_then(|result| serde_json::from_slice(&result.stdout).ok()).unwrap_or(WindowsSystemProbe { os_name: None, os_version: None, cpu_name: None, total_memory_bytes: None, available_memory_bytes: None, virtual_total_bytes: None, disks: Vec::new() })
+    output.ok().filter(|result| result.status.success()).and_then(|result| serde_json::from_slice(&result.stdout).ok()).unwrap_or(WindowsSystemProbe { os_name: None, os_version: None, os_build: None, cpu_name: None, total_memory_bytes: None, available_memory_bytes: None, virtual_total_bytes: None, disks: Vec::new() })
 }
 
 fn nvidia_gpus() -> Vec<GpuView> {
@@ -71,6 +75,8 @@ fn inspect_runtime(root: &str) -> RuntimeView {
 fn issue(code: &str, severity: &str, title: &str, message: &str, action: &str) -> EnvironmentIssue { EnvironmentIssue { code: code.into(), severity: severity.into(), title: title.into(), message: message.into(), action: action.into() } }
 fn parse_number(value: &str) -> Option<f64> { value.parse().ok() }
 fn non_empty(value: &str) -> Option<String> { let value = value.trim(); (!value.is_empty() && value != "N/A").then(|| value.to_owned()) }
+/** Windows 10 与 11 的内核主版本均为 10，使用构建号判断最低 1809。 */
+fn windows_build_supported(version: Option<&str>, build: Option<u64>) -> bool { version.is_some_and(|value| value.starts_with("10.")) && build.is_some_and(|value| value >= 17763) }
 
 #[cfg(test)]
 mod tests {
@@ -78,11 +84,18 @@ mod tests {
 
     #[test]
     fn environment_report_always_explains_unavailable_capabilities() {
-        let settings = DesktopSettings { default_privacy: "private".into(), model_root: "models".into(), output_root: "outputs".into(), runtime_root: "runtime-not-installed".into(), upload_concurrency: 2, wifi_only: false, bandwidth_limit_kib: None };
+        let settings = DesktopSettings { theme_mode: "system".into(), dependency_source: "auto".into(), default_privacy: "private".into(), model_root: "models".into(), output_root: "outputs".into(), runtime_root: "runtime-not-installed".into(), upload_concurrency: 2, wifi_only: false, bandwidth_limit_kib: None };
         let report = inspect_environment(&settings);
         assert!(!report.checked_at.is_empty());
         assert!(report.capabilities.model_management);
         assert!(!report.issues.is_empty());
         if report.gpus.is_empty() { assert!(report.issues.iter().any(|issue| issue.code == "gpu_missing")); }
+    }
+
+    #[test]
+    fn windows_build_gate_matches_supported_range() {
+        assert!(!windows_build_supported(Some("10.0.17763"), Some(17762)));
+        assert!(windows_build_supported(Some("10.0.17763"), Some(17763)));
+        assert!(!windows_build_supported(Some("6.3"), Some(9600)));
     }
 }
