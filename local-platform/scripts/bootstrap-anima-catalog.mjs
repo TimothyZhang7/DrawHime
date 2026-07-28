@@ -13,8 +13,10 @@ const defaultTrainingPricingVersion = 3;
 const defaultTrainingPriceCny = "0.80";
 const sharedDefaults = { width: 1024, height: 1024, maxEdge: 1536, maxAttempts: 3, promptEnhancementEnabled: true, pricingVersion: defaultPricingVersion, priceCny: defaultPriceCny, trainingProductCode: defaultTrainingProductCode, trainingPricingVersion: defaultTrainingPricingVersion, trainingPriceCny: defaultTrainingPriceCny };
 const defaultNegativePrompt = "worst quality, low quality, score_1, score_2, score_3, artist name";
+// 完整微调底模共享同一采样工作量，约 968² 基础采样配合 25 步兼顾清晰度、收敛质量和 240～280 秒耗时。
+const balancedFullCheckpointSampling = { qualityProfile: "balanced-260s-v2", targetSeconds: 260, steps: 25, samplingMaxEdge: 1536, samplingPixelBudget: 930000, samplingPixelBudgetAspectSlope: 130000, systemHighresLoraEnabled: false };
 
-// 模型文件名、哈希、CFG 与采样器来自对应版本；像素预算按生产 P40 历史中位数校准到约 240 秒。
+// 模型文件名、哈希、CFG 与采样器来自对应版本；像素预算按生产 P40 的横竖幅与正方形任务实测校准到约 260 秒。
 const modelCatalog = [
   {
     workflowVersion: 1,
@@ -27,7 +29,7 @@ const modelCatalog = [
     sourceVersionId: null,
     sha256: null,
     byteSize: 4182218328,
-    parameters: { profileRevision: 2, targetSeconds: 240, steps: 12, cfg: 1, sampler: "er_sde", scheduler: "simple", samplingMaxEdge: 2048, samplingPixelBudget: 2359296, samplingPixelBudgetAspectSlope: 0, qualityPrefix: "masterpiece, best quality, score_7", defaultNegativePrompt, systemHighresLoraEnabled: true },
+    parameters: { profileRevision: 5, qualityProfile: "balanced-260s-v2", targetSeconds: 260, steps: 13, cfg: 1, sampler: "er_sde", scheduler: "simple", samplingMaxEdge: 2048, samplingPixelBudget: 2350000, samplingPixelBudgetAspectSlope: 0, qualityPrefix: "masterpiece, best quality, score_7", defaultNegativePrompt, systemHighresLoraEnabled: true },
   },
   {
     workflowVersion: 8,
@@ -40,7 +42,7 @@ const modelCatalog = [
     sourceVersionId: 3047288,
     sha256: "8E279F111ED7E7EA214EA61850E002F700CCE55A8CD027675796773089B3C739",
     byteSize: 4182218504,
-    parameters: { profileRevision: 4, targetSeconds: 240, steps: 24, cfg: 4, sampler: "er_sde", scheduler: "simple", samplingMaxEdge: 1536, samplingPixelBudget: 900000, samplingPixelBudgetAspectSlope: 130000, qualityPrefix: "masterpiece, best quality, score_7, very aesthetic", defaultNegativePrompt: `${defaultNegativePrompt}, blurry, jpeg artifacts, sepia, muscular female`, systemHighresLoraEnabled: false },
+    parameters: { profileRevision: 6, ...balancedFullCheckpointSampling, cfg: 4, sampler: "er_sde", scheduler: "simple", qualityPrefix: "masterpiece, best quality, score_7, very aesthetic", defaultNegativePrompt: `${defaultNegativePrompt}, blurry, jpeg artifacts, sepia, muscular female` },
   },
   {
     workflowVersion: 9,
@@ -53,7 +55,7 @@ const modelCatalog = [
     sourceVersionId: 3071702,
     sha256: "D33247D48A9C15A872AEF963940FC87362F925E3E087365810AD747042FCC454",
     byteSize: 4182218328,
-    parameters: { profileRevision: 4, targetSeconds: 240, steps: 24, cfg: 4, sampler: "euler_ancestral", scheduler: "normal", samplingMaxEdge: 1536, samplingPixelBudget: 900000, samplingPixelBudgetAspectSlope: 130000, qualityPrefix: "best quality, score_7, score_9, very aesthetic, ultra detailed, fair skin, high contrast, photorealistic, raw photo, photo background", defaultNegativePrompt, systemHighresLoraEnabled: false },
+    parameters: { profileRevision: 6, ...balancedFullCheckpointSampling, cfg: 4, sampler: "euler_ancestral", scheduler: "normal", qualityPrefix: "best quality, score_7, score_9, very aesthetic, ultra detailed, fair skin, high contrast, photorealistic, raw photo, photo background", defaultNegativePrompt },
   },
   {
     workflowVersion: 10,
@@ -66,7 +68,7 @@ const modelCatalog = [
     sourceVersionId: 3074791,
     sha256: "0707CBE8DEED6C858A6BA8DFBCFE2006E3A4FD44C099AAFD048400FDEC1866DD",
     byteSize: 4182218328,
-    parameters: { profileRevision: 4, targetSeconds: 240, steps: 24, cfg: 4, sampler: "euler_ancestral", scheduler: "normal", samplingMaxEdge: 1536, samplingPixelBudget: 900000, samplingPixelBudgetAspectSlope: 130000, qualityPrefix: "best quality, score_7, score_9, very aesthetic, ultra detailed, high contrast", defaultNegativePrompt, systemHighresLoraEnabled: false },
+    parameters: { profileRevision: 6, ...balancedFullCheckpointSampling, cfg: 4, sampler: "euler_ancestral", scheduler: "normal", qualityPrefix: "best quality, score_7, score_9, very aesthetic, ultra detailed, high contrast", defaultNegativePrompt },
   },
   {
     workflowVersion: 11,
@@ -79,7 +81,7 @@ const modelCatalog = [
     sourceVersionId: 2983680,
     sha256: "9D5A1E1393C2978D6A979FAB38FB0DEE00BC2A94E354196C9F3CF2F6F56D5FBF",
     byteSize: 4182233976,
-    parameters: { profileRevision: 1, targetSeconds: 240, steps: 24, cfg: 4.5, sampler: "euler_ancestral", scheduler: "normal", samplingMaxEdge: 1536, samplingPixelBudget: 900000, samplingPixelBudgetAspectSlope: 130000, qualityPrefix: "masterpiece, best quality, score_7", defaultNegativePrompt: `${defaultNegativePrompt}, blurry, jpeg artifacts, lowres, censor`, systemHighresLoraEnabled: false },
+    parameters: { profileRevision: 3, ...balancedFullCheckpointSampling, cfg: 4.5, sampler: "euler_ancestral", scheduler: "normal", qualityPrefix: "masterpiece, best quality, score_7", defaultNegativePrompt: `${defaultNegativePrompt}, blurry, jpeg artifacts, lowres, censor` },
   },
 ];
 
