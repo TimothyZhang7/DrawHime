@@ -2,7 +2,7 @@
  * 本页面实现主站 LoRA 训练打标工具，训练集、图片和标签直接持久化到独立本地模型平台。
  */
 import type { LocalCaptioningAssetView, LocalCaptioningDatasetListView, LocalCaptioningDatasetView, LocalCaptioningStageView, LocalCaptioningTranslationListView } from '@aiimage/shared-contracts';
-import { ArrowLeft, Check, ChevronRight, ImagePlus, Languages, LoaderCircle, Plus, RefreshCw, Save, Sparkles, Tags, Trash2, X } from 'lucide-react';
+import { ArrowLeft, Check, ChevronRight, Copy, ImagePlus, Languages, LoaderCircle, Plus, RefreshCw, Save, Sparkles, Tags, Trash2, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, Dispatch, SetStateAction } from 'react';
 import { Link } from 'react-router-dom';
@@ -208,10 +208,14 @@ function CaptionAssetCard({ token, datasetId, asset, locked, translations, onCha
     try { await localTrainingJson(`/v1/training/datasets/${datasetId}/assets/${asset.id}`, token, { method: 'DELETE' }); await onChanged(); }
     catch (error) { onMessage(errorMessage(error)); }
   };
+  /** 复制当前单图的英文 Anima 标签，保持逗号加空格的标准分隔格式。 */
+  const copyTags = async () => {
+    try { await copyText(tags.join(', ')); onMessage(`已复制当前图片的 ${tags.length} 个 Anima 标签`); }
+    catch (error) { onMessage(errorMessage(error)); }
+  };
   return <article className={`lora-caption-asset${asset.caption?.trim() ? ' captioned' : ''}`}>
     <div className="lora-caption-image"><PrivateDatasetImage token={token} datasetId={datasetId} assetId={asset.id} /><span>{asset.width && asset.height ? `${asset.width} × ${asset.height}` : '训练图片'}</span><button disabled={locked} onClick={() => void removeImage()} aria-label="删除图片"><Trash2 size={14} /></button></div>
-    <section className="lora-caption-column lora-caption-original"><header><span>英文原标签</span><small>{tags.length} 个</small></header><div className="lora-caption-tag-list">{tags.length ? tags.map((tag) => <span className="lora-caption-tag" style={tagColorStyle(translations[tag])} key={tag}><b>{tag}</b><button disabled={locked} onClick={() => { setTags((current) => current.filter((item) => item !== tag)); setEdited(true); }} aria-label={`删除标签 ${tag}`}><X size={11} /></button></span>) : <p>尚未打标，可自动打标或手动添加。</p>}</div><footer><div className="lora-caption-add"><input value={newTag} disabled={locked} onChange={(event) => setNewTag(event.target.value)} placeholder="输入英文标签" onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addTag(); } }} /><button disabled={locked || !newTag.trim()} onClick={addTag}><Plus size={13} />添加</button></div><button className="lora-caption-save" disabled={locked || saving || !dirty} onClick={() => void save()}>{saving ? <LoaderCircle className="spin" /> : <Save size={14} />}{saving ? '保存中' : dirty ? '保存标签' : '已保存'}</button></footer></section>
-    <section className="lora-caption-column lora-caption-translated"><header><span>中文翻译</span><small>同色对应原标签</small></header><div className="lora-caption-tag-list">{tags.length ? tags.map((tag) => { const translation = translations[tag]; return translation ? <span className="lora-caption-tag translation" style={tagColorStyle(translation)} key={tag} title={translation.source === 'common' ? '平台常用标签翻译集' : '智能翻译并已持久化'}><b>{translation.translated}</b><small>{translation.source === 'common' ? '常用' : '补全'}</small></span> : <span className="lora-caption-tag is-pending" key={tag}><LoaderCircle className="spin" /><b>{tag}</b><small>读取中</small></span>; }) : <p>英文标签生成后会自动读取中文翻译。</p>}</div></section>
+    <section className="lora-caption-column"><header><span>图片标签</span><div><small>{tags.length} 个</small><button className="lora-caption-copy" disabled={!tags.length} onClick={() => void copyTags()}><Copy size={12} />复制 Anima Tag</button></div></header><div className="lora-caption-tag-list">{tags.length ? tags.map((tag) => { const translation = translations[tag]; return <span className={`lora-caption-tag${translation ? '' : ' is-pending'}`} style={tagColorStyle(translation)} key={tag} title={translation?.source === 'common' ? '平台常用标签翻译集' : translation ? '智能翻译并已持久化' : '正在读取翻译'}><b>{tag}</b><small>{translation?.translated || '翻译中'}</small><button disabled={locked} onClick={() => { setTags((current) => current.filter((item) => item !== tag)); setEdited(true); }} aria-label={`删除标签 ${tag}`}><X size={11} /></button></span>; }) : <p>尚未打标，可自动打标或手动添加。</p>}</div><footer><div className="lora-caption-add"><input value={newTag} disabled={locked} onChange={(event) => setNewTag(event.target.value)} placeholder="输入英文标签" onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addTag(); } }} /><button disabled={locked || !newTag.trim()} onClick={addTag}><Plus size={13} />添加</button></div><button className="lora-caption-save" disabled={locked || saving || !dirty} onClick={() => void save()}>{saving ? <LoaderCircle className="spin" /> : <Save size={14} />}{saving ? '保存中' : dirty ? '保存标签' : '已保存'}</button></footer></section>
   </article>;
 }
 
@@ -234,6 +238,15 @@ function normalizeTag(value: string): string { return value.trim().replace(/\s+/
 function normalizeCaption(value: string): string { return splitTags(value).join(', '); }
 /** 把后端持久化色写入同一英文、中文标签的 CSS 变量。 */
 function tagColorStyle(translation: TagTranslation | undefined): CSSProperties { return { '--tag-color': translation?.color || '#64748b' } as CSSProperties; }
+/** 优先使用安全剪贴板 API，浏览器限制时回退到临时文本框复制。 */
+async function copyText(value: string): Promise<void> {
+  if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(value);
+  const textarea = document.createElement('textarea');
+  textarea.value = value; textarea.style.position = 'fixed'; textarea.style.opacity = '0';
+  document.body.appendChild(textarea); textarea.select();
+  const copied = document.execCommand('copy'); textarea.remove();
+  if (!copied) throw new Error('复制失败，请检查浏览器剪贴板权限');
+}
 /** 输出打标阶段中文状态。 */
 function stageLabel(status: LocalCaptioningStageView['status'] | null | undefined): string {
   return { queued: '等待打标', running: '自动打标中', awaiting_confirmation: '等待确认', confirmed: '已确认', failed: '打标失败', stale: '需要重新打标' }[String(status)] || '未打标';
