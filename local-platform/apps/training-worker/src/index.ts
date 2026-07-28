@@ -219,8 +219,9 @@ async function downloadRuntimeOutput(id: string, runtime: TrainingRuntimeJobView
   const totalBytes = runtime.outputBytes ?? 0;
   if (totalBytes <= 0 || !runtime.outputSha256) throw new Error("训练 Runtime 未返回产物完整性信息");
   if (totalBytes > 512 * 1024 * 1024) throw new Error("训练产物超过 512MB 限制");
-  const configuredChunkBytes = Number(process.env.TRAINING_OUTPUT_CHUNK_BYTES || 64 * 1024);
-  const chunkBytes = Number.isSafeInteger(configuredChunkBytes) ? Math.max(16 * 1024, Math.min(4 * 1024 * 1024, configuredChunkBytes)) : 64 * 1024;
+  // 1MB 分片把常见 46MB LoRA 的请求数从约 700 次降到约 46 次，仍保留断点重传粒度。
+  const configuredChunkBytes = Number(process.env.TRAINING_OUTPUT_CHUNK_BYTES || 1024 * 1024);
+  const chunkBytes = Number.isSafeInteger(configuredChunkBytes) ? Math.max(16 * 1024, Math.min(4 * 1024 * 1024, configuredChunkBytes)) : 1024 * 1024;
   const configuredConcurrency = Number(process.env.TRAINING_OUTPUT_CONCURRENCY || 8);
   const concurrency = Number.isSafeInteger(configuredConcurrency) ? Math.max(1, Math.min(16, configuredConcurrency)) : 8;
   const buffer = Buffer.allocUnsafe(totalBytes);

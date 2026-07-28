@@ -301,7 +301,8 @@ grep -q '^GPU_WORKLOADS_SHARE_DEVICE=' .env || echo 'GPU_WORKLOADS_SHARE_DEVICE=
 grep -q '^TRAINING_RUNTIME_TOKEN=' .env || echo "TRAINING_RUNTIME_TOKEN=$(openssl rand -hex 32)" >> .env
 grep -q '^TRAINING_RUNTIME_BASE_URL=' .env || echo 'TRAINING_RUNTIME_BASE_URL=${trainingRuntimeBaseUrl}' >> .env
 # 训练产物弱网链路使用可恢复小分片，避免下载异常触发重复训练。
-grep -q '^TRAINING_OUTPUT_CHUNK_BYTES=' .env || echo 'TRAINING_OUTPUT_CHUNK_BYTES=65536' >> .env
+# 旧生产默认值升级到 1MB；管理员自定义的其他值保持不变。
+if grep -q '^TRAINING_OUTPUT_CHUNK_BYTES=65536$' .env; then sed -i 's/^TRAINING_OUTPUT_CHUNK_BYTES=65536$/TRAINING_OUTPUT_CHUNK_BYTES=1048576/' .env; else grep -q '^TRAINING_OUTPUT_CHUNK_BYTES=' .env || echo 'TRAINING_OUTPUT_CHUNK_BYTES=1048576' >> .env; fi
 grep -q '^TRAINING_OUTPUT_CONCURRENCY=' .env || echo 'TRAINING_OUTPUT_CONCURRENCY=8' >> .env
 grep -q '^LOCAL_PUBLIC_API_BASE_URL=' .env || echo 'LOCAL_PUBLIC_API_BASE_URL=https://www.xanime.ink/local-model-api' >> .env
 # LoRA 同步端点沿用当前 ComfyUI 已配置的服务 token；只从本机 PM2 进程环境读取并写入独立私有环境文件。
