@@ -192,6 +192,22 @@ export const inferenceJobCreateRequestSchema = z.object({
   isPrivate: z.boolean(),
 });
 
+/** 推理与训练任务共用的队列位置和耗时估算。 */
+export const jobQueueEstimateViewSchema = z.object({
+  /** 当前任务在包含运行中任务的队列位置，从 1 开始。 */
+  position: z.number().int().positive(),
+  /** 当前任务前方尚未完成的任务数量。 */
+  ahead: z.number().int().nonnegative(),
+  /** 当前队列中等待执行的任务总数，包含当前任务但不包含运行中任务。 */
+  total: z.number().int().positive(),
+  /** 从现在到预计开始执行的秒数。 */
+  estimatedWaitSeconds: z.number().int().nonnegative(),
+  /** 当前任务自身预计占用 Runtime 的秒数。 */
+  estimatedRunSeconds: z.number().int().positive(),
+  /** 从现在到当前任务预计完成的总秒数。 */
+  estimatedCompletionSeconds: z.number().int().positive(),
+});
+
 /** 推理任务视图。 */
 export const inferenceJobViewSchema = z.object({
   id: z.string().min(1),
@@ -203,6 +219,8 @@ export const inferenceJobViewSchema = z.object({
   negativePrompt: z.string().nullable(),
   modelDisplayName: z.string(),
   parameters: z.record(z.unknown()),
+  /** 只在任务尚未开始 Runtime 执行且确实位于队列时返回。 */
+  queue: jobQueueEstimateViewSchema.nullable(),
   /** 任务创建时固化的 LoRA 选择及其可审计封面。 */
   loras: z.array(z.object({
     loraVersionId: z.string(),
@@ -622,6 +640,8 @@ export const trainingJobViewSchema = z.object({
   baseModelVersionId: z.string(),
   baseModelDisplayName: z.string(),
   parameters: z.record(z.unknown()),
+  /** 只在任务尚未开始训练 Runtime 且确实位于队列时返回。 */
+  queue: jobQueueEstimateViewSchema.nullable(),
   outputLoraVersionId: z.string().nullable(),
   errorCode: z.string().nullable(),
   errorMessage: z.string().nullable(),
@@ -729,6 +749,7 @@ export type GalleryPublicationCreateRequest = z.infer<typeof galleryPublicationC
 export type GalleryPublicationView = z.infer<typeof galleryPublicationViewSchema>;
 export type GalleryPublicationRemovalView = z.infer<typeof galleryPublicationRemovalViewSchema>;
 export type InferenceJobCreateRequest = z.infer<typeof inferenceJobCreateRequestSchema>;
+export type JobQueueEstimateView = z.infer<typeof jobQueueEstimateViewSchema>;
 export type InferenceJobView = z.infer<typeof inferenceJobViewSchema>;
 export type InferenceModelView = z.infer<typeof inferenceModelViewSchema>;
 export type LocalBotInferenceJobCreateRequest = z.infer<typeof localBotInferenceJobCreateRequestSchema>;

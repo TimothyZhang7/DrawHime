@@ -1,11 +1,14 @@
 /**
  * 本文件负责把推理数据库记录转换为用户与管理端共享的任务详情视图。
  */
-import type { InferenceJobView } from "@drawhime/contracts";
+import type { InferenceJobView, JobQueueEstimateView } from "@drawhime/contracts";
 import { database } from "@drawhime/database";
+import { getInferenceQueueEstimates } from "./queue-estimates.js";
 
 /** 把数据库任务转换为不包含对象存储私有键的用户视图。 */
-export async function toInferenceJobView(jobId: string): Promise<InferenceJobView> {
+export async function toInferenceJobView(jobId: string, queueSnapshot?: ReadonlyMap<string, JobQueueEstimateView>): Promise<InferenceJobView> {
+  // 列表调用方传入同一份队列快照；详情与创建响应只额外读取一次，避免逐任务重复统计。
+  const queueEstimates = queueSnapshot ?? await getInferenceQueueEstimates();
   const job = await database.inferenceJob.findUniqueOrThrow({
     where: { id: jobId },
     include: {
@@ -36,6 +39,7 @@ export async function toInferenceJobView(jobId: string): Promise<InferenceJobVie
     negativePrompt: job.negativePrompt,
     modelDisplayName: job.modelVersion.displayName,
     parameters,
+    queue: queueEstimates.get(job.id) ?? null,
     loras: loraVersionIds.map((loraVersionId) => {
       const version = loraVersionMap.get(loraVersionId);
       const snapshot = loraSnapshotMap.get(loraVersionId);

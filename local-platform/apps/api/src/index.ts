@@ -37,6 +37,7 @@ import { registerAdminRuntimeRoutes } from "./admin-runtime.js";
 import { registerBotRoutes } from "./bot-routes.js";
 import { registerTrainingRoutes } from "./training-routes.js";
 import { toInferenceJobView } from "./inference-views.js";
+import { getInferenceQueueEstimates } from "./queue-estimates.js";
 import { inferenceSubmissionCooldownRemainingSeconds, normalizeInferenceSubmissionCooldownSeconds } from "./submission-cooldown.js";
 
 const inferenceQueue = new InferenceQueue();
@@ -159,7 +160,8 @@ startService({
         take: limit,
         select: { id: true },
       });
-      sendSuccess(response, { jobs: await Promise.all(jobs.map((job) => toInferenceJobView(job.id))) });
+      const queueSnapshot = await getInferenceQueueEstimates();
+      sendSuccess(response, { jobs: await Promise.all(jobs.map((job) => toInferenceJobView(job.id, queueSnapshot))) });
     });
 
     router.get("/v1/inference/jobs/:id", async ({ request, response, params }) => {

@@ -37,8 +37,8 @@
 | `POST/DELETE /v1/admin/model-library/:id/examples[/:exampleId]` | admin | api | 管理员上传或删除底模封面与示例图；第一张示例作为仓库封面，图片统一转为高质量 WebP |
 | `GET /v1/model-library/examples/:id/content` | web/admin | api | 登录用户读取可访问底模的仓库示例图，不暴露对象存储键 |
 | `POST /v1/inference/jobs` | web | api | `InferenceJobCreateRequest` 创建持久化任务并完成主站资金预留后入队；同一独立身份默认每 180 秒只接受一个新任务，幂等重放不重复占用冷却，命中限制返回 HTTP 429 `inference_submission_cooldown`；正面提示词与可空的用户负面提示词独立保存，Worker 分别映射到 Runtime 的 positive/negative conditioning；`loraVersionIds` 可跨角色、画风、概念、服装、姿势等类型多选，最多 4 个且不可重复；`loraStrengths` 与 `loraSelections` 固化每个版本的 0–1.5 强度及触发词快照，Worker 以显式强度优先并把实际 LoRA 链、采样尺寸和最终提示词写入任务审计 |
-| `GET /v1/inference/jobs` | web/admin | api | 当前身份任务列表；管理员可读取全局列表 |
-| `GET /v1/inference/jobs/:id` | web/admin | api | `InferenceJobView`，包含阶段、尝试、固化参数、任务所用 LoRA 的标题、类型、权重与封面地址、产物哈希与字节数、计费镜像和主站图库发布状态；普通用户只读取自己的任务 |
+| `GET /v1/inference/jobs` | web/admin | api | 当前身份任务列表；管理员可读取全局列表；等待执行的任务批量返回全局推理队列位置、前方任务数、队列任务总数及预计等待/执行/完成秒数 |
+| `GET /v1/inference/jobs/:id` | web/admin | api | `InferenceJobView`，包含阶段、尝试、固化参数、任务所用 LoRA 的标题、类型、权重与封面地址、产物哈希与字节数、计费镜像、主站图库发布状态和等待执行时的队列估算；普通用户只读取自己的任务 |
 | `GET /v1/inference/jobs/:id/loras/:versionId/cover` | web/admin | api | 经任务归属鉴权读取该任务实际选用 LoRA 的首张示例封面；即使 LoRA 后续下架，历史任务仍可审计展示 |
 | `GET /internal/gallery-publications/:externalTaskId/loras/:versionId/cover` | 主站 backend | api | 校验 `x-local-platform-token`、正式图库发布终态和任务 LoRA 快照后读取首张示例封面；用于主站图库封面代理，不开放对象存储地址 |
 | `GET /internal/gallery-publications/:externalTaskId/loras` | 主站 backend | api | 校验服务凭证和正式图库发布终态，按任务固化版本 ID 返回对应 LoRA 当前条目 ID、实时标题与类型，并返回任务独立保存的用户负面提示词；标题编辑后主站图库详情无需改写历史任务即可刷新 |
@@ -70,7 +70,7 @@
 | `POST /v1/training/datasets/:id/caption-jobs/:jobId/confirm` | web | api | 校验图片快照与全部 Caption 后由用户确认；图片变化会把旧确认标为失效 |
 | `POST /v1/training/quotes` | web | api | 使用真实图片数量、轮次、重复、分辨率、Rank 等参数计算资金预留数量与动态价格 |
 | `DELETE /v1/training/datasets/:id` | web | api | 归档没有训练任务的数据集并清理其独立对象；已用于训练的数据集保持不可变 |
-| `POST/GET /v1/training/jobs[/:id]` | web/admin | api | 创建、列表和读取 `TrainingJobView`；创建时复算动态计价单位并完成主站资金预留，再进入训练队列 |
+| `POST/GET /v1/training/jobs[/:id]` | web/admin | api | 创建、列表和读取 `TrainingJobView`；创建时复算动态计价单位并完成主站资金预留，再进入训练队列；等待执行的任务批量返回全局训练队列位置、前方任务数、队列任务总数及预计等待/执行/完成秒数 |
 | `POST /v1/training/jobs/:id/cancel` | web | api | 取消尚未运行的训练任务，原分账释放主站资金预留 |
 | `DELETE /v1/training/jobs/:id` | web | api | 删除已结束训练记录；只软删除用户可见记录，保留训练产物、LoRA、钱包与计费审计 |
 | `POST /v1/training/jobs` | training-worker | GPU training-runtime | 以训练尝试 ID 幂等提交；Runtime 单卡串行排队，不把繁忙状态写成任务失败 |

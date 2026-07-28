@@ -16,6 +16,7 @@ import {
   type TrainingCaptionStageView,
   type TrainingDatasetView,
   type TrainingDatasetTriggerSummaryView,
+  type JobQueueEstimateView,
   type TrainingJobView,
   type TrainingParameters,
 } from "@drawhime/contracts";
@@ -30,6 +31,7 @@ import { calculateTrainingPrice } from "./training-pricing.js";
 import { translateTrainingTags } from "./training-tag-translation.js";
 import { streamTrainingDatasetArchive, trainingDatasetArchiveContentDisposition } from "./training-dataset-archive.js";
 import { findRecoverableCaptionStage } from "./training-caption-stage-recovery.js";
+import { getTrainingQueueEstimates } from "./queue-estimates.js";
 
 const trainingQueue = new TrainingQueue();
 const maximumDatasetImageBytes = 25 * 1024 * 1024;
@@ -301,7 +303,8 @@ export function registerTrainingRoutes(router: ServiceRouter, findSession: (toke
     const session = await requireSession(request, response, findSession); if (!session) return;
     const admin = readRoles(session.externalIdentity.roles).includes("admin");
     const rows = await database.trainingJob.findMany({ where: admin && url.searchParams.get("scope") === "all" ? { deletedAt: null } : { externalIdentityId: session.externalIdentity.id, deletedAt: null }, orderBy: { createdAt: "desc" }, take: 100, select: { id: true } });
-    sendSuccess(response, { jobs: await Promise.all(rows.map((item) => getTrainingJobView(item.id))) });
+    const queueSnapshot = await getTrainingQueueEstimates();
+    sendSuccess(response, { jobs: await Promise.all(rows.map((item) => getTrainingJobView(item.id, queueSnapshot))) });
   });
 
   router.get("/v1/training/jobs/:id", async ({ request, response, params }) => {
@@ -388,9 +391,11 @@ async function recoverStaleCaptionStage(datasetId: string): Promise<boolean> {
 function toDatasetView(row: DatasetRow): TrainingDatasetView { return { id: row.id, title: row.title, description: row.description, triggerWords: readTrainingTags(row.triggerWords), status: row.status.toLowerCase() as TrainingDatasetView["status"], ownerDisplayName: row.owner.displayName, assets: row.assets.map((asset) => ({ id: asset.id, artifactId: asset.artifactId, caption: asset.caption, width: asset.artifact.width, height: asset.artifact.height, byteSize: Number(asset.artifact.byteSize), sha256: asset.artifact.sha256, contentUrl: `/local-model-api/v1/training/datasets/${row.id}/assets/${asset.id}/content`, captionStage: asset.captionJobs[0] ? toCaptionStageView(asset.captionJobs[0]) : null, createdAt: asset.createdAt.toISOString() })), trainingJobCount: row._count.trainingJobs, captionStage: row.captionJobs[0] ? toCaptionStageView(row.captionJobs[0]) : null, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() }; }
 
 /** 读取包含尝试、模型、数据集和计费镜像的训练任务视图。 */
-export async function getTrainingJobView(id: string): Promise<TrainingJobView> {
+export async function getTrainingJobView(id: string, queueSnapshot?: ReadonlyMap<string, JobQueueEstimateView>): Promise<TrainingJobView> {
+  // 列表复用批量快照，详情和创建响应按需读取一次当前训练队列。
+  const queueEstimates = queueSnapshot ?? await getTrainingQueueEstimates();
   const row = await database.trainingJob.findUniqueOrThrow({ where: { id }, include: { dataset: true, baseModelVersion: true, attempts: { orderBy: { attemptNumber: "asc" } }, billingReservation: true } });
-  return { id: row.id, title: row.title, status: row.status.toLowerCase() as TrainingJobView["status"], progress: Number(row.progress), datasetId: row.datasetId, datasetTitle: row.dataset.title, baseModelVersionId: row.baseModelVersionId, baseModelDisplayName: row.baseModelVersion.displayName, parameters: readObject(row.parameters), outputLoraVersionId: row.outputLoraVersionId, errorCode: row.errorCode, errorMessage: row.errorMessage, attempts: row.attempts.map((attempt) => ({ id: attempt.id, attemptNumber: attempt.attemptNumber, status: attempt.status.toLowerCase() as TrainingJobView["attempts"][number]["status"], runtimeJobId: attempt.runtimeJobId, metrics: nullableObject(attempt.metrics), errorMessage: attempt.errorMessage, startedAt: attempt.startedAt?.toISOString() ?? null, completedAt: attempt.completedAt?.toISOString() ?? null })), billing: row.billingReservation ? { status: row.billingReservation.status.toLowerCase() as NonNullable<TrainingJobView["billing"]>["status"], amount: (Number(row.billingReservation.amountMinor) / 100).toFixed(2), currency: row.billingReservation.currency } : null, startedAt: row.startedAt?.toISOString() ?? null, completedAt: row.completedAt?.toISOString() ?? null, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() };
+  return { id: row.id, title: row.title, status: row.status.toLowerCase() as TrainingJobView["status"], progress: Number(row.progress), datasetId: row.datasetId, datasetTitle: row.dataset.title, baseModelVersionId: row.baseModelVersionId, baseModelDisplayName: row.baseModelVersion.displayName, parameters: readObject(row.parameters), queue: queueEstimates.get(row.id) ?? null, outputLoraVersionId: row.outputLoraVersionId, errorCode: row.errorCode, errorMessage: row.errorMessage, attempts: row.attempts.map((attempt) => ({ id: attempt.id, attemptNumber: attempt.attemptNumber, status: attempt.status.toLowerCase() as TrainingJobView["attempts"][number]["status"], runtimeJobId: attempt.runtimeJobId, metrics: nullableObject(attempt.metrics), errorMessage: attempt.errorMessage, startedAt: attempt.startedAt?.toISOString() ?? null, completedAt: attempt.completedAt?.toISOString() ?? null })), billing: row.billingReservation ? { status: row.billingReservation.status.toLowerCase() as NonNullable<TrainingJobView["billing"]>["status"], amount: (Number(row.billingReservation.amountMinor) / 100).toFixed(2), currency: row.billingReservation.currency } : null, startedAt: row.startedAt?.toISOString() ?? null, completedAt: row.completedAt?.toISOString() ?? null, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() };
 }
 
 async function findOwnedMutableDataset(id: string, ownerIdentityId: string) { const row = await database.trainingDataset.findFirst({ where: { id, ownerIdentityId, status: "ACTIVE" }, include: { captionJobs: { orderBy: { updatedAt: "desc" }, take: 1 }, _count: { select: { assets: true, trainingJobs: true } } } }); if (!row) throw new TrainingRouteError(404, "dataset_not_found", "训练数据集不存在"); if (row._count.trainingJobs > 0) throw new TrainingRouteError(409, "dataset_locked", "数据集已用于训练，内容需要保持不可变"); return row; }
