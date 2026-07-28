@@ -65,7 +65,9 @@ async fn desktop_install_resource(app: tauri::AppHandle, state: State<'_, Deskto
     if resource_id.starts_with("runtime.") && matches!(state.runtime.status()?.status.as_str(), "starting" | "ready" | "stopping") { return Err("请先停止本地 Runtime，再安装或切换 Runtime 版本".into()); }
     let settings = state.load_settings()?;
     let app_data_dir = state.app_data_dir.clone();
-    tauri::async_runtime::spawn_blocking(move || resource::install_resource(&settings, &app_data_dir, &resource_id, &app)).await.map_err(|error| format!("资源安装任务异常：{error}"))?
+    let outcome = tauri::async_runtime::spawn_blocking(move || resource::install_resource(&settings, &app_data_dir, &resource_id, &app)).await.map_err(|error| format!("资源安装任务异常：{error}"))??;
+    for registration in outcome.model_registrations { state.register_local_model(registration)?; }
+    Ok(outcome.view)
 }
 
 #[tauri::command]

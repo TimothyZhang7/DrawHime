@@ -949,6 +949,7 @@ select:focus-visible {
 }
 
 .resource-reload,
+.resource-install-all,
 .resource-list article > button {
   height: 32px;
   display: flex;
@@ -965,15 +966,30 @@ select:focus-visible {
 }
 
 .resource-reload svg,
+.resource-install-all svg,
 .resource-list article > button svg {
   width: 14px;
   height: 14px;
 }
 
 .resource-reload:disabled,
+.resource-install-all:disabled,
 .resource-list article > button:disabled {
   cursor: default;
   opacity: 0.55;
+}
+
+.resource-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.resource-install-all {
+  border-color: var(--accent-border);
+  background: var(--accent);
+  color: #fff;
 }
 
 /* 本地生成、模型导入和任务卡统一使用紧凑控件，保证 720px 窗口仍能完成全部操作。 */

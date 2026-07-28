@@ -313,6 +313,7 @@ fn read_bytes(response: reqwest::blocking::Response, limit: u64) -> Result<Vec<u
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{models::DesktopSettings, runtime::RuntimeController};
 
     #[test]
     fn checkpoint_workflow_keeps_positive_and_negative_conditioning_separate() {
@@ -330,6 +331,23 @@ mod tests {
         assert_eq!(workflow["1"]["class_type"], "UNETLoader");
         assert_eq!(workflow["2"]["inputs"]["clip_name"], "clip.safetensors");
         assert_eq!(workflow["3"]["inputs"]["vae_name"], "vae.safetensors");
+    }
+
+    #[test]
+    fn real_anima_runtime_generates_verified_png() {
+        let Ok(runtime_root) = std::env::var("DRAWHIME_GENERATION_TEST_RUNTIME_ROOT") else { return; };
+        let Ok(model_root) = std::env::var("DRAWHIME_GENERATION_TEST_MODEL_ROOT") else { return; };
+        let output_root = std::env::var("DRAWHIME_GENERATION_TEST_OUTPUT_ROOT").map(PathBuf::from).unwrap_or_else(|_| tempfile::tempdir().expect("创建真实生成输出目录").keep());
+        let temporary = tempfile::tempdir().expect("创建真实生成状态目录");
+        let settings = DesktopSettings { theme_mode: "system".into(), dependency_source: "auto".into(), default_privacy: "private".into(), model_root, output_root: output_root.to_string_lossy().into_owned(), runtime_root, upload_concurrency: 2, wifi_only: false, bandwidth_limit_kib: None };
+        let controller = RuntimeController::new();
+        controller.self_test(&settings, temporary.path()).expect("真实 Runtime 自检");
+        let endpoint = controller.endpoint().expect("读取 Runtime 端点");
+        let result = generate_image(&endpoint, GenerationRequest { job_id: Uuid::new_v4().to_string(), workflow_kind: "anima".into(), model_file_name: "animeBulldozer_anima.safetensors".into(), text_encoder_file_name: Some("qwen_3_06b_base.safetensors".into()), vae_file_name: Some("qwen_image_vae.safetensors".into()), prompt: "masterpiece, best quality, 1girl, solo, blue hair, white background".into(), negative_prompt: Some("worst quality, low quality, blurry, bad anatomy".into()), width: 512, height: 512, steps: 4, cfg: 4.0, sampler_name: "euler".into(), scheduler_name: "normal".into(), seed: 20260729, output_root, runtime_output_root: temporary.path().join("runtime-state").join("comfy-output") }, |_| Ok(()), || false).map_err(|failure| match failure { GenerationFailure::Cancelled => "生成被取消".to_string(), GenerationFailure::Failed(error) => error }).expect("真实 Anima 生图");
+        assert!(Path::new(&result.path).is_file());
+        assert_eq!((result.width, result.height), (512, 512));
+        assert_eq!(result.sha256.len(), 64);
+        controller.stop().expect("停止真实 Runtime");
     }
 
     fn test_request(workflow_kind: &str) -> GenerationRequest {

@@ -1,6 +1,7 @@
 //! 本模块负责拉取签名资源清单，并以断点、切源、哈希校验和原子落盘下载桌面依赖。
 
 use crate::models::{DesktopResourceCatalogItemView, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopResourceManifestEnvelope, DesktopResourceManifestItem, DesktopResourceManifestPayload, DesktopResourceSource, DesktopSettings};
+use crate::storage::LocalModelRegistration;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
@@ -8,7 +9,7 @@ use fs2::available_space;
 use reqwest::{blocking::{Client, Response}, header::RANGE, StatusCode, Url};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
-use std::{collections::HashSet, fs::{self, File, OpenOptions}, io::{BufReader, Read, Seek, SeekFrom, Write}, path::{Component, Path, PathBuf}, process::{Command, Stdio}, thread, time::{Duration, Instant}};
+use std::{collections::{HashMap, HashSet}, fs::{self, File, OpenOptions}, io::{BufReader, Read, Seek, SeekFrom, Write}, path::{Component, Path, PathBuf}, process::{Command, Stdio}, thread, time::{Duration, Instant, UNIX_EPOCH}};
 use tauri::Emitter;
 use uuid::Uuid;
 use zip::ZipArchive;
@@ -27,6 +28,12 @@ struct ManifestApiResponse {
     ok: bool,
     data: Option<DesktopResourceManifestEnvelope>,
     message: Option<String>,
+}
+
+/** 资源安装完成后返回界面状态及已经凑齐的底模自动登记记录。 */
+pub struct ResourceInstallOutcome {
+    pub view: DesktopResourceInstallView,
+    pub model_registrations: Vec<LocalModelRegistration>,
 }
 
 /** 读取远端签名目录；发布配置缺失时返回明确未配置状态，不制造可安装资源。 */
@@ -58,19 +65,21 @@ pub fn load_catalog(settings: &DesktopSettings, app_data_dir: &Path) -> Result<D
 }
 
 /** 把已验证缓存安全安装到受控目录，并在切换失败时恢复旧版本。 */
-pub fn install_resource(settings: &DesktopSettings, app_data_dir: &Path, resource_id: &str, app: &tauri::AppHandle) -> Result<DesktopResourceInstallView, String> {
+pub fn install_resource(settings: &DesktopSettings, app_data_dir: &Path, resource_id: &str, app: &tauri::AppHandle) -> Result<ResourceInstallOutcome, String> {
     let result = install_resource_inner(settings, app_data_dir, resource_id, app);
     if let Err(error) = &result { emit_install_progress(app, install_view(resource_id, "failed", 0, None, None, Some(error.clone()))); }
     result
 }
 
-fn install_resource_inner(settings: &DesktopSettings, app_data_dir: &Path, resource_id: &str, app: &tauri::AppHandle) -> Result<DesktopResourceInstallView, String> {
+fn install_resource_inner(settings: &DesktopSettings, app_data_dir: &Path, resource_id: &str, app: &tauri::AppHandle) -> Result<ResourceInstallOutcome, String> {
     let Some((manifest_url, key_id, public_key)) = manifest_configuration() else { return Err("当前安装包尚未配置经过签名的资源发布通道".into()); };
     let payload = fetch_verified_manifest(manifest_url, key_id, public_key)?;
-    let item = payload.resources.into_iter().find(|candidate| candidate.id == resource_id && resource_matches_current_platform(candidate)).ok_or_else(|| "资源不存在或不适用于当前系统".to_string())?;
+    let item = payload.resources.iter().find(|candidate| candidate.id == resource_id && resource_matches_current_platform(candidate)).cloned().ok_or_else(|| "资源不存在或不适用于当前系统".to_string())?;
     let cache = resource_cache_dir(app_data_dir).join(&item.file_name);
     let notify = |view| emit_install_progress(app, view);
-    install_cached_resource(settings, &item, &cache, &notify)
+    let view = install_cached_resource(settings, &item, &cache, &notify)?;
+    let model_registrations = collect_model_registrations(settings, &payload.resources)?;
+    Ok(ResourceInstallOutcome { view, model_registrations })
 }
 
 fn install_cached_resource<F: Fn(DesktopResourceInstallView)>(settings: &DesktopSettings, item: &DesktopResourceManifestItem, cache: &Path, notify: &F) -> Result<DesktopResourceInstallView, String> {
@@ -214,6 +223,22 @@ fn validate_manifest(payload: &DesktopResourceManifestPayload) -> Result<(), Str
         if !ids.insert(&item.id) { return Err(format!("资源清单存在重复 ID：{}", item.id)); }
         validate_item(item)?;
     }
+    validate_model_groups(&payload.resources)?;
+    Ok(())
+}
+
+fn validate_model_groups(items: &[DesktopResourceManifestItem]) -> Result<(), String> {
+    let mut groups: HashMap<&str, (&str, &str, &str, HashSet<&str>)> = HashMap::new();
+    for item in items {
+        let Some(registration) = &item.model_registration else { continue; };
+        if !matches!(registration.workflow_kind.as_str(), "checkpoint" | "anima") || !matches!(registration.role.as_str(), "primary" | "text_encoder" | "vae") { return Err(format!("模型组合字段不正确：{}", item.id)); }
+        let group = groups.entry(&registration.group_id).or_insert((&registration.display_name, &registration.family, &registration.workflow_kind, HashSet::new()));
+        if group.0 != registration.display_name || group.1 != registration.family || group.2 != registration.workflow_kind || !group.3.insert(&registration.role) { return Err(format!("模型组合元数据冲突：{}", registration.group_id)); }
+    }
+    for (group_id, (_, _, workflow_kind, roles)) in groups {
+        let valid = if workflow_kind == "anima" { roles.len() == 3 && ["primary", "text_encoder", "vae"].iter().all(|role| roles.contains(role)) } else { roles.len() == 1 && roles.contains("primary") };
+        if !valid { return Err(format!("模型组合资源不完整：{group_id}")); }
+    }
     Ok(())
 }
 
@@ -228,6 +253,9 @@ fn validate_item(item: &DesktopResourceManifestItem) -> Result<(), String> {
     if matches!(item.kind.as_str(), "model" | "lora") && (item.archive != "raw" || item.installed_size != item.byte_size) { return Err(format!("模型和 LoRA 必须使用声明大小一致的原始文件：{}", item.id)); }
     if matches!(item.kind.as_str(), "runtime" | "captioner" | "trainer") && item.archive == "raw" { return Err(format!("运行组件必须使用归档文件：{}", item.id)); }
     if item.archive == "raw" && item.root_directory.is_some() { return Err(format!("原始文件资源不得声明归档根目录：{}", item.id)); }
+    if item.kind == "model" && (!matches!(item.install_directory.as_deref(), Some("checkpoints" | "diffusion_models" | "text_encoders" | "vae")) || item.model_registration.is_none()) { return Err(format!("模型资源缺少受控安装目录或组合登记：{}", item.id)); }
+    if item.kind == "lora" && item.install_directory.as_deref().is_some_and(|directory| directory != "loras") { return Err(format!("LoRA 安装目录不正确：{}", item.id)); }
+    if !matches!(item.kind.as_str(), "model" | "lora") && (item.install_directory.is_some() || item.model_registration.is_some()) { return Err(format!("非模型资源不得声明模型安装元数据：{}", item.id)); }
     if let Some(root_directory) = &item.root_directory { validate_windows_relative_path(Path::new(root_directory)).map_err(|_| format!("资源归档根目录不安全：{}", item.id))?; if Path::new(root_directory).components().count() != 1 { return Err(format!("资源归档根目录只能包含一级：{}", item.id)); } }
     let mut kinds = HashSet::new();
     for source in &item.sources {
@@ -301,12 +329,50 @@ fn network_error(error: &reqwest::Error) -> String { if error.is_timeout() { "�
 fn install_destination(item: &DesktopResourceManifestItem, settings: &DesktopSettings) -> PathBuf {
     match item.kind.as_str() {
         "runtime" => Path::new(&settings.runtime_root).join("current"),
-        "model" => Path::new(&settings.model_root).join("checkpoints").join(&item.file_name),
+        "model" => Path::new(&settings.model_root).join(item.install_directory.as_deref().unwrap_or("checkpoints")).join(&item.file_name),
         "lora" => Path::new(&settings.model_root).join("loras").join(&item.file_name),
         "captioner" => Path::new(&settings.runtime_root).join("components").join("captioner").join(&item.version),
         "trainer" => Path::new(&settings.runtime_root).join("components").join("trainer").join(&item.version),
         _ => Path::new(&settings.model_root).join(&item.file_name),
     }
+}
+
+fn collect_model_registrations(settings: &DesktopSettings, items: &[DesktopResourceManifestItem]) -> Result<Vec<LocalModelRegistration>, String> {
+    let mut groups: HashMap<&str, Vec<&DesktopResourceManifestItem>> = HashMap::new();
+    for item in items.iter().filter(|item| item.model_registration.is_some()) {
+        groups.entry(item.model_registration.as_ref().unwrap().group_id.as_str()).or_default().push(item);
+    }
+    let mut registrations = Vec::new();
+    for group in groups.into_values() {
+        if !group.iter().all(|item| installed_resource_matches(item, settings)) { continue; }
+        let primary = group.iter().find(|item| item.model_registration.as_ref().is_some_and(|registration| registration.role == "primary")).ok_or_else(|| "模型组合缺少主文件".to_string())?;
+        let metadata = install_destination(primary, settings).metadata().map_err(|error| format!("读取已安装底模失败：{error}"))?;
+        let primary_registration = primary.model_registration.as_ref().unwrap();
+        let text_encoder = group.iter().find(|item| item.model_registration.as_ref().is_some_and(|registration| registration.role == "text_encoder"));
+        let vae = group.iter().find(|item| item.model_registration.as_ref().is_some_and(|registration| registration.role == "vae"));
+        registrations.push(LocalModelRegistration {
+            display_name: primary_registration.display_name.clone(),
+            family: primary_registration.family.clone(),
+            workflow_kind: primary_registration.workflow_kind.clone(),
+            model_file_name: primary.file_name.clone(),
+            model_relative_path: resource_relative_path(primary)?,
+            model_sha256: primary.sha256.clone(),
+            byte_size: primary.byte_size,
+            model_modified_ms: metadata.modified().map_err(|error| format!("读取底模修改时间失败：{error}"))?.duration_since(UNIX_EPOCH).map_err(|_| "底模修改时间早于系统纪元".to_string())?.as_millis() as u64,
+            text_encoder_file_name: text_encoder.map(|item| item.file_name.clone()),
+            text_encoder_relative_path: text_encoder.map(|item| resource_relative_path(item)).transpose()?,
+            text_encoder_sha256: text_encoder.map(|item| item.sha256.clone()),
+            vae_file_name: vae.map(|item| item.file_name.clone()),
+            vae_relative_path: vae.map(|item| resource_relative_path(item)).transpose()?,
+            vae_sha256: vae.map(|item| item.sha256.clone()),
+        });
+    }
+    Ok(registrations)
+}
+
+fn resource_relative_path(item: &DesktopResourceManifestItem) -> Result<String, String> {
+    let directory = item.install_directory.as_deref().ok_or_else(|| "模型资源缺少安装目录".to_string())?;
+    Ok(format!("{directory}/{}", item.file_name))
 }
 
 fn installed_resource_matches(item: &DesktopResourceManifestItem, settings: &DesktopSettings) -> bool {
@@ -481,7 +547,7 @@ mod tests {
     use std::{net::TcpListener, thread};
 
     fn item() -> DesktopResourceManifestItem {
-        DesktopResourceManifestItem { id: "runtime.core".into(), kind: "runtime".into(), version: "1.0.0".into(), os: "windows".into(), arch: std::env::consts::ARCH.into(), file_name: "runtime.zip".into(), byte_size: 10, installed_size: 1024, sha256: "a".repeat(64), archive: "zip".into(), root_directory: None, required: true, sources: vec![DesktopResourceSource { kind: "mirror".into(), url: "https://mirror.example/runtime.zip".into() }, DesktopResourceSource { kind: "official".into(), url: "https://official.example/runtime.zip".into() }] }
+        DesktopResourceManifestItem { id: "runtime.core".into(), kind: "runtime".into(), version: "1.0.0".into(), os: "windows".into(), arch: std::env::consts::ARCH.into(), file_name: "runtime.zip".into(), byte_size: 10, installed_size: 1024, sha256: "a".repeat(64), archive: "zip".into(), root_directory: None, install_directory: None, model_registration: None, required: true, sources: vec![DesktopResourceSource { kind: "mirror".into(), url: "https://mirror.example/runtime.zip".into() }, DesktopResourceSource { kind: "official".into(), url: "https://official.example/runtime.zip".into() }] }
     }
 
     #[test]
@@ -608,5 +674,26 @@ mod tests {
         assert_eq!(result.status, "installed");
         assert!(installed_resource_matches(&item, &settings));
         assert_eq!(crate::environment::inspect_environment(&settings).runtime.status, "installed_unverified");
+    }
+
+    #[test]
+    fn installed_anima_resource_group_becomes_one_registered_model() {
+        let temporary = tempfile::tempdir().expect("创建模型组合临时目录");
+        let settings = DesktopSettings { theme_mode: "system".into(), dependency_source: "auto".into(), default_privacy: "private".into(), model_root: temporary.path().join("models").to_string_lossy().into_owned(), output_root: temporary.path().join("outputs").to_string_lossy().into_owned(), runtime_root: temporary.path().join("runtime").to_string_lossy().into_owned(), upload_concurrency: 2, wifi_only: false, bandwidth_limit_kib: None };
+        let definitions = [("primary", "diffusion_models", "model.safetensors", b"model".as_slice()), ("text_encoder", "text_encoders", "clip.safetensors", b"clip".as_slice()), ("vae", "vae", "vae.safetensors", b"vae".as_slice())];
+        let mut items = Vec::new();
+        for (role, directory, file_name, bytes) in definitions {
+            let cache = temporary.path().join(format!("cache-{role}.safetensors"));
+            fs::write(&cache, bytes).expect("写入模型缓存");
+            let item = DesktopResourceManifestItem { id: format!("model.test.{role}"), kind: "model".into(), version: "1".into(), os: "windows".into(), arch: std::env::consts::ARCH.into(), file_name: file_name.into(), byte_size: bytes.len() as u64, installed_size: bytes.len() as u64, sha256: hex::encode(Sha256::digest(bytes)), archive: "raw".into(), root_directory: None, install_directory: Some(directory.into()), model_registration: Some(crate::models::DesktopResourceModelRegistration { group_id: "model.test".into(), display_name: "测试 Anima".into(), family: "anima".into(), workflow_kind: "anima".into(), role: role.into() }), required: true, sources: vec![DesktopResourceSource { kind: "mirror".into(), url: format!("https://mirror.example/{file_name}") }] };
+            install_cached_resource(&settings, &item, &cache, &|_| {}).expect("安装模型组合文件");
+            items.push(item);
+        }
+        validate_model_groups(&items).expect("模型组合清单有效");
+        let registrations = collect_model_registrations(&settings, &items).expect("收集模型登记");
+        assert_eq!(registrations.len(), 1);
+        assert_eq!(registrations[0].model_file_name, "model.safetensors");
+        assert_eq!(registrations[0].text_encoder_file_name.as_deref(), Some("clip.safetensors"));
+        assert_eq!(registrations[0].vae_file_name.as_deref(), Some("vae.safetensors"));
     }
 }

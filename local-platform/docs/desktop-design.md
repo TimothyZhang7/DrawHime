@@ -164,6 +164,8 @@ Runtime 更新不能中断运行中任务；队列空闲后切换。
 
 首个 NVIDIA Runtime 使用 `Comfy-Org/ComfyUI` 正式发布的 `v0.28.0` CUDA 12.6 Windows 便携包，构建脚本固定 GitHub 发布资产大小和 SHA-256 `6af1b60b...4157cc0`。执行 `pnpm desktop:build-runtime --output BUILD_DIR --cache CACHE_DIR` 后，脚本断点下载并验证上游 7z、实际解压确认便携 Python 与 ComfyUI 入口及展开体积，再复用相同官方 7z 字节生成可直接进入签名清单的元数据。桌面端安全解压后写入自己的 Runtime 内部清单；因此官方来源和主站镜像可共享完全相同的哈希，下载量由 5.63GB 降至 2.03GB。版本升级必须修改固定版本、大小和 GitHub 摘要并重新经过生成、自检和 LoRA 训练回归，不允许静默跟随 latest。
 
+首个一键底模组合使用 WAI Anima v1.0 主文件、`qwen_3_06b_base.safetensors` 和 `qwen_image_vae.safetensors`。三个签名资源分别安装到 `diffusion_models`、`text_encoders` 和 `vae`，全部哈希匹配后自动登记为一个 Anima 底模。WAI 主文件优先从 Hugging Face 官方下载，失败后由主站镜像端点按 8 MiB Range 代理同一签名官方对象；CLIP/VAE 使用主站已校验镜像。代理逐段核对状态码、`Content-Length`、`Content-Range` 和总大小，最终客户端仍执行完整 SHA-256，不信任代理传输结果。
+
 ## 9. 本地生成、打标和训练
 
 - 生成页复用网页端模型、LoRA、画幅、提示词和任务详情语义，但数据源切换为本地仓库和 Local Scheduler。
@@ -278,6 +280,6 @@ Local Scheduler 使用桌面 SQLite 作为唯一事实源。提交命令先固�
 
 ## 18. 当前实现状态
 
-当前已完成：Tauri 工程、Windows/NVIDIA 基础检测、Windows 10 1809 构建号门禁、持续环境提示、SQLite 设置及升级、主题跟随/手动切换、依赖来源偏好、环境快照、默认图库隐私、图库 outbox、响应式桌面 UI、签名资源清单契约和 API、离线签名工具、8 MiB Range 断点下载、低速切源、SHA-256 隔离、资源进度事件、安全 ZIP/7z 解压、磁盘预检、同卷原子安装、旧版本保留与回滚、Runtime 安装状态回归测试和 NSIS 构建。首个 NVIDIA Runtime、固定公钥、签名清单和主站 Range 镜像已经发布；清单签名、镜像首分片、完整 7z 安装及 NSIS 安装包均已通过真实验证。桌面核心现已支持 ComfyUI 动态回环启动、状态轮询、GPU/节点自检、受控日志、停止回收、safetensors 原子导入、Checkpoint/Anima 工作流、SQLite 本地任务/attempt/产物、串行调度、取消恢复和自动图库 outbox；真实 Runtime 生命周期自检已在正式 2.03GB 便携包上通过。
+当前已完成：Tauri 工程、Windows/NVIDIA 基础检测、Windows 10 1809 构建号门禁、持续环境提示、SQLite 设置及升级、主题跟随/手动切换、依赖来源偏好、环境快照、默认图库隐私、图库 outbox、响应式桌面 UI、签名资源清单契约和 API、离线签名工具、8 MiB Range 断点下载、低速切源、SHA-256 隔离、资源进度事件、安全 ZIP/7z 解压、磁盘预检、同卷原子安装、旧版本保留与回滚、Runtime 安装状态回归测试和 NSIS 构建。首个 NVIDIA Runtime、WAI Anima 模型组合、固定公钥、签名清单和主站 Range 镜像已经发布；清单签名、四项资源分片、完整 7z 安装及 NSIS 安装包均已通过真实验证。桌面核心现已支持 ComfyUI 动态回环启动、状态轮询、GPU/节点自检、受控日志、停止回收、safetensors 原子导入、Checkpoint/Anima 工作流、SQLite 本地任务/attempt/产物、串行调度、取消恢复和自动图库 outbox；真实 Runtime 生命周期自检以及 512×512 Anima 端到端生图均已通过。
 
 后续按顺序推进：网站底模与组件资源发布 → 多 LoRA 下载/导入/叠加 → 自动打标 → 分阶段 LoRA 训练 → 设备授权与图库上传执行器 → 签名软件更新 → Windows 完整系统矩阵验证。

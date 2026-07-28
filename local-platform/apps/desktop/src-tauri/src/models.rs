@@ -226,8 +226,21 @@ pub struct DesktopResourceManifestItem {
     pub sha256: String,
     pub archive: String,
     pub root_directory: Option<String>,
+    pub install_directory: Option<String>,
+    pub model_registration: Option<DesktopResourceModelRegistration>,
     pub required: bool,
     pub sources: Vec<DesktopResourceSource>,
+}
+
+/** 签名清单中把多个原始文件组合为一个可用底模的登记元数据。 */
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopResourceModelRegistration {
+    pub group_id: String,
+    pub display_name: String,
+    pub family: String,
+    pub workflow_kind: String,
+    pub role: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

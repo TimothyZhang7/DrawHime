@@ -685,6 +685,16 @@ export const desktopResourceManifestItemSchema = z.object({
   sha256: z.string().regex(/^[a-f0-9]{64}$/),
   archive: z.enum(["raw", "zip", "7z"]),
   rootDirectory: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/).nullable(),
+  /** 原始模型文件只允许写入 ComfyUI 已登记的固定类别目录。 */
+  installDirectory: z.enum(["checkpoints", "diffusion_models", "text_encoders", "vae", "loras"]).nullable().optional(),
+  /** 同组资源全部安装后用于自动登记本地底模的签名元数据。 */
+  modelRegistration: z.object({
+    groupId: z.string().regex(/^[a-z0-9][a-z0-9._-]{1,127}$/),
+    displayName: z.string().min(1).max(191),
+    family: z.string().min(1).max(100),
+    workflowKind: z.enum(["checkpoint", "anima"]),
+    role: z.enum(["primary", "text_encoder", "vae"]),
+  }).nullable().optional(),
   required: z.boolean(),
   sources: z.array(desktopResourceSourceSchema).min(1).max(8),
 });
