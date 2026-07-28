@@ -29,6 +29,7 @@
 | `desktop_inspect_environment` | desktop webview | desktop core | 重新检测 Windows 名称、版本、构建号、支持状态、CPU、内存、磁盘、NVIDIA GPU、驱动和本地 Runtime，并持久化脱敏快照 |
 | `desktop_save_settings` | desktop webview | desktop core | 校验并保存主题模式、依赖来源、模型/输出/Runtime 目录以及默认图库隐私和上传策略；对应 `DesktopSettingsUpdate` |
 | `GET /v1/desktop/resources/manifest` | desktop core | api/CDN | 返回 `{ ok: true, data: DesktopResourceManifestEnvelope }`；`payload` 是原始 UTF-8 JSON，`signature` 是服务端 Ed25519 签名，桌面端使用安装包内固定公钥验签后才解析资源 |
+| `GET /v1/desktop/resources/:id/content` | desktop core | api | 从签名清单定位主站镜像资源，只流式返回大小与清单一致的受控文件；支持单段 HTTP Range、`ETag=SHA-256` 和断点续传，不接受客户端文件路径 |
 | `desktop_load_resource_catalog` | desktop webview | desktop core | 拉取并验签资源清单，校验过期时间、Windows/架构、文件名、大小、SHA-256 与 HTTPS 来源后返回可展示目录；未配置真实清单和公钥时明确返回未配置状态 |
 | `desktop_download_resource` | desktop webview | desktop core | 按资源 ID 执行断点下载；`auto` 优先官方，连接失败或持续低速后从相同哈希的主站镜像续传，完成整体 SHA-256 后原子写入本机下载缓存 |
 | `desktop-resource-progress` | desktop core | desktop webview | 资源下载进度事件；对应 `DesktopResourceDownloadView`，包含当前来源、已下载字节、总字节、速度、状态与脱敏错误 |

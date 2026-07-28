@@ -683,7 +683,8 @@ export const desktopResourceManifestItemSchema = z.object({
   byteSize: z.number().int().positive(),
   installedSize: z.number().int().positive(),
   sha256: z.string().regex(/^[a-f0-9]{64}$/),
-  archive: z.enum(["raw", "zip"]),
+  archive: z.enum(["raw", "zip", "7z"]),
+  rootDirectory: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/).nullable(),
   required: z.boolean(),
   sources: z.array(desktopResourceSourceSchema).min(1).max(8),
 });

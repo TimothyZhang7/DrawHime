@@ -8,14 +8,14 @@ use fs2::available_space;
 use reqwest::{blocking::{Client, Response}, header::RANGE, StatusCode, Url};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
-use std::{collections::HashSet, fs::{self, File, OpenOptions}, io::{BufReader, Read, Seek, SeekFrom, Write}, path::{Component, Path, PathBuf}, time::{Duration, Instant}};
+use std::{collections::HashSet, fs::{self, File, OpenOptions}, io::{BufReader, Read, Seek, SeekFrom, Write}, path::{Component, Path, PathBuf}, process::{Command, Stdio}, thread, time::{Duration, Instant}};
 use tauri::Emitter;
 use uuid::Uuid;
 use zip::ZipArchive;
 
-const MANIFEST_URL: Option<&str> = option_env!("DRAWHIME_DESKTOP_RESOURCE_MANIFEST_URL");
-const MANIFEST_KEY_ID: Option<&str> = option_env!("DRAWHIME_DESKTOP_RESOURCE_KEY_ID");
-const MANIFEST_PUBLIC_KEY: Option<&str> = option_env!("DRAWHIME_DESKTOP_RESOURCE_PUBLIC_KEY");
+const MANIFEST_URL: &str = "https://www.xanime.ink/local-model-api/v1/desktop/resources/manifest";
+const MANIFEST_KEY_ID: &str = "stable-2026-07-29";
+const MANIFEST_PUBLIC_KEY: &str = "asfEBEwmIW6BPSgrLk9iNSgKqLprKisVFkq9QpJI8Pg=";
 const MAX_MANIFEST_BYTES: u64 = 5 * 1024 * 1024;
 const DOWNLOAD_BUFFER_BYTES: usize = 256 * 1024;
 const DOWNLOAD_RANGE_BYTES: u64 = 8 * 1024 * 1024;
@@ -85,16 +85,24 @@ fn install_cached_resource<F: Fn(DesktopResourceInstallView)>(settings: &Desktop
     if available < required_space { return Err(format!("安装磁盘空间不足：至少需要 {} MiB 可用空间", required_space / 1024 / 1024)); }
     let staging = parent.join(format!(".drawhime-install-{}-{}", item.id, Uuid::new_v4()));
     notify(install_view(&item.id, "installing", 10, Some(&destination), None, None));
-    if item.archive == "zip" {
+    let install_candidate = if item.archive != "raw" {
         fs::create_dir(&staging).map_err(|error| format!("创建安装临时目录失败：{error}"))?;
-        extract_zip_safely(&cache, &staging, item.installed_size)?;
-        validate_extracted_resource(&item, &staging)?;
-        write_install_marker(&staging, &item, true)?;
+        let content = staging.join("content");
+        fs::create_dir(&content).map_err(|error| format!("创建解压临时目录失败：{error}"))?;
+        if item.archive == "zip" { extract_zip_safely(cache, &content, item.installed_size)?; }
+        else { extract_7z_safely(cache, &content, item.installed_size)?; }
+        let root = item.root_directory.as_deref().map(|directory| content.join(directory)).unwrap_or(content);
+        if !root.is_dir() { return Err("资源归档声明的根目录不存在".into()); }
+        validate_extracted_resource(item, &root)?;
+        if item.kind == "runtime" { write_runtime_manifest(&root, item)?; }
+        write_install_marker(&root, item, true)?;
+        root
     } else {
         if fs::hard_link(&cache, &staging).is_err() { fs::copy(&cache, &staging).map_err(|error| format!("复制资源到安装临时文件失败：{error}"))?; }
-    }
+        staging.clone()
+    };
     notify(install_view(&item.id, "switching", 90, Some(&destination), None, None));
-    let backup = switch_atomically(&staging, &destination).map_err(|error| {
+    let backup = switch_atomically(&install_candidate, &destination).map_err(|error| {
         let _ = quarantine_file(&staging, "install-failed");
         error
     })?;
@@ -106,6 +114,7 @@ fn install_cached_resource<F: Fn(DesktopResourceInstallView)>(settings: &Desktop
             return Err(error);
         }
     }
+    if item.archive != "raw" && staging.exists() { let _ = fs::remove_dir_all(&staging); }
     let view = install_view(&item.id, "installed", 100, Some(&destination), backup.as_deref(), None);
     notify(view.clone());
     Ok(view)
@@ -160,10 +169,7 @@ pub fn download_resource(settings: &DesktopSettings, app_data_dir: &Path, resour
 }
 
 fn manifest_configuration() -> Option<(&'static str, &'static str, &'static str)> {
-    match (MANIFEST_URL, MANIFEST_KEY_ID, MANIFEST_PUBLIC_KEY) {
-        (Some(url), Some(key_id), Some(public_key)) if !url.trim().is_empty() && !key_id.trim().is_empty() && !public_key.trim().is_empty() => Some((url, key_id, public_key)),
-        _ => None,
-    }
+    (!MANIFEST_URL.is_empty() && !MANIFEST_KEY_ID.is_empty() && !MANIFEST_PUBLIC_KEY.is_empty()).then_some((MANIFEST_URL, MANIFEST_KEY_ID, MANIFEST_PUBLIC_KEY))
 }
 
 fn fetch_verified_manifest(manifest_url: &str, expected_key_id: &str, public_key: &str) -> Result<DesktopResourceManifestPayload, String> {
@@ -218,9 +224,11 @@ fn validate_item(item: &DesktopResourceManifestItem) -> Result<(), String> {
     if item.file_name.len() < 2 || item.file_name.len() > 255 || !item.file_name.chars().all(|character| character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-')) { return Err(format!("资源文件名不安全：{}", item.id)); }
     validate_windows_relative_path(Path::new(&item.file_name)).map_err(|_| format!("资源文件名不适用于 Windows：{}", item.id))?;
     if item.byte_size == 0 || item.installed_size == 0 || item.installed_size > 512 * 1024 * 1024 * 1024 || item.sha256.len() != 64 || !item.sha256.chars().all(|character| character.is_ascii_hexdigit() && !character.is_ascii_uppercase()) { return Err(format!("资源大小或哈希不正确：{}", item.id)); }
-    if !matches!(item.archive.as_str(), "raw" | "zip") || item.sources.is_empty() || item.sources.len() > 8 { return Err(format!("资源归档或来源不正确：{}", item.id)); }
+    if !matches!(item.archive.as_str(), "raw" | "zip" | "7z") || item.sources.is_empty() || item.sources.len() > 8 { return Err(format!("资源归档或来源不正确：{}", item.id)); }
     if matches!(item.kind.as_str(), "model" | "lora") && (item.archive != "raw" || item.installed_size != item.byte_size) { return Err(format!("模型和 LoRA 必须使用声明大小一致的原始文件：{}", item.id)); }
-    if matches!(item.kind.as_str(), "runtime" | "captioner" | "trainer") && item.archive != "zip" { return Err(format!("运行组件必须使用 ZIP 归档：{}", item.id)); }
+    if matches!(item.kind.as_str(), "runtime" | "captioner" | "trainer") && item.archive == "raw" { return Err(format!("运行组件必须使用归档文件：{}", item.id)); }
+    if item.archive == "raw" && item.root_directory.is_some() { return Err(format!("原始文件资源不得声明归档根目录：{}", item.id)); }
+    if let Some(root_directory) = &item.root_directory { validate_windows_relative_path(Path::new(root_directory)).map_err(|_| format!("资源归档根目录不安全：{}", item.id))?; if Path::new(root_directory).components().count() != 1 { return Err(format!("资源归档根目录只能包含一级：{}", item.id)); } }
     let mut kinds = HashSet::new();
     for source in &item.sources {
         if !matches!(source.kind.as_str(), "official" | "mirror") || !kinds.insert(&source.kind) { return Err(format!("资源来源类型不正确或重复：{}", item.id)); }
@@ -303,7 +311,7 @@ fn install_destination(item: &DesktopResourceManifestItem, settings: &DesktopSet
 
 fn installed_resource_matches(item: &DesktopResourceManifestItem, settings: &DesktopSettings) -> bool {
     let destination = install_destination(item, settings);
-    let marker = install_marker_path(&destination, item.archive == "zip");
+    let marker = install_marker_path(&destination, item.archive != "raw");
     if !destination.exists() || !marker.is_file() { return false; }
     let Ok(content) = fs::read_to_string(marker) else { return false; };
     let Ok(value) = serde_json::from_str::<serde_json::Value>(&content) else { return false; };
@@ -342,6 +350,58 @@ fn extract_zip_safely(archive_path: &Path, staging: &Path, maximum_installed_byt
     Ok(())
 }
 
+fn extract_7z_safely(archive_path: &Path, staging: &Path, maximum_installed_bytes: u64) -> Result<(), String> {
+    let tar = Path::new(r"C:\Windows\System32\tar.exe");
+    if !tar.is_file() { return Err("当前 Windows 缺少系统归档工具 tar.exe".into()); }
+    let archive_text = archive_path.to_string_lossy().into_owned();
+    let staging_text = staging.to_string_lossy().into_owned();
+    let names_output = Command::new(tar).args(["-tf", archive_text.as_str()]).output().map_err(|error| format!("读取 7z 文件列表失败：{error}"))?;
+    if !names_output.status.success() || names_output.stdout.len() > 64 * 1024 * 1024 { return Err("资源 7z 文件列表读取失败或超过限制".into()); }
+    let names = String::from_utf8(names_output.stdout).map_err(|_| "资源 7z 文件名不是 UTF-8".to_string())?;
+    let mut entry_count = 0_usize;
+    for name in names.lines().filter(|name| !name.trim().is_empty()) {
+        entry_count += 1;
+        if entry_count > 200_000 { return Err("资源 7z 文件数量超过限制".into()); }
+        let normalized = name.trim_end_matches('/').replace('\\', "/");
+        validate_windows_relative_path(Path::new(&normalized))?;
+    }
+    let verbose = Command::new(tar).args(["-tvf", archive_text.as_str()]).output().map_err(|error| format!("读取 7z 类型列表失败：{error}"))?;
+    if !verbose.status.success() || verbose.stdout.len() > 128 * 1024 * 1024 { return Err("资源 7z 类型列表读取失败或超过限制".into()); }
+    if String::from_utf8_lossy(&verbose.stdout).lines().any(|line| matches!(line.chars().next(), Some('l' | 'h'))) { return Err("资源 7z 包含链接条目".into()); }
+    let mut child = Command::new(tar).args(["-xf", archive_text.as_str(), "-C", staging_text.as_str()]).stdout(Stdio::null()).stderr(Stdio::null()).spawn().map_err(|error| format!("启动 7z 解压失败：{error}"))?;
+    let mut last_size_check = Instant::now();
+    loop {
+        if let Some(status) = child.try_wait().map_err(|error| format!("读取 7z 解压状态失败：{error}"))? {
+            if !status.success() { return Err(format!("系统 tar 解压 7z 失败，退出码 {}", status.code().unwrap_or(-1))); }
+            break;
+        }
+        if last_size_check.elapsed() >= Duration::from_secs(5) {
+            if directory_size_limited(staging, maximum_installed_bytes)? > maximum_installed_bytes { let _ = child.kill(); let _ = child.wait(); return Err("资源 7z 解压大小超过签名清单声明".into()); }
+            last_size_check = Instant::now();
+        }
+        thread::sleep(Duration::from_millis(250));
+    }
+    if directory_size_limited(staging, maximum_installed_bytes)? > maximum_installed_bytes { return Err("资源 7z 解压大小超过签名清单声明".into()); }
+    Ok(())
+}
+
+fn directory_size_limited(root: &Path, limit: u64) -> Result<u64, String> {
+    let mut total = 0_u64;
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(directory) = pending.pop() {
+        for entry in fs::read_dir(&directory).map_err(|error| format!("读取解压目录失败：{error}"))? {
+            let entry = entry.map_err(|error| format!("读取解压项失败：{error}"))?;
+            let metadata = fs::symlink_metadata(entry.path()).map_err(|error| format!("读取解压项元数据失败：{error}"))?;
+            if metadata.file_type().is_symlink() { return Err("资源归档解压后包含链接".into()); }
+            #[cfg(windows)]
+            { use std::os::windows::fs::MetadataExt; if metadata.file_attributes() & 0x400 != 0 { return Err("资源归档解压后包含重解析点".into()); } }
+            if metadata.is_dir() { pending.push(entry.path()); }
+            else if metadata.is_file() { total = total.checked_add(metadata.len()).ok_or_else(|| "资源解压大小溢出".to_string())?; if total > limit { return Ok(total); } }
+        }
+    }
+    Ok(total)
+}
+
 fn validate_windows_relative_path(path: &Path) -> Result<(), String> {
     const RESERVED: [&str; 22] = ["CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"];
     for component in path.components() {
@@ -356,11 +416,15 @@ fn validate_windows_relative_path(path: &Path) -> Result<(), String> {
 
 fn validate_extracted_resource(item: &DesktopResourceManifestItem, staging: &Path) -> Result<(), String> {
     if item.kind != "runtime" { return Ok(()); }
-    let manifest = staging.join("runtime-manifest.json");
-    let content = fs::read_to_string(manifest).map_err(|_| "Runtime 归档缺少 runtime-manifest.json".to_string())?;
-    let value: serde_json::Value = serde_json::from_str(&content).map_err(|_| "Runtime 内部清单不是有效 JSON".to_string())?;
-    if !matches!(value.get("status").and_then(serde_json::Value::as_str), Some("installed" | "installed_unverified" | "ready")) { return Err("Runtime 内部清单状态不正确".into()); }
+    for required in [staging.join("python_embeded").join("python.exe"), staging.join("ComfyUI").join("main.py")] {
+        if !required.is_file() { return Err(format!("Runtime 归档缺少必需文件：{}", required.file_name().unwrap_or_default().to_string_lossy())); }
+    }
     Ok(())
+}
+
+fn write_runtime_manifest(root: &Path, item: &DesktopResourceManifestItem) -> Result<(), String> {
+    let content = serde_json::to_vec_pretty(&serde_json::json!({ "schemaVersion": 1, "status": "installed", "runtimeVersion": item.version, "resourceId": item.id, "resourceSha256": item.sha256, "pythonExecutable": "python_embeded/python.exe", "entrypoint": "ComfyUI/main.py", "installedAt": Utc::now().to_rfc3339() })).map_err(|error| format!("生成 Runtime 内部清单失败：{error}"))?;
+    fs::write(root.join("runtime-manifest.json"), content).map_err(|error| format!("写入 Runtime 内部清单失败：{error}"))
 }
 
 fn switch_atomically(staging: &Path, destination: &Path) -> Result<Option<PathBuf>, String> {
@@ -417,7 +481,7 @@ mod tests {
     use std::{net::TcpListener, thread};
 
     fn item() -> DesktopResourceManifestItem {
-        DesktopResourceManifestItem { id: "runtime.core".into(), kind: "runtime".into(), version: "1.0.0".into(), os: "windows".into(), arch: std::env::consts::ARCH.into(), file_name: "runtime.zip".into(), byte_size: 10, installed_size: 1024, sha256: "a".repeat(64), archive: "zip".into(), required: true, sources: vec![DesktopResourceSource { kind: "mirror".into(), url: "https://mirror.example/runtime.zip".into() }, DesktopResourceSource { kind: "official".into(), url: "https://official.example/runtime.zip".into() }] }
+        DesktopResourceManifestItem { id: "runtime.core".into(), kind: "runtime".into(), version: "1.0.0".into(), os: "windows".into(), arch: std::env::consts::ARCH.into(), file_name: "runtime.zip".into(), byte_size: 10, installed_size: 1024, sha256: "a".repeat(64), archive: "zip".into(), root_directory: None, required: true, sources: vec![DesktopResourceSource { kind: "mirror".into(), url: "https://mirror.example/runtime.zip".into() }, DesktopResourceSource { kind: "official".into(), url: "https://official.example/runtime.zip".into() }] }
     }
 
     #[test]
@@ -469,8 +533,10 @@ mod tests {
         let file = File::create(&archive_path).expect("创建测试 ZIP");
         let mut archive = zip::ZipWriter::new(file);
         let options = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
-        archive.start_file("runtime-manifest.json", options).expect("创建 Runtime 清单项");
-        archive.write_all(br#"{"status":"installed"}"#).expect("写入 Runtime 清单");
+        archive.start_file("python_embeded/python.exe", options).expect("创建便携 Python 项");
+        archive.write_all(b"python").expect("写入便携 Python");
+        archive.start_file("ComfyUI/main.py", options).expect("创建 ComfyUI 入口项");
+        archive.write_all(b"print('comfyui')").expect("写入 ComfyUI 入口");
         archive.start_file("bin/worker.txt", options).expect("创建 Runtime 文件项");
         archive.write_all(b"runtime-worker").expect("写入 Runtime 文件");
         archive.finish().expect("完成测试 ZIP");
@@ -505,8 +571,10 @@ mod tests {
         let file = File::create(&cache).expect("创建 Runtime 缓存");
         let mut archive = zip::ZipWriter::new(file);
         let options = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
-        archive.start_file("runtime-manifest.json", options).expect("创建 Runtime 内部清单");
-        archive.write_all(br#"{"status":"installed"}"#).expect("写入 Runtime 内部清单");
+        archive.start_file("python_embeded/python.exe", options).expect("创建便携 Python");
+        archive.write_all(b"python").expect("写入便携 Python");
+        archive.start_file("ComfyUI/main.py", options).expect("创建 ComfyUI 入口");
+        archive.write_all(b"print('comfyui')").expect("写入 ComfyUI 入口");
         archive.start_file("bin/runtime.txt", options).expect("创建 Runtime 程序文件");
         archive.write_all(b"verified-runtime").expect("写入 Runtime 程序文件");
         archive.finish().expect("完成 Runtime 缓存");
@@ -520,5 +588,25 @@ mod tests {
         assert!(installed_resource_matches(&item, &settings));
         let report = crate::environment::inspect_environment(&settings);
         assert_eq!(report.runtime.status, "installed_unverified");
+    }
+
+    #[test]
+    fn official_runtime_7z_is_compatible_with_safe_extractor() {
+        let Ok(archive_path) = std::env::var("DRAWHIME_RUNTIME_TEST_ARCHIVE") else { return; };
+        let temporary = tempfile::tempdir().expect("创建官方 Runtime 安装目录");
+        let mut item = item();
+        item.id = "runtime.comfyui.nvidia-cu126".into();
+        item.version = "comfyui-v0.28.0-nvidia-cu126".into();
+        item.file_name = "drawhime-runtime-comfyui-v0.28.0-nvidia-cu126-x86_64.7z".into();
+        item.byte_size = 2_034_160_963;
+        item.installed_size = 5_579_485_120;
+        item.sha256 = "6af1b60b6a1fad780b07871e4ff356ac04a1807755ee13c6050e3ec3a4157cc0".into();
+        item.archive = "7z".into();
+        item.root_directory = Some("ComfyUI_windows_portable".into());
+        let settings = DesktopSettings { theme_mode: "system".into(), dependency_source: "auto".into(), default_privacy: "private".into(), model_root: temporary.path().join("models").to_string_lossy().into_owned(), output_root: temporary.path().join("outputs").to_string_lossy().into_owned(), runtime_root: temporary.path().join("runtime").to_string_lossy().into_owned(), upload_concurrency: 2, wifi_only: false, bandwidth_limit_kib: None };
+        let result = install_cached_resource(&settings, &item, Path::new(&archive_path), &|_| {}).expect("安全安装官方 Runtime");
+        assert_eq!(result.status, "installed");
+        assert!(installed_resource_matches(&item, &settings));
+        assert_eq!(crate::environment::inspect_environment(&settings).runtime.status, "installed_unverified");
     }
 }

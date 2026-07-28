@@ -102,6 +102,7 @@ pub struct DesktopResourceManifestItem {
     pub installed_size: u64,
     pub sha256: String,
     pub archive: String,
+    pub root_directory: Option<String>,
     pub required: bool,
     pub sources: Vec<DesktopResourceSource>,
 }

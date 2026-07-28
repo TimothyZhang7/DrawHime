@@ -150,7 +150,7 @@ Runtime 更新不能中断运行中任务；队列空闲后切换。
 
 下载界面展示资源实际来源、实时速度、已下载/总大小、预计剩余时间、最近切源原因和校验阶段。测速、下载和哈希均在 Rust 后台任务执行；同时下载数和带宽限制受本地设置控制，生成或训练运行时自动降低下载优先级，避免抢占磁盘与网络。
 
-每个资源同时声明下载字节数 `byteSize` 与安装后最大字节数 `installedSize`。安装前按后者加安全余量检查目标卷空间；ZIP 只允许 Runtime、打标和训练组件，底模与 LoRA 必须是大小一致的原始文件。ZIP 解压拒绝绝对路径、父级穿越、符号链接、Windows 保留名、重复文件和超出声明的展开体积。所有内容先写同卷临时路径，再原子切换到正式目录；旧版本重命名保留，切换或标记写入失败时恢复旧版本。
+每个资源同时声明下载字节数 `byteSize` 与安装后最大字节数 `installedSize`。安装前按后者加安全余量检查目标卷空间；ZIP/7z 归档只允许 Runtime、打标和训练组件，底模与 LoRA 必须是大小一致的原始文件。解压拒绝绝对路径、父级穿越、重解析点、Windows 保留名、重复文件和超出声明的展开体积。所有内容先写同卷临时路径，再原子切换到正式目录；旧版本重命名保留，切换或标记写入失败时恢复旧版本。
 
 正式实现前必须先在 `docs/interfaces/README.md` 登记网站签名清单、镜像地址和更新协议，并在 `packages/contracts` 落地真实响应契约；客户端不内置未经登记的下载地址。
 
@@ -160,7 +160,9 @@ Runtime 更新不能中断运行中任务；队列空闲后切换。
 2. 维护人员准备符合 `DesktopResourceManifestPayload` 的 JSON，官方与镜像条目必须指向同一字节大小和 SHA-256。
 3. 执行 `pnpm desktop:resource-manifest sign --payload PAYLOAD_JSON --private-key PRIVATE_PEM --output ENVELOPE_JSON --key-id KEY_ID`；脚本先用共享契约校验，再压缩载荷、签名并自检。
 4. API 只读取 `DESKTOP_RESOURCE_MANIFEST_ENVELOPE_FILE` 指向的信封，不持有签名私钥；未发布或信封结构异常时返回 HTTP 503。
-5. 正式桌面安装包通过 `DRAWHIME_DESKTOP_RESOURCE_MANIFEST_URL`、`DRAWHIME_DESKTOP_RESOURCE_KEY_ID` 和 `DRAWHIME_DESKTOP_RESOURCE_PUBLIC_KEY` 固定清单地址与公钥；任一项缺失时资源入口明确保持未配置状态。
+5. 正式桌面安装包在 `resource.rs` 固定公开清单 URL、密钥 ID 与 32 字节 Ed25519 公钥；私钥不进入源码、构建机环境或安装包。密钥轮换必须先发布同时受旧新密钥覆盖的过渡客户端，再切换清单签名。
+
+首个 NVIDIA Runtime 使用 `Comfy-Org/ComfyUI` 正式发布的 `v0.28.0` CUDA 12.6 Windows 便携包，构建脚本固定 GitHub 发布资产大小和 SHA-256 `6af1b60b...4157cc0`。执行 `pnpm desktop:build-runtime --output BUILD_DIR --cache CACHE_DIR` 后，脚本断点下载并验证上游 7z、实际解压确认便携 Python 与 ComfyUI 入口及展开体积，再复用相同官方 7z 字节生成可直接进入签名清单的元数据。桌面端安全解压后写入自己的 Runtime 内部清单；因此官方来源和主站镜像可共享完全相同的哈希，下载量由 5.63GB 降至 2.03GB。版本升级必须修改固定版本、大小和 GitHub 摘要并重新经过生成、自检和 LoRA 训练回归，不允许静默跟随 latest。
 
 ## 9. 本地生成、打标和训练
 
@@ -272,6 +274,6 @@ Runtime 更新不能中断运行中任务；队列空闲后切换。
 
 ## 18. 当前实现状态
 
-当前已完成：Tauri 工程、Windows/NVIDIA 基础检测、Windows 10 1809 构建号门禁、持续环境提示、SQLite 设置及升级、主题跟随/手动切换、依赖来源偏好、环境快照、默认图库隐私、图库 outbox、响应式桌面 UI、签名资源清单契约和 API、离线签名工具、8 MiB Range 断点下载、低速切源、SHA-256 隔离、资源进度事件、安全 ZIP 解压、磁盘预检、同卷原子安装、旧版本保留与回滚、Runtime 安装状态回归测试和 NSIS 构建。正式资源包、公钥和清单尚未发布，因此当前安装包会真实显示资源通道未配置，而不会提供无效安装按钮。
+当前已完成：Tauri 工程、Windows/NVIDIA 基础检测、Windows 10 1809 构建号门禁、持续环境提示、SQLite 设置及升级、主题跟随/手动切换、依赖来源偏好、环境快照、默认图库隐私、图库 outbox、响应式桌面 UI、签名资源清单契约和 API、离线签名工具、8 MiB Range 断点下载、低速切源、SHA-256 隔离、资源进度事件、安全 ZIP/7z 解压、磁盘预检、同卷原子安装、旧版本保留与回滚、Runtime 安装状态回归测试和 NSIS 构建。首个 NVIDIA Runtime、固定公钥、签名清单和主站 Range 镜像已经发布；清单签名、镜像首分片、完整 7z 安装及 NSIS 安装包均已通过真实验证。
 
 后续按顺序推进：设备授权 → 签名资源清单与 Runtime 安装器 → 本地模型/LoRA 仓库 → Local Scheduler → 生成/打标/训练 → 图库上传执行器 → 签名更新与完整系统矩阵验证。
