@@ -1,0 +1,365 @@
+/* 局部抖动工具页：深色动态舞台配合高密度参数侧栏，强调“涂抹后立即动起来”的工作流。 */
+.wobble-shell {
+  --wobble-ink: #172033;
+  --wobble-coral: #ff5c7a;
+  --wobble-cyan: #31c6d4;
+  display: grid;
+  gap: 14px;
+  width: min(1180px, 100%);
+  margin: 0 auto;
+}
+
+.wobble-shell > .tool-back-strip {
+  width: 100%;
+  min-height: 36px;
+  border-radius: 9px;
+}
+
+/* 页头使用错位色块和零上传徽章，避免工具页沦为普通表单。 */
+.wobble-hero {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  overflow: hidden;
+  padding: 24px 26px;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 18%, var(--color-border));
+  border-radius: 20px;
+  background:
+    radial-gradient(circle at 92% 10%, color-mix(in srgb, var(--wobble-coral) 18%, transparent) 0 90px, transparent 91px),
+    radial-gradient(circle at 6% 120%, color-mix(in srgb, var(--wobble-cyan) 18%, transparent) 0 120px, transparent 121px),
+    linear-gradient(125deg, color-mix(in srgb, var(--color-surface) 92%, #fff), color-mix(in srgb, var(--color-primary-soft) 54%, var(--color-surface)));
+}
+
+.wobble-hero::after {
+  position: absolute;
+  top: -36px;
+  right: 150px;
+  width: 76px;
+  height: 130px;
+  border: 2px solid color-mix(in srgb, var(--wobble-cyan) 55%, transparent);
+  border-radius: 50%;
+  content: "";
+  transform: rotate(28deg);
+}
+
+.wobble-hero > div:first-child {
+  position: relative;
+  z-index: 1;
+}
+
+.wobble-hero > div:first-child > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: color-mix(in srgb, var(--color-primary) 82%, var(--wobble-cyan));
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+}
+
+.wobble-hero h1 {
+  margin: 8px 0 0;
+  color: var(--color-text);
+  font-family: ui-rounded, "Microsoft YaHei", sans-serif;
+  font-size: clamp(30px, 5vw, 48px);
+  font-weight: 1000;
+  line-height: 0.98;
+  letter-spacing: -0.06em;
+}
+
+.wobble-hero p {
+  max-width: 670px;
+  margin: 12px 0 0;
+  color: var(--color-text-2);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.65;
+}
+
+.wobble-privacy {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 1px 8px;
+  min-width: 158px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--wobble-cyan) 38%, var(--color-border));
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--color-surface) 88%, transparent);
+  box-shadow: 0 10px 28px color-mix(in srgb, var(--wobble-cyan) 12%, transparent);
+}
+
+.wobble-privacy svg { grid-row: 1 / 3; color: var(--wobble-cyan); }
+.wobble-privacy strong { color: var(--color-text); font-size: 13px; }
+.wobble-privacy small { color: var(--color-text-2); font-size: 10px; }
+
+/* 上传区以轨道动画提示“图片会动”，但遵守系统减少动态设置。 */
+.wobble-dropzone {
+  display: grid;
+  place-items: center;
+  gap: 10px;
+  min-height: min(58vh, 500px);
+  padding: 36px;
+  border: 1px dashed color-mix(in srgb, var(--color-primary) 45%, var(--color-border));
+  border-radius: 20px;
+  background:
+    linear-gradient(135deg, transparent 48%, color-mix(in srgb, var(--wobble-cyan) 6%, transparent) 49% 51%, transparent 52%),
+    var(--color-surface);
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.wobble-dropzone.is-dragging {
+  border-style: solid;
+  border-color: var(--wobble-coral);
+  background-color: color-mix(in srgb, var(--wobble-coral) 7%, var(--color-surface));
+  box-shadow: inset 0 0 0 4px color-mix(in srgb, var(--wobble-coral) 12%, transparent);
+}
+
+.wobble-dropzone strong { font-size: 18px; font-weight: 950; }
+.wobble-dropzone small { color: var(--color-text-2); font-size: 12px; font-weight: 700; text-align: center; }
+
+.wobble-drop-orbit {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 86px;
+  height: 86px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--color-primary-soft) 76%, var(--color-surface));
+  color: var(--color-primary);
+}
+
+.wobble-drop-orbit > span {
+  position: absolute;
+  inset: -7px;
+  border: 2px dashed color-mix(in srgb, var(--wobble-coral) 56%, transparent);
+  border-radius: 46% 54% 58% 42%;
+  animation: wobble-orbit 7s linear infinite;
+}
+
+@keyframes wobble-orbit { to { transform: rotate(360deg); } }
+
+.wobble-mode-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  width: min(520px, 100%);
+  margin: 0 auto;
+  padding: 4px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface);
+}
+
+.wobble-mode-tabs button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 42px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-text-2);
+  font-size: 13px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.wobble-mode-tabs button.is-active {
+  background: linear-gradient(115deg, var(--wobble-coral), #ff8f6b);
+  color: #fff;
+  box-shadow: 0 5px 16px color-mix(in srgb, var(--wobble-coral) 25%, transparent);
+}
+
+.wobble-workbench {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 380px);
+  align-items: start;
+  gap: 14px;
+}
+
+/* 舞台使用暗色棋盘格，透明图片和白色遮罩都保持可辨识。 */
+.wobble-stage-card {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 18px;
+  background: var(--color-surface);
+}
+
+.wobble-stage-topline,
+.wobble-stage-caption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.wobble-stage-topline > div { display: grid; min-width: 0; }
+.wobble-stage-topline strong { overflow: hidden; color: var(--color-text); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.wobble-stage-topline span { color: var(--color-text-2); font-size: 10px; }
+.wobble-stage-topline button { display: grid; place-items: center; flex: 0 0 34px; width: 34px; height: 34px; border: 0; border-radius: 9px; background: var(--color-bg); color: var(--color-text-2); cursor: pointer; }
+
+.wobble-canvas-stage {
+  position: relative;
+  margin: 0 auto;
+  overflow: hidden;
+  border: 1px solid #263246;
+  border-radius: 13px;
+  background-color: #121a29;
+  background-image: linear-gradient(45deg, #1c2638 25%, transparent 25%), linear-gradient(-45deg, #1c2638 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #1c2638 75%), linear-gradient(-45deg, transparent 75%, #1c2638 75%);
+  background-position: 0 0, 0 12px, 12px -12px, -12px 0;
+  background-size: 24px 24px;
+}
+
+.wobble-render-canvas,
+.wobble-mask-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.wobble-render-canvas { pointer-events: none; }
+.wobble-mask-canvas { touch-action: none; opacity: 0.48; cursor: crosshair; }
+.wobble-canvas-stage.is-preview .wobble-render-canvas { pointer-events: auto; touch-action: none; cursor: grab; }
+.wobble-canvas-stage.is-preview .wobble-render-canvas:active { cursor: grabbing; }
+.wobble-canvas-stage.is-preview .wobble-mask-canvas { pointer-events: none; opacity: 0; }
+
+.wobble-stage-loading,
+.wobble-stage-drop {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  background: rgba(13, 20, 32, 0.72);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.wobble-stage-drop { margin: 12px; border: 1px dashed rgba(255, 255, 255, 0.75); border-radius: 10px; }
+.wobble-stage-caption { padding: 0 2px; color: var(--color-text-2); font-size: 11px; }
+.wobble-stage-caption strong { color: var(--wobble-coral); }
+
+.wobble-controls { display: grid; gap: 12px; }
+.wobble-panel { display: grid; gap: 13px; padding: 16px; border: 1px solid var(--color-border); border-radius: 16px; background: var(--color-surface); }
+.wobble-panel-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.wobble-panel-heading > span { color: var(--color-text); font-size: 16px; font-weight: 950; }
+.wobble-panel-heading small { color: var(--color-text-2); font-size: 10px; text-align: right; }
+
+.wobble-segmented { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 3px; border-radius: 12px; background: var(--color-bg); }
+.wobble-segmented button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 38px; border: 0; border-radius: 9px; background: transparent; color: var(--color-text-2); font-weight: 850; cursor: pointer; }
+.wobble-segmented button.is-active { background: var(--color-surface); color: var(--wobble-coral); box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08); }
+
+.wobble-range { display: grid; gap: 7px; }
+.wobble-range > span { display: flex; justify-content: space-between; gap: 8px; color: var(--color-text-2); font-size: 11px; }
+.wobble-range strong { color: var(--color-text); }
+.wobble-range output { color: var(--wobble-coral); font-weight: 900; }
+.wobble-range input { width: 100%; accent-color: var(--wobble-coral); }
+
+.wobble-mask-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+.wobble-mask-actions button,
+.wobble-snapshot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 38px;
+  border: 1px solid var(--color-border);
+  border-radius: 9px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 11px;
+  font-weight: 850;
+  cursor: pointer;
+}
+.wobble-mask-actions button.is-wide { grid-column: 1 / -1; }
+.wobble-mask-actions button:disabled { opacity: 0.42; cursor: not-allowed; }
+
+.wobble-next,
+.wobble-record {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 44px;
+  border: 0;
+  border-radius: 11px;
+  background: linear-gradient(115deg, var(--wobble-coral), #ff906b);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 950;
+  cursor: pointer;
+  box-shadow: 0 7px 18px color-mix(in srgb, var(--wobble-coral) 24%, transparent);
+}
+.wobble-next:disabled,
+.wobble-record:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.wobble-presets { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+.wobble-presets button { display: grid; gap: 3px; min-height: 58px; padding: 9px 10px; border: 1px solid var(--color-border); border-radius: 10px; background: var(--color-surface); color: var(--color-text); text-align: left; cursor: pointer; }
+.wobble-presets button.is-active { border-color: var(--wobble-cyan); background: color-mix(in srgb, var(--wobble-cyan) 9%, var(--color-surface)); box-shadow: inset 3px 0 var(--wobble-cyan); }
+.wobble-presets strong { font-size: 11px; }
+.wobble-presets small { color: var(--color-text-2); font-size: 9px; line-height: 1.35; }
+
+.wobble-parameters { display: grid; gap: 12px; padding-top: 2px; }
+.wobble-select,
+.wobble-record-settings label { display: grid; gap: 6px; color: var(--color-text); font-size: 11px; font-weight: 850; }
+.wobble-select select,
+.wobble-record-settings select { min-height: 38px; padding: 0 10px; border: 1px solid var(--color-border); border-radius: 9px; background: var(--color-surface); color: var(--color-text); }
+
+.wobble-export-panel { background: linear-gradient(145deg, color-mix(in srgb, var(--wobble-cyan) 5%, var(--color-surface)), var(--color-surface)); }
+.wobble-format-toggle { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.wobble-format-toggle button { display: grid; gap: 2px; min-height: 56px; padding: 8px 10px; border: 1px solid var(--color-border); border-radius: 10px; background: color-mix(in srgb, var(--color-surface) 92%, transparent); color: var(--color-text); text-align: left; cursor: pointer; transition: border-color 160ms ease, background 160ms ease, transform 160ms ease; }
+.wobble-format-toggle button:hover:not(:disabled) { border-color: color-mix(in srgb, var(--wobble-cyan) 72%, var(--color-border)); transform: translateY(-1px); }
+.wobble-format-toggle button.is-active { border-color: var(--wobble-cyan); background: color-mix(in srgb, var(--wobble-cyan) 12%, var(--color-surface)); box-shadow: inset 3px 0 0 var(--wobble-cyan); }
+.wobble-format-toggle button:disabled { cursor: not-allowed; opacity: 0.45; }
+.wobble-format-toggle strong { font-size: 13px; font-weight: 1000; letter-spacing: 0.03em; }
+.wobble-format-toggle small { color: var(--color-text-2); font-size: 9px; font-weight: 750; }
+.wobble-record-settings { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.wobble-record.is-recording { background: #bd2448; box-shadow: 0 0 0 5px rgba(189, 36, 72, 0.1); }
+.wobble-record-dot { width: 9px; height: 9px; border-radius: 50%; background: #fff; animation: wobble-record-pulse 1s ease-in-out infinite; }
+@keyframes wobble-record-pulse { 50% { opacity: 0.28; } }
+
+.wobble-result { display: grid; gap: 8px; }
+.wobble-result video,
+.wobble-result img { width: 100%; max-height: 240px; border: 1px solid var(--color-border); border-radius: 10px; background: #111827; object-fit: contain; }
+.wobble-result > div { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--color-text-2); font-size: 10px; }
+.wobble-result button { display: inline-flex; align-items: center; gap: 5px; min-height: 34px; padding: 0 11px; border: 0; border-radius: 8px; background: var(--wobble-cyan); color: #102b31; font-size: 11px; font-weight: 950; cursor: pointer; }
+.wobble-error { padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--color-error) 30%, var(--color-border)); border-radius: 11px; background: var(--color-error-soft); color: var(--color-error); font-size: 11px; font-weight: 800; line-height: 1.5; }
+
+@media (max-width: 900px) {
+  .wobble-workbench { grid-template-columns: 1fr; }
+  .wobble-controls { grid-template-columns: 1fr 1fr; }
+}
+
+@media (max-width: 650px) {
+  .wobble-shell { gap: 10px; }
+  .wobble-hero { align-items: flex-start; padding: 19px; }
+  .wobble-hero h1 { font-size: 34px; }
+  .wobble-hero p { font-size: 12px; }
+  .wobble-privacy { display: none; }
+  .wobble-dropzone { min-height: 360px; padding: 24px 16px; }
+  .wobble-workbench { gap: 10px; }
+  .wobble-stage-card { padding: 8px; border-radius: 14px; }
+  .wobble-controls { grid-template-columns: 1fr; }
+  .wobble-panel { padding: 14px; }
+  .wobble-presets { grid-template-columns: 1fr 1fr; }
+  .wobble-mode-tabs button { font-size: 11px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wobble-drop-orbit > span,
+  .wobble-record-dot { animation: none; }
+}

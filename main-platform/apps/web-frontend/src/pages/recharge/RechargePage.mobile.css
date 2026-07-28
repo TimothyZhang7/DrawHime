@@ -1,0 +1,210 @@
+/* 充值页移动端样式：压缩卡片高度并保持余额、流水和邀请模块可读。 */
+@media (max-width: 860px) {
+  .recharge-page {
+    gap: 12px;
+  }
+
+  .recharge-header,
+  .recharge-redeem-row,
+  .recharge-shop-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .recharge-header {
+    gap: 10px;
+  }
+
+  .recharge-header h1 {
+    font-size: 22px;
+  }
+
+  .recharge-status-grid,
+  .recharge-work-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .recharge-status-card,
+  .recharge-balance-panel,
+  .recharge-panel {
+    padding: 14px;
+  }
+
+  .recharge-status-card {
+    min-height: 82px;
+  }
+
+  .recharge-balance-summary {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .recharge-metric {
+    min-height: 76px;
+    padding: 10px 8px;
+  }
+
+  .recharge-metric span {
+    font-size: 11px;
+  }
+
+  .recharge-metric strong {
+    font-size: 16px;
+  }
+
+  .recharge-tabs {
+    gap: 5px;
+    padding: 5px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .recharge-tab {
+    min-height: 46px;
+    justify-content: center;
+    gap: 5px;
+    padding: 6px 4px;
+    white-space: nowrap;
+  }
+
+  .recharge-tab-icon {
+    width: 26px;
+    height: 26px;
+    border-radius: 7px;
+  }
+
+  .recharge-tab-icon svg {
+    width: 13px;
+    height: 13px;
+  }
+
+  .recharge-tab-copy {
+    align-items: flex-start;
+    gap: 0;
+  }
+
+  .recharge-tab-copy > span {
+    font-size: 12px;
+    line-height: 1.15;
+  }
+
+  .recharge-tab-copy small {
+    display: none;
+  }
+
+  .recharge-wallet-table {
+    border: 0;
+    border-radius: 0;
+  }
+
+  .recharge-wallet-head {
+    display: none;
+  }
+
+  .recharge-wallet-row {
+    grid-template-columns: 1fr 1fr;
+    border: 1px solid rgba(203, 213, 225, .86);
+    border-radius: 8px;
+    margin-bottom: 8px;
+    background: #fff;
+  }
+
+  .recharge-wallet-row > span,
+  .recharge-wallet-row > strong {
+    text-align: left;
+  }
+
+  .recharge-referral-grid,
+  .recharge-invite-apply {
+    grid-template-columns: 1fr;
+  }
+
+  .recharge-action-panel {
+    min-height: 0;
+    gap: 12px;
+  }
+
+  .recharge-shop-row {
+    align-items: stretch;
+  }
+
+  .recharge-shop-row .btn,
+  .recharge-redeem-row .btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .recharge-shop-amounts {
+    gap: 5px;
+  }
+
+  .recharge-shop-amounts span {
+    height: 26px;
+    padding: 0 8px;
+  }
+
+  .recharge-invite-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .recharge-ledger-summary {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .recharge-ledger-filters {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .recharge-ledger-filters .btn {
+    width: 100%;
+    grid-column: 1 / -1;
+  }
+
+  .recharge-ledger-table {
+    border: 0;
+    border-radius: 0;
+  }
+
+  .recharge-ledger-head {
+    display: none;
+  }
+
+  .recharge-ledger-row {
+    grid-template-columns: 1fr 1fr;
+    border: 1px solid rgba(203, 213, 225, .86);
+    border-radius: 8px;
+    margin-bottom: 8px;
+    background: var(--color-surface);
+  }
+
+  .recharge-ledger-row > * {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .recharge-ledger-row > [data-label]::before {
+    content: attr(data-label);
+    color: var(--color-text-2);
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  .recharge-ledger-row strong {
+    text-align: left;
+  }
+
+  .recharge-ledger-row small {
+    grid-column: 1 / -1;
+  }
+
+  .recharge-ledger-after {
+    white-space: normal;
+  }
+
+  .recharge-ledger-pager {
+    justify-content: space-between;
+  }
+}

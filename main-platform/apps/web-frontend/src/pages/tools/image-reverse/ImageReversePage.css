@@ -1,0 +1,1375 @@
+html.reverse-page-locked,
+body.reverse-page-locked {
+  height: 100%;
+  overflow: hidden;
+}
+
+html.reverse-page-locked #root,
+body.reverse-page-locked #root {
+  height: 100%;
+  overflow: hidden;
+}
+
+html.reverse-page-locked .app-main-full {
+  height: calc(100dvh - 48px);
+  overflow: hidden;
+  padding: 0 !important;
+}
+
+/* 图片反推工具页样式：左侧单图上传，右侧结构化识图结果，布局保持紧凑工作台形态。 */
+.reverse-shell {
+  --reverse-blue: #2563eb;
+  --reverse-cyan: #0891b2;
+  --reverse-green: #16a34a;
+  --reverse-lime: #65a30d;
+  --reverse-amber: #d97706;
+  --reverse-orange: #ea580c;
+  --reverse-purple: #7c3aed;
+  --reverse-indigo: #4f46e5;
+  --reverse-pink: #db2777;
+  --reverse-rose: #e11d48;
+  --reverse-slate: #334155;
+  display: grid;
+  gap: 10px;
+  height: 100%;
+  padding: 8px;
+  box-sizing: border-box;
+  overflow: hidden;
+  width: 100%;
+}
+
+.reverse-workbench {
+  display: grid;
+  grid-template-columns: minmax(400px, 520px) minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+  height: 100%;
+  min-height: 0;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.reverse-left,
+.reverse-result {
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--color-border) 72%, transparent);
+  border-radius: 8px;
+  background: var(--color-surface);
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.065);
+}
+
+.reverse-left {
+  display: grid;
+  align-content: start;
+  gap: 9px;
+  padding: 10px;
+  position: relative;
+  top: 0;
+  height: 100%;
+  overflow: auto;
+  border-top-color: color-mix(in srgb, var(--reverse-blue) 54%, var(--color-border));
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--reverse-blue) 7%, transparent), transparent 34%),
+    linear-gradient(120deg, transparent, color-mix(in srgb, var(--reverse-pink) 5%, transparent) 72%, transparent),
+    var(--color-surface);
+}
+
+.reverse-result {
+  border-top-color: color-mix(in srgb, var(--reverse-cyan) 54%, var(--color-border));
+  height: 100%;
+  min-height: 0;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--reverse-cyan) 6%, transparent), transparent 30%),
+    linear-gradient(120deg, transparent, color-mix(in srgb, var(--reverse-lime) 4%, transparent) 70%, transparent),
+    var(--color-surface);
+}
+
+.reverse-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 2px 2px 0;
+}
+
+.reverse-head span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: color-mix(in srgb, var(--reverse-blue) 86%, var(--color-text));
+  font-size: 12px;
+  font-weight: 950;
+}
+
+.reverse-head h1 {
+  margin: 4px 0 0;
+  color: var(--color-text);
+  font-size: 21px;
+  font-weight: 950;
+  line-height: 1.12;
+  letter-spacing: 0;
+}
+
+.reverse-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.reverse-head-actions > a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 8px;
+  border: 1px solid color-mix(in srgb, var(--reverse-blue) 28%, var(--color-border));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--reverse-blue) 8%, var(--color-surface));
+  color: var(--reverse-blue);
+  font-size: 11px;
+  font-weight: 900;
+  text-decoration: none;
+}
+
+.reverse-head-actions > a:hover {
+  border-color: color-mix(in srgb, var(--reverse-blue) 58%, var(--color-border));
+  background: color-mix(in srgb, var(--reverse-blue) 13%, var(--color-surface));
+}
+
+.reverse-head small {
+  flex-shrink: 0;
+  max-width: 168px;
+  overflow: hidden;
+  padding: 5px 8px;
+  border: 1px solid color-mix(in srgb, var(--reverse-cyan) 26%, var(--color-border));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--reverse-cyan) 10%, var(--color-surface));
+  color: var(--reverse-cyan);
+  font-size: 11px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reverse-input-mode {
+  display: grid;
+  gap: 8px;
+  padding: 8px 9px 9px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--reverse-blue) 7%, transparent), color-mix(in srgb, var(--reverse-amber) 7%, transparent), color-mix(in srgb, var(--reverse-pink) 5%, transparent)),
+    linear-gradient(180deg, color-mix(in srgb, var(--color-bg) 68%, transparent), transparent),
+    color-mix(in srgb, var(--color-surface) 78%, var(--color-bg));
+}
+
+.reverse-input-mode > span {
+  color: var(--color-text-2);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.reverse-input-mode .reverse-mode-tabs {
+  width: 100%;
+}
+
+.reverse-dropzone {
+  position: relative;
+  display: grid;
+  place-items: center;
+  height: clamp(360px, 49vh, 540px);
+  min-height: 0;
+  overflow: hidden;
+  border: 1px dashed color-mix(in srgb, var(--reverse-blue) 40%, var(--color-border));
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--reverse-blue) 10%, transparent), transparent 38%),
+    linear-gradient(315deg, color-mix(in srgb, var(--reverse-cyan) 9%, transparent), transparent 46%),
+    linear-gradient(45deg, color-mix(in srgb, var(--reverse-orange) 7%, transparent), transparent 62%),
+    linear-gradient(180deg, transparent, color-mix(in srgb, var(--reverse-lime) 5%, transparent)),
+    repeating-linear-gradient(90deg, color-mix(in srgb, var(--color-border) 28%, transparent) 0 1px, transparent 1px 22px),
+    repeating-linear-gradient(0deg, color-mix(in srgb, var(--color-border) 22%, transparent) 0 1px, transparent 1px 22px),
+    var(--color-bg);
+  cursor: pointer;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease, transform 0.16s ease;
+}
+
+.reverse-dropzone input {
+  display: none;
+}
+
+.reverse-dropzone.is-dragging {
+  border-color: var(--reverse-blue);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--reverse-blue) 34%, transparent), 0 14px 28px rgba(15, 23, 42, 0.08);
+}
+
+.reverse-dropzone:hover {
+  border-color: color-mix(in srgb, var(--reverse-cyan) 68%, var(--color-border));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--reverse-cyan) 18%, transparent);
+}
+
+.reverse-dropzone.has-image {
+  border-style: solid;
+  background: #080d18;
+}
+
+.reverse-dropzone.has-image.is-dragging::after {
+  position: absolute;
+  inset: 12px;
+  display: grid;
+  place-items: center;
+  border: 1px dashed rgba(255, 255, 255, 0.68);
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.58);
+  color: #fff;
+  content: "松开替换图片";
+  font-size: 15px;
+  font-weight: 950;
+  pointer-events: none;
+}
+
+.reverse-dropzone img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.reverse-dropzone div {
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  padding: 24px;
+  color: var(--reverse-blue);
+  text-align: center;
+}
+
+.reverse-dropzone div > svg {
+  width: 42px;
+  height: 42px;
+  padding: 9px;
+  border: 1px solid color-mix(in srgb, var(--reverse-blue) 30%, var(--color-border));
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--reverse-blue) 10%, transparent), color-mix(in srgb, var(--reverse-cyan) 8%, transparent), color-mix(in srgb, var(--reverse-lime) 7%, transparent)),
+    var(--color-surface);
+  box-shadow: 0 9px 18px rgba(15, 23, 42, 0.08);
+}
+
+.reverse-dropzone strong {
+  color: var(--color-text);
+  font-size: 18px;
+  font-weight: 950;
+}
+
+.reverse-dropzone small {
+  max-width: 260px;
+  color: var(--color-text-2);
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.45;
+}
+
+.reverse-filebar {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto 30px;
+  align-items: center;
+  gap: 8px;
+  min-height: 33px;
+  padding: 0 4px 0 10px;
+  border: 1px solid color-mix(in srgb, var(--reverse-cyan) 22%, var(--color-border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--reverse-cyan) 5%, var(--color-bg));
+}
+
+.reverse-filebar span {
+  overflow: hidden;
+  color: var(--color-text);
+  font-size: 12px;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reverse-filebar strong {
+  color: var(--reverse-cyan);
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.reverse-filebar button {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text-2);
+  cursor: pointer;
+}
+
+.reverse-filebar button:hover {
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.reverse-alert,
+.reverse-copied {
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.reverse-alert {
+  border: 1px solid color-mix(in srgb, var(--color-error) 30%, var(--color-border));
+  background: color-mix(in srgb, var(--color-error) 8%, var(--color-surface));
+  color: var(--color-error);
+}
+
+.reverse-local-note {
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--reverse-amber) 28%, var(--color-border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--reverse-amber) 9%, var(--color-surface));
+  color: color-mix(in srgb, var(--reverse-amber) 72%, var(--color-text));
+  font-size: 12px;
+  font-weight: 820;
+}
+
+.reverse-copied {
+  border: 1px solid color-mix(in srgb, var(--color-success) 28%, var(--color-border));
+  background: color-mix(in srgb, var(--color-success) 9%, var(--color-surface));
+  color: var(--color-success);
+}
+
+.reverse-submit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+  border: 1px solid color-mix(in srgb, var(--reverse-blue) 86%, #000);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, var(--reverse-blue), var(--reverse-indigo), var(--reverse-purple));
+  color: #fff;
+  font-size: 14px;
+  font-weight: 950;
+  cursor: pointer;
+  box-shadow: 0 10px 20px color-mix(in srgb, var(--reverse-blue) 18%, transparent);
+  transition: transform 0.14s ease, box-shadow 0.14s ease, opacity 0.14s ease;
+}
+
+.reverse-submit:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 14px 26px color-mix(in srgb, var(--reverse-purple) 22%, transparent);
+}
+
+.reverse-submit:disabled {
+  border-color: color-mix(in srgb, var(--color-border) 82%, transparent);
+  background: color-mix(in srgb, var(--reverse-blue) 7%, var(--color-bg));
+  color: color-mix(in srgb, var(--reverse-slate) 72%, var(--color-text-2));
+  box-shadow: none;
+  cursor: not-allowed;
+  opacity: 1;
+}
+
+.reverse-result {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+  min-height: clamp(500px, 76vh, 840px);
+}
+
+.reverse-result-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-bg) 62%, transparent), transparent),
+    var(--color-surface);
+}
+
+.reverse-result-head h2 {
+  margin: 0;
+  color: color-mix(in srgb, var(--reverse-cyan) 76%, var(--color-text));
+  font-size: 17px;
+  font-weight: 950;
+}
+
+.reverse-result-head span {
+  display: block;
+  margin-top: 4px;
+  color: var(--color-text-2);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.reverse-copy-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.reverse-copy-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 31px;
+  padding: 0 9px;
+  border: 1px solid color-mix(in srgb, var(--reverse-cyan) 22%, var(--color-border));
+  border-radius: 7px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: 12px;
+  font-weight: 850;
+  cursor: pointer;
+  transition: border-color 0.14s ease, background 0.14s ease, transform 0.14s ease;
+}
+
+.reverse-copy-actions button:hover {
+  border-color: color-mix(in srgb, var(--reverse-cyan) 48%, var(--color-border));
+  background: color-mix(in srgb, var(--reverse-cyan) 10%, var(--color-bg));
+  transform: translateY(-1px);
+}
+
+.reverse-empty {
+  display: grid;
+  place-items: center;
+  min-height: 100%;
+  padding: 28px;
+  color: var(--color-text-2);
+  font-size: 13px;
+  font-weight: 800;
+  text-align: center;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--reverse-cyan) 10%, transparent), transparent 42%),
+    linear-gradient(45deg, color-mix(in srgb, var(--reverse-orange) 7%, transparent), transparent 58%),
+    linear-gradient(120deg, transparent, color-mix(in srgb, var(--reverse-pink) 5%, transparent) 78%),
+    linear-gradient(180deg, color-mix(in srgb, var(--color-bg) 72%, transparent), transparent 56%),
+    var(--color-surface);
+}
+
+.reverse-sections {
+  display: grid;
+  gap: 8px;
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+  padding: 9px;
+  scrollbar-gutter: stable;
+}
+
+.reverse-result-mode-badge {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  padding: 0 11px;
+  border: 1px solid color-mix(in srgb, var(--reverse-cyan) 28%, var(--color-border));
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--reverse-cyan) 10%, transparent), color-mix(in srgb, var(--reverse-indigo) 8%, transparent), color-mix(in srgb, var(--reverse-pink) 6%, transparent)),
+    var(--color-bg);
+}
+
+.reverse-result-mode-badge strong {
+  color: var(--reverse-cyan);
+  font-size: 12px;
+  font-weight: 950;
+}
+
+.reverse-result-mode-badge span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-2);
+  font-size: 12px;
+  font-weight: 820;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reverse-result-mode-badge em {
+  color: var(--color-success);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.reverse-language-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.reverse-mode-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.reverse-mode-tabs {
+  display: inline-grid;
+  grid-template-columns: repeat(auto-fit, minmax(66px, 1fr));
+  gap: 4px;
+  min-height: 35px;
+  padding: 3px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-bg) 78%, var(--color-surface));
+}
+
+.reverse-mode-tabs button {
+  min-width: 0;
+  min-height: 30px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--color-text-2);
+  font-size: 12px;
+  font-weight: 900;
+  cursor: pointer;
+  transition: background 0.14s ease, color 0.14s ease, box-shadow 0.14s ease;
+}
+
+.reverse-option-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--reverse-green) 6%, transparent), color-mix(in srgb, var(--reverse-orange) 5%, transparent)),
+    color-mix(in srgb, var(--color-bg) 70%, var(--color-surface));
+}
+
+.reverse-description-compare.is-single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.reverse-option-grid label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.reverse-option-grid span {
+  color: var(--color-text-2);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.reverse-option-grid select {
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 82%, transparent);
+  border-radius: 7px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 12px;
+  font-weight: 850;
+  outline: none;
+}
+
+.reverse-mode-tabs button.is-active {
+  background: linear-gradient(135deg, var(--reverse-blue), var(--reverse-indigo), var(--reverse-purple));
+  color: #fff;
+  box-shadow: 0 7px 14px color-mix(in srgb, var(--reverse-purple) 18%, transparent);
+}
+
+.reverse-weight-toggle {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--reverse-green) 28%, var(--color-border));
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--reverse-green) 8%, var(--color-surface));
+  color: var(--color-text);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.reverse-weight-toggle input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--reverse-green);
+}
+
+.reverse-language-tabs {
+  display: inline-grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px;
+  min-height: 34px;
+  padding: 3px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-bg) 82%, var(--color-surface));
+}
+
+.reverse-language-tabs button {
+  min-width: 86px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--color-text-2);
+  font-size: 12px;
+  font-weight: 900;
+  cursor: pointer;
+  transition: background 0.14s ease, color 0.14s ease, box-shadow 0.14s ease;
+}
+
+.reverse-language-tabs button.is-active {
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--reverse-blue) 8%, transparent), color-mix(in srgb, var(--reverse-pink) 6%, transparent)),
+    var(--color-surface);
+  color: var(--reverse-indigo);
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+}
+
+.reverse-language-empty {
+  display: grid;
+  place-items: center;
+  min-height: 180px;
+  padding: 20px;
+  border: 1px dashed color-mix(in srgb, var(--color-border) 88%, transparent);
+  border-radius: 9px;
+  background: var(--color-bg);
+  color: var(--color-text-2);
+  font-size: 13px;
+  font-weight: 820;
+  text-align: center;
+}
+
+.reverse-tag-note {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 11px;
+  border: 1px solid color-mix(in srgb, var(--reverse-green) 22%, var(--color-border));
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--reverse-green) 6%, var(--color-surface));
+  color: var(--color-text-2);
+  font-size: 12px;
+  font-weight: 820;
+}
+
+.reverse-tag-prompt,
+.reverse-tag-list {
+  display: grid;
+  gap: 7px;
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 72%, transparent);
+  border-radius: 8px;
+  background: var(--color-bg);
+}
+
+.reverse-tag-list.is-emphasized {
+  border-color: color-mix(in srgb, var(--reverse-orange) 40%, var(--color-border));
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--reverse-orange) 10%, transparent), color-mix(in srgb, var(--reverse-pink) 6%, transparent), transparent 78%),
+    var(--color-bg);
+}
+
+.reverse-tag-prompt.is-positive {
+  border-color: color-mix(in srgb, var(--reverse-green) 42%, var(--color-border));
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--reverse-green) 10%, transparent), color-mix(in srgb, var(--reverse-lime) 7%, transparent), transparent 70%),
+    var(--color-bg);
+}
+
+.reverse-tag-prompt.is-negative {
+  border-color: color-mix(in srgb, var(--reverse-rose) 34%, var(--color-border));
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--reverse-rose) 7%, transparent), transparent 66%),
+    var(--color-bg);
+}
+
+.reverse-tag-prompt p {
+  max-height: 220px;
+  overflow: auto;
+  margin: 0;
+  color: var(--color-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 11.5px;
+  font-weight: 650;
+  line-height: 1.62;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.reverse-tag-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: 6px;
+}
+
+.reverse-tag-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 8px;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid color-mix(in srgb, var(--reverse-green) 16%, var(--color-border));
+  border-radius: 8px;
+  background: var(--color-surface);
+}
+
+.reverse-tag-card strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 11.5px;
+  font-weight: 820;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reverse-tag-card span {
+  grid-column: 1 / -1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-2);
+  font-size: 11px;
+  font-weight: 760;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reverse-tag-card small {
+  color: var(--reverse-green);
+  font-size: 11px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+
+.reverse-character-card {
+  display: grid;
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--reverse-amber) 38%, var(--color-border));
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--reverse-amber) 11%, transparent), color-mix(in srgb, var(--reverse-orange) 8%, transparent), transparent 62%),
+    var(--color-bg);
+}
+
+.reverse-character-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.reverse-character-grid section {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 76%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-surface) 82%, var(--color-bg));
+}
+
+.reverse-character-grid section:nth-child(6n + 1) {
+  border-color: color-mix(in srgb, var(--reverse-amber) 26%, var(--color-border));
+  background: color-mix(in srgb, var(--reverse-amber) 6%, var(--color-surface));
+}
+
+.reverse-character-grid section:nth-child(6n + 2) {
+  border-color: color-mix(in srgb, var(--reverse-orange) 24%, var(--color-border));
+  background: color-mix(in srgb, var(--reverse-orange) 5%, var(--color-surface));
+}
+
+.reverse-character-grid section:nth-child(6n + 3) {
+  border-color: color-mix(in srgb, var(--reverse-pink) 22%, var(--color-border));
+  background: color-mix(in srgb, var(--reverse-pink) 5%, var(--color-surface));
+}
+
+.reverse-character-grid section:nth-child(6n + 4) {
+  border-color: color-mix(in srgb, var(--reverse-purple) 22%, var(--color-border));
+  background: color-mix(in srgb, var(--reverse-purple) 5%, var(--color-surface));
+}
+
+.reverse-character-grid section:nth-child(6n + 5) {
+  border-color: color-mix(in srgb, var(--reverse-cyan) 22%, var(--color-border));
+  background: color-mix(in srgb, var(--reverse-cyan) 5%, var(--color-surface));
+}
+
+.reverse-character-grid section:nth-child(6n) {
+  border-color: color-mix(in srgb, var(--reverse-lime) 22%, var(--color-border));
+  background: color-mix(in srgb, var(--reverse-lime) 5%, var(--color-surface));
+}
+
+.reverse-character-grid span {
+  color: var(--reverse-amber);
+  font-size: 11px;
+  font-weight: 950;
+}
+
+.reverse-character-grid p,
+.reverse-character-prompt p {
+  margin: 0;
+  color: var(--color-text);
+  font-size: 12.5px;
+  font-weight: 700;
+  line-height: 1.58;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.reverse-character-anchors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.reverse-character-anchors span {
+  padding: 4px 7px;
+  border: 1px solid color-mix(in srgb, var(--reverse-amber) 26%, var(--color-border));
+  border-radius: 7px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 11.5px;
+  font-weight: 820;
+}
+
+.reverse-character-prompt {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--reverse-indigo) 30%, var(--color-border));
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--reverse-indigo) 7%, transparent), color-mix(in srgb, var(--reverse-purple) 7%, transparent)),
+    var(--color-surface);
+}
+
+.reverse-character-prompt strong {
+  color: var(--reverse-indigo);
+  font-size: 12px;
+  font-weight: 950;
+}
+
+.reverse-description-tabs {
+  display: inline-grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px;
+  min-height: 34px;
+  padding: 3px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-bg) 82%, var(--color-surface));
+}
+
+.reverse-description-tabs button {
+  min-width: 112px;
+  min-height: 28px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--color-text-2);
+  font-size: 12px;
+  font-weight: 900;
+  cursor: pointer;
+  transition: background 0.14s ease, color 0.14s ease, box-shadow 0.14s ease;
+}
+
+.reverse-description-tabs button.is-active {
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--reverse-cyan) 10%, transparent), color-mix(in srgb, var(--reverse-indigo) 8%, transparent)),
+    var(--color-surface);
+  color: var(--reverse-indigo);
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+}
+
+.reverse-description-compare {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+  align-items: start;
+  height: 100%;
+  min-height: 0;
+}
+
+.reverse-description-panel {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 74%, transparent);
+  border-radius: 8px;
+  background: var(--color-bg);
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+}
+
+.reverse-description-panel.is-description {
+  border-color: color-mix(in srgb, var(--reverse-cyan) 30%, var(--color-border));
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--reverse-cyan) 8%, transparent), transparent 56%),
+    var(--color-bg);
+}
+
+.reverse-description-panel.is-prompt {
+  border-color: color-mix(in srgb, var(--reverse-indigo) 34%, var(--color-border));
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--reverse-indigo) 9%, transparent), color-mix(in srgb, var(--reverse-purple) 6%, transparent), transparent 62%),
+    var(--color-bg);
+}
+
+.reverse-description-panel-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: start;
+  padding-bottom: 8px;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border) 68%, transparent);
+}
+
+.reverse-description-panel-head h3 {
+  margin: 0;
+  color: var(--color-text);
+  font-size: 15px;
+  font-weight: 950;
+}
+
+.reverse-description-panel-head span {
+  display: block;
+  margin-top: 3px;
+  color: var(--color-text-2);
+  font-size: 11.5px;
+  font-weight: 780;
+  line-height: 1.35;
+}
+
+.reverse-description-panel-head button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 30px;
+  padding: 0 9px;
+  border: 1px solid color-mix(in srgb, var(--reverse-cyan) 24%, var(--color-border));
+  border-radius: 7px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 11.5px;
+  font-weight: 900;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.reverse-description-panel.is-prompt .reverse-description-panel-head button {
+  border-color: color-mix(in srgb, var(--reverse-indigo) 30%, var(--color-border));
+  color: color-mix(in srgb, var(--reverse-indigo) 82%, var(--color-text));
+}
+
+.reverse-description-field {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 68%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-surface) 76%, var(--color-bg));
+}
+
+.reverse-description-field.is-strong {
+  border-color: color-mix(in srgb, var(--reverse-indigo) 28%, var(--color-border));
+  background: color-mix(in srgb, var(--reverse-indigo) 6%, var(--color-surface));
+}
+
+.reverse-description-field.is-negative {
+  border-color: color-mix(in srgb, var(--reverse-rose) 24%, var(--color-border));
+  background: color-mix(in srgb, var(--reverse-rose) 5%, var(--color-surface));
+}
+
+.reverse-description-field.is-compact p {
+  color: color-mix(in srgb, var(--reverse-indigo) 76%, var(--color-text));
+  font-weight: 820;
+}
+
+.reverse-description-field > span {
+  color: color-mix(in srgb, var(--reverse-blue) 78%, var(--color-text));
+  font-size: 11px;
+  font-weight: 950;
+}
+
+.reverse-description-field p {
+  margin: 0;
+  color: var(--color-text);
+  font-size: 12.6px;
+  font-weight: 700;
+  line-height: 1.62;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.reverse-description-field.is-character-summary div {
+  display: grid;
+  gap: 5px;
+}
+
+.reverse-description-field.is-character-summary p {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  gap: 7px;
+}
+
+.reverse-description-field.is-character-summary strong {
+  color: var(--reverse-amber);
+  font-size: 11.5px;
+  font-weight: 950;
+}
+
+.reverse-block {
+  display: grid;
+  gap: 7px;
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 72%, transparent);
+  border-radius: 8px;
+  background: var(--color-bg);
+}
+
+.reverse-block.is-strong {
+  border-color: color-mix(in srgb, var(--reverse-indigo) 42%, var(--color-border));
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--reverse-indigo) 10%, transparent), color-mix(in srgb, var(--reverse-purple) 8%, transparent), transparent 68%),
+    var(--color-bg);
+}
+
+.reverse-block-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.reverse-block-title h3 + button { margin-left: auto; }
+
+.reverse-block h3 {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: color-mix(in srgb, var(--reverse-blue) 82%, var(--color-text));
+  font-size: 12px;
+  font-weight: 950;
+  line-height: 1.25;
+}
+
+.reverse-block h3 span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--reverse-green) 10%, var(--color-surface));
+  color: var(--reverse-green);
+  font-size: 10px;
+  font-weight: 950;
+}
+
+.reverse-block-title button {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 62px;
+  min-height: 26px;
+  padding: 0 7px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 80%, transparent);
+  border-radius: 7px;
+  background: var(--color-surface);
+  color: var(--color-text-2);
+  font-size: 11px;
+  font-weight: 850;
+  cursor: pointer;
+  transition: border-color 0.14s ease, background 0.14s ease, color 0.14s ease;
+}
+
+.reverse-block-title button:hover {
+  border-color: color-mix(in srgb, var(--reverse-blue) 34%, var(--color-border));
+  background: color-mix(in srgb, var(--reverse-blue) 8%, var(--color-surface));
+  color: var(--reverse-blue);
+}
+
+.reverse-block p {
+  margin: 0;
+  color: var(--color-text);
+  font-size: 12.8px;
+  font-weight: 680;
+  line-height: 1.68;
+  white-space: pre-wrap;
+}
+
+.reverse-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.reverse-chip-list span {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 4px 7px;
+  border: 1px solid color-mix(in srgb, var(--reverse-blue) 16%, var(--color-border));
+  border-radius: 7px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.reverse-chip-list span:nth-child(3n + 1) {
+  border-color: color-mix(in srgb, var(--reverse-cyan) 22%, var(--color-border));
+  background: color-mix(in srgb, var(--reverse-cyan) 5%, var(--color-surface));
+}
+
+.reverse-chip-list span:nth-child(3n + 2) {
+  border-color: color-mix(in srgb, var(--reverse-green) 22%, var(--color-border));
+  background: color-mix(in srgb, var(--reverse-green) 5%, var(--color-surface));
+}
+
+.reverse-chip-list span:nth-child(3n) {
+  border-color: color-mix(in srgb, var(--reverse-amber) 24%, var(--color-border));
+  background: color-mix(in srgb, var(--reverse-amber) 6%, var(--color-surface));
+}
+
+.reverse-copy-actions button:nth-child(3n + 1),
+.reverse-block-title button:nth-child(3n + 1) {
+  border-color: color-mix(in srgb, var(--reverse-cyan) 26%, var(--color-border));
+  color: color-mix(in srgb, var(--reverse-cyan) 82%, var(--color-text));
+}
+
+.reverse-copy-actions button:nth-child(3n + 2),
+.reverse-block-title button:nth-child(3n + 2) {
+  border-color: color-mix(in srgb, var(--reverse-indigo) 24%, var(--color-border));
+  color: color-mix(in srgb, var(--reverse-indigo) 82%, var(--color-text));
+}
+
+.reverse-copy-actions button:nth-child(3n),
+.reverse-block-title button:nth-child(3n) {
+  border-color: color-mix(in srgb, var(--reverse-orange) 24%, var(--color-border));
+  color: color-mix(in srgb, var(--reverse-orange) 82%, var(--color-text));
+}
+
+.reverse-block.is-dense .reverse-chip-list span {
+  padding: 4px 7px;
+  font-size: 11px;
+}
+
+@media (max-width: 860px) {
+  html.reverse-page-locked .app-main-full {
+    height: auto;
+    overflow: visible;
+    padding: 0 !important;
+  }
+
+  .reverse-shell {
+    gap: 8px;
+    padding: 8px;
+    height: auto;
+    overflow: visible;
+  }
+
+  .reverse-workbench {
+    grid-template-columns: 1fr;
+    gap: 8px;
+    height: auto;
+  }
+
+  .reverse-left {
+    padding: 10px;
+    height: auto;
+    overflow: visible;
+  }
+
+  .reverse-head h1 {
+    font-size: 19px;
+  }
+
+  .reverse-dropzone {
+    height: 300px;
+  }
+
+  .reverse-result {
+    min-height: 360px;
+    height: auto;
+  }
+
+  .reverse-dropzone.has-image {
+    min-height: 0;
+  }
+
+  .reverse-result-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .reverse-copy-actions {
+    justify-content: flex-start;
+  }
+
+  .reverse-sections {
+    padding: 10px;
+    height: auto;
+    overflow: visible;
+  }
+
+  .reverse-language-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .reverse-mode-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .reverse-mode-tabs {
+    width: 100%;
+  }
+
+  .reverse-result-mode-badge {
+    grid-template-columns: 1fr;
+    align-items: start;
+    padding: 9px 10px;
+  }
+
+  .reverse-result-mode-badge span {
+    white-space: normal;
+  }
+
+  .reverse-language-tabs {
+    width: 100%;
+  }
+
+  .reverse-description-compare {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+
+  .reverse-weight-toggle {
+    justify-content: center;
+  }
+}
+
+@media (max-width: 520px) {
+  .reverse-shell {
+    padding: 6px;
+    height: auto;
+  }
+
+  .reverse-workbench {
+    width: 100%;
+    height: auto;
+  }
+
+  .reverse-head {
+    display: grid;
+    gap: 8px;
+  }
+
+  .reverse-head small {
+    max-width: 100%;
+    justify-self: start;
+  }
+
+  .reverse-dropzone {
+    height: 244px;
+  }
+
+  .reverse-empty {
+    place-items: start center;
+    min-height: 126px;
+    padding: 28px 14px 18px;
+  }
+
+  .reverse-filebar {
+    grid-template-columns: auto minmax(0, 1fr) 28px;
+  }
+
+  .reverse-filebar strong {
+    display: none;
+  }
+
+  .reverse-copy-actions {
+    width: 100%;
+  }
+
+  .reverse-copy-actions button {
+    flex: 1 1 130px;
+    justify-content: center;
+  }
+
+  .reverse-result-head {
+    padding: 11px;
+  }
+
+  .reverse-result {
+    min-height: 200px;
+    height: auto;
+  }
+
+  .reverse-block {
+    padding: 9px;
+  }
+
+  .reverse-block-title {
+    align-items: flex-start;
+  }
+
+  .reverse-description-panel-head {
+    grid-template-columns: 1fr;
+  }
+
+  .reverse-description-panel-head button {
+    width: 100%;
+  }
+
+  .reverse-description-field.is-character-summary p {
+    grid-template-columns: 1fr;
+    gap: 3px;
+  }
+
+  .reverse-character-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .reverse-block-title button {
+    min-width: 54px;
+    padding: 0 6px;
+  }
+
+  .reverse-tag-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .reverse-tag-prompt p {
+    max-height: 180px;
+  }
+}

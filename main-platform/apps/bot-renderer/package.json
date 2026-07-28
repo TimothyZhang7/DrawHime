@@ -1,0 +1,21 @@
+{
+  "name": "@aiimage/bot-renderer",
+  "private": true,
+  "version": "3.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch --import tsx src/main.ts",
+    "build": "tsc -p tsconfig.json",
+    "type-check": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aiimage/core-utils": "workspace:*",
+    "@aiimage/shared-contracts": "workspace:*",
+    "puppeteer": "^24.43.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.20",
+    "tsx": "^4.22.4",
+    "typescript": "~5.9.3"
+  }
+}

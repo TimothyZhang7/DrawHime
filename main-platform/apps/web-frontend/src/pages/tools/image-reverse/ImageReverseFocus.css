@@ -1,0 +1,83 @@
+/* 短期单项版本本地结果的兼容展示样式。 */
+.reverse-focused-toolbar,
+.reverse-focused-observations > div,
+.reverse-focused-prompt > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.reverse-focused-result {
+  display: grid;
+  gap: 10px;
+}
+
+.reverse-focused-copy,
+.reverse-focused-prompt button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 31px;
+  padding: 0 9px;
+  border: 1px solid color-mix(in srgb, var(--reverse-blue) 28%, var(--color-border));
+  border-radius: 7px;
+  background: var(--color-surface);
+  color: var(--reverse-blue);
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.reverse-focused-summary,
+.reverse-focused-observations,
+.reverse-focused-prompt {
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 78%, transparent);
+  border-radius: 8px;
+  background: var(--color-surface);
+}
+
+.reverse-focused-summary > span,
+.reverse-focused-observations strong,
+.reverse-focused-prompt strong {
+  color: var(--reverse-blue);
+  font-size: 12px;
+  font-weight: 950;
+}
+
+.reverse-focused-summary p,
+.reverse-focused-prompt p {
+  margin: 7px 0 0;
+  color: var(--color-text);
+  line-height: 1.72;
+  white-space: pre-wrap;
+}
+
+.reverse-focused-observations > div span {
+  color: var(--color-text-2);
+  font-size: 11px;
+}
+
+.reverse-focused-observations ol {
+  display: grid;
+  gap: 7px;
+  margin: 9px 0 0;
+  padding-left: 22px;
+}
+
+.reverse-focused-observations li {
+  color: var(--color-text);
+  line-height: 1.58;
+}
+
+.reverse-focused-prompt {
+  border-color: color-mix(in srgb, var(--reverse-cyan) 32%, var(--color-border));
+  background: color-mix(in srgb, var(--reverse-cyan) 5%, var(--color-surface));
+}
+
+@media (max-width: 520px) {
+  .reverse-focused-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

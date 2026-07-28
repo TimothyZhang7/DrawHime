@@ -1,0 +1,12 @@
+{
+  "name": "@aiimage/local-model-platform",
+  "private": true,
+  "version": "3.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm --prefix shared run build && pnpm --prefix backend run dev",
+    "build": "pnpm --prefix shared run build && pnpm --prefix backend run build && pnpm --prefix web run build && pnpm --prefix admin run build && pnpm --prefix worker run build",
+    "type-check": "pnpm --prefix shared run type-check && pnpm --prefix backend run type-check && pnpm --prefix web run type-check && pnpm --prefix admin run type-check && pnpm --prefix worker run type-check"
+  },
+  "dependencies": {}
+}

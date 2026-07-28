@@ -1,0 +1,1127 @@
+/* 工作台消息区样式：负责聊天气泡、附件、工具调用和绘图确认卡片。 */
+.workbench-message-list {
+  min-height: 0;
+  overflow: auto;
+  padding: 18px 16px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-bg) 42%, var(--color-surface)), var(--color-surface) 34%),
+    var(--color-surface);
+}
+
+.workbench-message-loading,
+.workbench-empty-chat {
+  min-height: 240px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--color-text-2);
+  font-size: 13px;
+  font-weight: 780;
+}
+
+.workbench-empty-chat {
+  flex-direction: column;
+}
+
+.workbench-empty-chat strong {
+  color: var(--color-text);
+  font-size: 15px;
+}
+
+.workbench-message {
+  position: relative;
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 9px;
+  margin-bottom: 14px;
+}
+
+.workbench-message.is-user {
+  grid-template-columns: minmax(0, 1fr) 30px;
+}
+
+.workbench-message.is-user .workbench-message-avatar {
+  grid-column: 2;
+  grid-row: 1;
+  background: var(--color-primary);
+  color: #fff;
+}
+
+.workbench-message.is-user .workbench-message-frame {
+  grid-column: 1;
+  justify-self: end;
+}
+
+.workbench-message.is-user .workbench-message-bubble {
+  background: var(--color-primary);
+  color: #fff;
+  border-color: color-mix(in srgb, var(--color-primary) 80%, var(--color-border));
+}
+
+.workbench-message-avatar {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+.workbench-message-frame {
+  /* 气泡和悬浮元信息共享同一个主宽度，元信息不参与消息气泡内部布局。 */
+  position: relative;
+  grid-column: 2;
+  justify-self: start;
+  width: fit-content;
+  max-width: min(760px, 92%);
+  min-width: 0;
+  display: grid;
+}
+
+.workbench-message-bubble {
+  max-width: 100%;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.workbench-message.is-pending .workbench-message-bubble {
+  border-color: color-mix(in srgb, var(--color-primary) 38%, var(--color-border));
+  background: color-mix(in srgb, var(--color-primary-soft) 54%, var(--color-surface));
+}
+
+.workbench-message.is-error .workbench-message-bubble {
+  border-color: color-mix(in srgb, var(--color-error) 38%, var(--color-border));
+  background: var(--color-error-soft);
+  color: var(--color-error);
+}
+
+/* 已提交绘图摘要直接使用消息气泡做唯一外框，避免气泡内再出现第二层卡片。 */
+.workbench-message.has-submitted-draw .workbench-message-frame {
+  max-width: min(680px, 92%);
+}
+
+.workbench-message.has-submitted-draw.is-submitted-running .workbench-message-bubble {
+  border-color: color-mix(in srgb, var(--color-primary) 34%, var(--color-border));
+  background: color-mix(in srgb, var(--color-primary-soft) 34%, var(--color-surface));
+}
+
+.workbench-message.has-submitted-draw.is-submitted-success .workbench-message-bubble {
+  border-color: color-mix(in srgb, var(--color-success) 34%, var(--color-border));
+  background: var(--color-success-soft);
+}
+
+.workbench-message.has-submitted-draw.is-submitted-failed .workbench-message-bubble {
+  border-color: color-mix(in srgb, var(--color-error) 42%, var(--color-border));
+  background: var(--color-error-soft);
+}
+
+.workbench-message.has-submitted-draw.is-submitted-rejected .workbench-message-bubble {
+  border-color: color-mix(in srgb, var(--color-text-2) 30%, var(--color-border));
+  background: color-mix(in srgb, var(--color-bg) 76%, var(--color-surface));
+}
+
+.workbench-message-bubble p {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+/* assistant 消息支持 Markdown；只负责正文排版，不影响工具卡和生成结果布局。 */
+.workbench-message-markdown {
+  color: inherit;
+  font-size: 13px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.workbench-message-markdown > :first-child {
+  margin-top: 0;
+}
+
+.workbench-message-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.workbench-message-markdown p {
+  margin: 0 0 8px;
+  white-space: normal;
+}
+
+.workbench-message-markdown h1,
+.workbench-message-markdown h2,
+.workbench-message-markdown h3,
+.workbench-message-markdown h4,
+.workbench-message-markdown h5,
+.workbench-message-markdown h6 {
+  margin: 10px 0 6px;
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1.42;
+}
+
+.workbench-message-markdown h1,
+.workbench-message-markdown h2 {
+  font-size: 14px;
+}
+
+.workbench-message-markdown ul,
+.workbench-message-markdown ol {
+  margin: 6px 0 8px;
+  padding-left: 18px;
+}
+
+.workbench-message-markdown li {
+  margin: 3px 0;
+  padding-left: 2px;
+}
+
+.workbench-message-markdown li input[type="checkbox"] {
+  width: 13px;
+  height: 13px;
+  margin: 0 5px 0 0;
+  vertical-align: -2px;
+}
+
+.workbench-message-markdown strong {
+  color: var(--color-text);
+  font-weight: 900;
+}
+
+.workbench-message-markdown em {
+  font-style: italic;
+}
+
+.workbench-message-markdown hr {
+  height: 1px;
+  margin: 10px 0;
+  border: 0;
+  background: color-mix(in srgb, var(--color-border) 80%, transparent);
+}
+
+.workbench-message-markdown blockquote {
+  margin: 8px 0;
+  padding: 6px 9px;
+  border-left: 3px solid color-mix(in srgb, var(--color-primary) 52%, var(--color-border));
+  border-radius: 0 6px 6px 0;
+  background: color-mix(in srgb, var(--color-bg) 68%, transparent);
+  color: var(--color-text-2);
+}
+
+.workbench-message-markdown code {
+  padding: 1px 4px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--color-bg) 82%, var(--color-surface));
+  color: var(--color-text);
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+}
+
+.workbench-message-markdown pre {
+  max-width: 100%;
+  overflow: auto;
+  margin: 8px 0;
+  padding: 9px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 80%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--color-bg) 82%, var(--color-surface));
+}
+
+.workbench-message-markdown pre code {
+  padding: 0;
+  background: transparent;
+  white-space: pre;
+}
+
+.workbench-message-markdown a {
+  color: var(--color-primary);
+  font-weight: 820;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.workbench-message-markdown table {
+  width: 100%;
+  max-width: 100%;
+  margin: 8px 0;
+  border-collapse: collapse;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+
+.workbench-message-markdown th,
+.workbench-message-markdown td {
+  padding: 5px 7px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 84%, transparent);
+  text-align: left;
+  vertical-align: top;
+}
+
+.workbench-message-markdown th {
+  background: color-mix(in srgb, var(--color-bg) 76%, var(--color-surface));
+  color: var(--color-text);
+  font-weight: 900;
+}
+
+.workbench-message-markdown del {
+  color: var(--color-text-2);
+}
+
+.workbench-markdown-image-disabled {
+  display: inline-flex;
+  max-width: 100%;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--color-bg) 80%, transparent);
+  color: var(--color-text-2);
+  font-size: 11px;
+  font-weight: 820;
+}
+
+.workbench-message-attachments {
+  /* 消息内参考图必须横向排列，窄气泡下用横向滚动而不是换行竖排。 */
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  gap: 8px;
+  max-width: 100%;
+  margin-bottom: 9px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 2px;
+  scrollbar-width: thin;
+}
+
+.workbench-message-attachments img {
+  width: 112px;
+  min-width: 112px;
+  height: 112px;
+  object-fit: cover;
+  border: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+  border-radius: 8px;
+  background: var(--color-bg);
+}
+
+/* 工作台消息内的私有参考图需要先鉴权拉取，加载期间使用稳定占位避免破图。 */
+.workbench-message-attachment-fallback {
+  width: 112px;
+  min-width: 112px;
+  height: 112px;
+  display: grid;
+  place-items: center;
+  gap: 4px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-bg) 72%, var(--color-surface));
+  color: var(--color-text-2);
+  font-size: 11px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.workbench-message-meta-line {
+  position: absolute;
+  z-index: 6;
+  top: calc(100% + 2px);
+  left: 0;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  padding: 0 1px;
+  color: var(--color-text-2);
+  font-size: 10px;
+  font-weight: 820;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-3px);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.workbench-message-meta-left {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.workbench-message-meta-left span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workbench-message-meta-time {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: inherit;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.workbench-message.is-user .workbench-message-meta-line {
+  right: 0;
+  left: auto;
+  color: var(--color-text-2);
+}
+
+.workbench-message:hover .workbench-message-meta-line,
+.workbench-message:focus-within .workbench-message-meta-line {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* 失败消息允许重新提交上一条用户消息；按钮只触发原工作台流式接口，不绕过后端 Agent。 */
+.workbench-message-retry {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 9px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--color-error) 42%, var(--color-border));
+  border-radius: 7px;
+  background: var(--color-surface);
+  color: var(--color-error);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 860;
+}
+
+.workbench-message-retry:disabled {
+  opacity: .62;
+  cursor: not-allowed;
+}
+
+.workbench-tool-calls {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.workbench-message.has-submitted-draw .workbench-tool-calls {
+  margin-top: 0;
+}
+
+.workbench-tool-call {
+  min-height: 26px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 0 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: 11px;
+  font-weight: 820;
+}
+
+.workbench-tool-call small {
+  flex-basis: 100%;
+  padding: 0 0 6px 18px;
+  color: var(--color-text-2);
+  font-size: 10px;
+  font-weight: 720;
+  line-height: 1.35;
+}
+
+.workbench-tool-call.is-error {
+  border-color: color-mix(in srgb, var(--color-error) 42%, var(--color-border));
+  background: var(--color-error-soft);
+  color: var(--color-error);
+}
+
+.workbench-draw-proposal {
+  width: min(100%, 680px);
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 32%, var(--color-border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-primary-soft) 35%, var(--color-surface));
+  color: var(--color-text);
+}
+
+.workbench-draw-proposal.is-rejected {
+  border-color: color-mix(in srgb, var(--color-text-2) 30%, var(--color-border));
+  background: color-mix(in srgb, var(--color-bg) 72%, var(--color-surface));
+}
+
+.workbench-draw-proposal.is-approved,
+.workbench-draw-proposal.is-success {
+  border-color: color-mix(in srgb, var(--color-success) 34%, var(--color-border));
+  background: var(--color-success-soft);
+}
+
+.workbench-draw-proposal.is-error {
+  border-color: color-mix(in srgb, var(--color-error) 42%, var(--color-border));
+  background: var(--color-error-soft);
+}
+
+.workbench-draw-proposal-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-text);
+  font-size: 12px;
+  font-weight: 860;
+}
+
+.workbench-draw-proposal-head span {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workbench-draw-proposal-head strong {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-primary-soft) 78%, var(--color-surface));
+  color: var(--color-primary);
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.workbench-draw-reference-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.workbench-draw-reference-row img {
+  width: 52px;
+  height: 52px;
+  flex: 0 0 auto;
+  object-fit: cover;
+  border: 1px solid color-mix(in srgb, var(--color-border) 74%, transparent);
+  border-radius: 7px;
+  background: var(--color-bg);
+}
+
+.workbench-draw-reason {
+  color: var(--color-text-2);
+  font-size: 11px;
+  font-weight: 760;
+  line-height: 1.5;
+}
+
+.workbench-draw-options {
+  display: grid;
+  gap: 9px;
+}
+
+.workbench-draw-option {
+  display: grid;
+  gap: 7px;
+  padding: 9px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 74%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-surface) 86%, var(--color-bg));
+}
+
+.workbench-draw-option.is-selected {
+  border-color: color-mix(in srgb, var(--color-success) 44%, var(--color-border));
+  background: color-mix(in srgb, var(--color-success-soft) 62%, var(--color-surface));
+}
+
+.workbench-draw-option-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.workbench-draw-option-head strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text);
+  font-size: 12px;
+  font-weight: 880;
+}
+
+.workbench-draw-option-head span {
+  flex: 0 0 auto;
+  color: var(--color-success);
+  font-size: 10px;
+  font-weight: 860;
+}
+
+.workbench-draw-option small {
+  color: var(--color-text-2);
+  font-size: 11px;
+  font-weight: 740;
+  line-height: 1.45;
+}
+
+.workbench-draw-prompt {
+  max-height: 220px;
+  overflow: auto;
+  margin: 0;
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 72%, transparent);
+  border-radius: 7px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.62;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.workbench-draw-option-submit {
+  min-height: 30px;
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 12px;
+  border: 1px solid color-mix(in srgb, var(--color-success) 42%, var(--color-border));
+  border-radius: 7px;
+  background: var(--color-success);
+  color: #fff;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 840;
+}
+
+.workbench-draw-option-submit:disabled {
+  opacity: .62;
+  cursor: not-allowed;
+}
+
+.workbench-draw-cooldown {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--color-warning);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.workbench-draw-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.workbench-draw-actions button {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 840;
+}
+
+.workbench-draw-actions button:disabled {
+  opacity: .62;
+  cursor: not-allowed;
+}
+
+.workbench-draw-actions .is-approve {
+  border-color: color-mix(in srgb, var(--color-success) 42%, var(--color-border));
+  background: var(--color-success);
+  color: #fff;
+}
+
+.workbench-draw-actions .is-reject {
+  background: var(--color-surface);
+  color: var(--color-text-2);
+}
+
+.workbench-draw-decision {
+  color: var(--color-text-2);
+  font-size: 11px;
+  font-weight: 780;
+}
+
+.workbench-submitted-draw {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  color: var(--color-text);
+}
+
+/* 有最终图时，结果图成为主内容区：单图大方图，多图横向一行展示。 */
+.workbench-submitted-draw.has-final-images {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+}
+
+.workbench-submitted-draw-main {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.workbench-submitted-draw-title {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-text);
+  font-size: 12px;
+  font-weight: 880;
+}
+
+.workbench-submitted-draw-title span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workbench-submitted-draw-meta {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--color-text-2);
+  font-size: 10px;
+  font-weight: 780;
+}
+
+.workbench-submitted-draw-meta strong {
+  color: var(--color-text-2);
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.workbench-submitted-draw-meta strong.is-success {
+  color: var(--color-success);
+}
+
+.workbench-submitted-draw-meta strong.is-running {
+  color: var(--color-primary);
+}
+
+.workbench-submitted-draw-meta strong.is-failed {
+  color: var(--color-error);
+}
+
+.workbench-submitted-draw-meta strong.is-rejected {
+  color: var(--color-text-2);
+}
+
+.workbench-submitted-draw-strip {
+  max-width: 236px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.workbench-submitted-draw.has-final-images .workbench-submitted-draw-strip {
+  grid-column: 1 / -1;
+  max-width: 100%;
+  justify-content: flex-start;
+  align-items: stretch;
+  flex-wrap: nowrap;
+  gap: 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 2px;
+  scrollbar-width: thin;
+}
+
+.workbench-submitted-draw-thumb {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--color-border) 72%, transparent);
+  border-radius: 7px;
+  background: var(--color-surface);
+  cursor: zoom-in;
+}
+
+.workbench-submitted-draw-strip.is-single .workbench-submitted-draw-thumb {
+  width: 168px;
+  height: 168px;
+}
+
+.workbench-submitted-draw-strip.is-multi .workbench-submitted-draw-thumb {
+  width: 128px;
+  height: 128px;
+}
+
+.workbench-submitted-draw-thumb img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  transition: transform 160ms ease, filter 160ms ease;
+}
+
+.workbench-submitted-draw-thumb:hover img {
+  transform: scale(1.055);
+  filter: saturate(1.08);
+}
+
+.workbench-submitted-draw-empty {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px;
+  border: 1px dashed color-mix(in srgb, var(--color-border) 82%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--color-surface) 74%, transparent);
+  color: var(--color-text-2);
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.workbench-submitted-draw-toggle {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 88%, transparent);
+  border-radius: 7px;
+  background: var(--color-surface);
+  color: var(--color-primary);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 860;
+  white-space: nowrap;
+}
+
+.workbench-submitted-draw.has-final-images .workbench-submitted-draw-toggle {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: start;
+  justify-self: end;
+}
+
+.workbench-submitted-draw-detail {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--color-border) 74%, transparent);
+}
+
+.workbench-task-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.workbench-task-links a {
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 8px;
+  border-radius: 7px;
+  background: var(--color-bg);
+  color: var(--color-primary);
+  font-size: 11px;
+  font-weight: 820;
+}
+
+.workbench-task-status-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 9px;
+}
+
+.workbench-task-status-card {
+  width: min(100%, 680px);
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 9px;
+  padding: 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-bg) 76%, var(--color-surface));
+}
+
+.workbench-task-status-card.is-success {
+  border-color: color-mix(in srgb, var(--color-success) 34%, var(--color-border));
+  background: var(--color-success-soft);
+}
+
+.workbench-task-status-card.is-failed {
+  border-color: color-mix(in srgb, var(--color-error) 42%, var(--color-border));
+  background: var(--color-error-soft);
+}
+
+.workbench-task-status-card.is-running,
+.workbench-task-status-card.is-finalizing {
+  border-color: color-mix(in srgb, var(--color-primary) 34%, var(--color-border));
+  background: color-mix(in srgb, var(--color-primary-soft) 34%, var(--color-surface));
+}
+
+.workbench-task-status-preview {
+  width: 72px;
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+  border-radius: 7px;
+  background: var(--color-surface);
+  color: var(--color-text-2);
+}
+
+.workbench-task-status-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.workbench-task-status-preview-button {
+  width: 100%;
+  height: 100%;
+  display: block;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  cursor: zoom-in;
+}
+
+.workbench-task-status-preview-button img {
+  display: block;
+  transition: transform 160ms ease, filter 160ms ease;
+}
+
+.workbench-task-status-preview-button:hover img {
+  transform: scale(1.045);
+  filter: saturate(1.08);
+}
+
+.workbench-task-status-preview-button:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.workbench-task-status-main {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 5px;
+}
+
+.workbench-task-status-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.workbench-task-status-head span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text);
+  font-size: 12px;
+  font-weight: 860;
+}
+
+.workbench-task-status-head strong {
+  flex: 0 0 auto;
+  color: var(--color-text-2);
+  font-size: 11px;
+  font-weight: 860;
+}
+
+.workbench-task-status-head strong.is-success {
+  color: var(--color-success);
+}
+
+.workbench-task-status-head strong.is-failed {
+  color: var(--color-error);
+}
+
+.workbench-task-status-head strong.is-running,
+.workbench-task-status-head strong.is-finalizing {
+  color: var(--color-primary);
+}
+
+.workbench-task-status-meta,
+.workbench-task-status-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--color-text-2);
+  font-size: 10px;
+  font-weight: 760;
+}
+
+.workbench-task-status-meta span {
+  min-width: 0;
+}
+
+.workbench-task-status-main p {
+  margin: 0;
+  color: var(--color-error);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.workbench-task-status-actions a {
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 7px;
+  border-radius: 6px;
+  background: var(--color-surface);
+  color: var(--color-primary);
+  font-size: 10px;
+  font-weight: 840;
+}
+
+@media (max-width: 560px) {
+  /* 手机端消息区优先给内容让路：隐藏头像占位，扩大气泡主宽度。 */
+  .workbench-message-list {
+    min-height: 0;
+    padding: 12px 9px;
+    overscroll-behavior: contain;
+  }
+
+  .workbench-message-loading,
+  .workbench-empty-chat {
+    min-height: 180px;
+  }
+
+  .workbench-message,
+  .workbench-message.is-user {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+    margin-bottom: 13px;
+  }
+
+  .workbench-message-avatar {
+    display: none;
+  }
+
+  .workbench-message-frame,
+  .workbench-message.is-user .workbench-message-frame,
+  .workbench-message.has-submitted-draw .workbench-message-frame {
+    grid-column: 1;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .workbench-message.is-user .workbench-message-frame {
+    justify-self: stretch;
+  }
+
+  .workbench-message-bubble {
+    max-width: 100%;
+    padding: 9px 10px;
+    border-radius: 9px;
+  }
+
+  .workbench-message-markdown,
+  .workbench-message-bubble p {
+    font-size: 12px;
+    line-height: 1.58;
+  }
+
+  .workbench-message-attachments img,
+  .workbench-message-attachment-fallback {
+    width: 86px;
+    min-width: 86px;
+    height: 86px;
+  }
+
+  .workbench-draw-proposal {
+    padding: 8px;
+  }
+
+  .workbench-draw-option {
+    padding: 8px;
+  }
+
+  .workbench-draw-prompt {
+    max-height: 180px;
+    padding: 8px;
+    font-size: 11px;
+    line-height: 1.55;
+  }
+
+  .workbench-submitted-draw {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+  }
+
+  .workbench-submitted-draw.has-final-images {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .workbench-submitted-draw-strip {
+    max-width: none;
+    justify-content: flex-start;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+
+  .workbench-submitted-draw-strip.is-single .workbench-submitted-draw-thumb,
+  .workbench-submitted-draw-strip.is-multi .workbench-submitted-draw-thumb {
+    width: min(128px, 38vw);
+    height: min(128px, 38vw);
+  }
+
+  .workbench-submitted-draw-toggle {
+    justify-self: end;
+  }
+
+  .workbench-task-status-card {
+    grid-template-columns: 58px minmax(0, 1fr);
+  }
+
+  .workbench-task-status-preview {
+    width: 58px;
+  }
+}

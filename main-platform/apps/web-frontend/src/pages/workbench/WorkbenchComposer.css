@@ -1,0 +1,517 @@
+/* 工作台输入区样式：负责邮箱提醒、图片附件、文本输入和发送按钮。 */
+.workbench-composer {
+  min-height: 0;
+  padding: 12px;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.workbench-email-warning {
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 8px;
+  padding: 0 10px;
+  border: 1px solid #fed7aa;
+  border-radius: 8px;
+  background: #fff7ed;
+  color: #9a3412;
+  font-size: 12px;
+  font-weight: 740;
+}
+
+.workbench-email-warning span {
+  flex: 1 1 auto;
+}
+
+.workbench-email-warning a {
+  flex: 0 0 auto;
+  color: #9a3412;
+  font-weight: 860;
+}
+
+.workbench-input-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 94px;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.workbench-reference-toolbar {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+/* 工作台参考图上传区采用紧凑胶片布局，避免挤占 Agent 输入空间。 */
+.workbench-reference-board {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 82%, transparent);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--color-surface) 88%, var(--color-bg)) 0%, var(--color-surface) 58%),
+    var(--color-surface);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .68);
+}
+
+.workbench-reference-board.has-images {
+  border-color: color-mix(in srgb, var(--color-primary) 30%, var(--color-border));
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--color-primary-soft) 28%, var(--color-surface)) 0%, var(--color-surface) 64%),
+    var(--color-surface);
+}
+
+.workbench-reference-board-head {
+  min-height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.workbench-reference-board-head div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.workbench-reference-board-head strong {
+  color: var(--color-text);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0;
+}
+
+.workbench-reference-board-head span {
+  color: var(--color-text-2);
+  font-size: 11px;
+  font-weight: 740;
+}
+
+.workbench-reference-close {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--color-border) 80%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-bg) 54%, var(--color-surface));
+  color: var(--color-text-2);
+  cursor: pointer;
+}
+
+.workbench-reference-close:hover {
+  border-color: color-mix(in srgb, var(--color-primary) 36%, var(--color-border));
+  color: var(--color-primary);
+}
+
+.workbench-reference-add-tile.is-disabled {
+  opacity: .58;
+  cursor: not-allowed;
+}
+
+.workbench-reference-grid {
+  min-height: 70px;
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 1px;
+  scrollbar-width: thin;
+}
+
+.workbench-reference-item,
+.workbench-reference-add-tile {
+  position: relative;
+  width: 68px;
+  min-width: 68px;
+  height: 68px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--color-border) 76%, transparent);
+  border-radius: 8px;
+  background: var(--color-surface);
+}
+
+.workbench-reference-add-tile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  flex-direction: column;
+  border: 1px dashed color-mix(in srgb, var(--color-primary) 42%, var(--color-border));
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-primary-soft) 24%, var(--color-surface)) 0%, var(--color-surface) 100%);
+  color: var(--color-primary);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 860;
+  line-height: 1.2;
+}
+
+.workbench-reference-board:not(.has-images) .workbench-reference-grid {
+  min-height: 54px;
+}
+
+.workbench-reference-board:not(.has-images) .workbench-reference-add-tile {
+  width: 100%;
+  min-width: 0;
+  height: 54px;
+  flex-direction: row;
+  justify-content: flex-start;
+  padding: 0 14px;
+}
+
+.workbench-reference-add-tile:hover {
+  border-color: color-mix(in srgb, var(--color-primary) 64%, var(--color-border));
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-primary-soft) 44%, var(--color-surface)) 0%, var(--color-surface) 100%);
+}
+
+.workbench-reference-add-tile span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workbench-reference-native-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  font-size: 100px;
+}
+
+.workbench-reference-native-input::file-selector-button {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.workbench-reference-native-input:disabled,
+.workbench-reference-native-input:disabled::file-selector-button {
+  cursor: not-allowed;
+}
+
+.workbench-reference-item img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.workbench-reference-item::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .22), inset 0 -22px 18px rgba(15, 23, 42, .18);
+}
+
+.workbench-reference-uploading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(15, 23, 42, .38);
+  color: #fff;
+}
+
+/* 上传失败时仍保留本地缩略图，并用短错误条说明不能提交该参考图。 */
+.workbench-reference-error {
+  position: absolute;
+  inset: auto 4px 4px 4px;
+  max-height: 34px;
+  overflow: hidden;
+  padding: 3px 4px;
+  border-radius: 6px;
+  background: rgba(185, 28, 28, .88);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 820;
+  line-height: 1.25;
+  text-align: center;
+}
+
+.workbench-reference-item span {
+  position: absolute;
+  left: 5px;
+  bottom: 5px;
+  min-width: 17px;
+  height: 17px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, .76);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.workbench-reference-item button {
+  position: absolute;
+  right: 5px;
+  top: 5px;
+  width: 21px;
+  height: 21px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, .72);
+  color: #fff;
+  cursor: pointer;
+}
+
+.workbench-reference-item button:hover {
+  background: rgba(185, 28, 28, .9);
+}
+
+.workbench-input-shell textarea {
+  width: 100%;
+  height: 78px;
+  min-height: 78px;
+  max-height: 78px;
+  resize: none;
+  overflow: auto;
+  padding: 11px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-bg) 46%, var(--color-surface));
+  color: var(--color-text);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.65;
+  outline: none;
+}
+
+.workbench-input-shell textarea:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 16%, transparent);
+}
+
+.workbench-input-shell > button {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--color-primary);
+  color: #fff;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.workbench-input-shell > button:disabled {
+  background: #d1d5db;
+  color: #9ca3af;
+  cursor: not-allowed;
+}
+
+.workbench-attachment-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.workbench-attachment-chip {
+  position: relative;
+  width: 58px;
+  height: 58px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--color-bg);
+}
+
+.workbench-attachment-chip img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.workbench-attachment-chip button {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(15, 23, 42, .72);
+  color: #fff;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.workbench-input-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 7px;
+  color: var(--color-text-2);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.workbench-input-meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.workbench-upload-button {
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.workbench-upload-button:disabled {
+  opacity: .58;
+  cursor: not-allowed;
+}
+
+.workbench-upload-button.is-active {
+  border-color: color-mix(in srgb, var(--color-primary) 42%, var(--color-border));
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+@media (max-width: 560px) {
+  /* 手机端输入区保持短而稳定，避免参考图和发送按钮挤压消息列表。 */
+  .workbench-composer {
+    padding: 8px;
+    border-top-color: color-mix(in srgb, var(--color-border) 80%, transparent);
+  }
+
+  .workbench-email-warning {
+    min-height: 28px;
+    margin-bottom: 6px;
+    padding: 5px 8px;
+    font-size: 11px;
+    line-height: 1.3;
+  }
+
+  .workbench-input-shell {
+    grid-template-columns: minmax(0, 1fr) 44px;
+    gap: 6px;
+    align-items: stretch;
+  }
+
+  .workbench-reference-toolbar,
+  .workbench-reference-board {
+    grid-column: 1 / -1;
+  }
+
+  .workbench-upload-button {
+    height: 28px;
+    border-radius: 8px;
+  }
+
+  .workbench-reference-board {
+    gap: 6px;
+    padding: 7px;
+    border-radius: 8px;
+  }
+
+  .workbench-reference-board-head {
+    min-height: 20px;
+  }
+
+  .workbench-reference-board-head strong {
+    font-size: 11px;
+  }
+
+  .workbench-reference-board-head span {
+    font-size: 10px;
+  }
+
+  .workbench-reference-close {
+    width: 24px;
+    height: 24px;
+    border-radius: 7px;
+  }
+
+  .workbench-reference-grid {
+    min-height: 56px;
+    gap: 6px;
+  }
+
+  .workbench-reference-item,
+  .workbench-reference-add-tile {
+    width: 56px;
+    min-width: 56px;
+    height: 56px;
+    border-radius: 7px;
+  }
+
+  .workbench-reference-board:not(.has-images) .workbench-reference-grid,
+  .workbench-reference-board:not(.has-images) .workbench-reference-add-tile {
+    min-height: 44px;
+    height: 44px;
+  }
+
+  .workbench-input-shell textarea {
+    height: 56px;
+    min-height: 56px;
+    max-height: 96px;
+    padding: 9px 10px;
+    border-radius: 9px;
+    font-size: 13px;
+    line-height: 1.45;
+  }
+
+  .workbench-input-shell > button {
+    width: 44px;
+    height: 56px;
+    padding: 0;
+    border-radius: 9px;
+  }
+
+  .workbench-input-shell > button span {
+    display: none;
+  }
+
+  .workbench-input-meta {
+    align-items: flex-start;
+    flex-direction: row;
+    justify-content: space-between;
+    gap: 6px;
+    margin-top: 5px;
+    font-size: 10px;
+    line-height: 1.35;
+  }
+}

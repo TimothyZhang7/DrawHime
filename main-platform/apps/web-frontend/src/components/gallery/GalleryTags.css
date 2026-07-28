@@ -1,0 +1,83 @@
+/* 图库标签组件样式：使用后端固定配色，同名标签在所有页面保持一致。 */
+
+.gallery-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.gallery-tags.is-compact {
+  gap: 4px;
+}
+
+.gallery-tags.with-omit {
+  align-content: flex-start;
+  align-items: flex-start;
+  overflow: hidden;
+}
+
+.gallery-tag-chip {
+  max-width: 100%;
+  min-width: 0;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 6px;
+  border: 1px solid;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: transform .14s ease, filter .14s ease, box-shadow .14s ease;
+}
+
+.gallery-tags.is-compact .gallery-tag-chip {
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 6px;
+  font-size: 11px;
+}
+
+.gallery-tag-chip:hover {
+  filter: saturate(1.08);
+  transform: translateY(-1px);
+  box-shadow: 0 5px 14px rgba(15, 23, 42, .08);
+}
+
+.gallery-tag-chip:active {
+  transform: translateY(0);
+}
+
+.gallery-tag-chip.weight-high {
+  font-weight: 760;
+}
+
+.gallery-tag-chip.weight-low {
+  opacity: .86;
+}
+
+.gallery-tag-chip.is-active {
+  outline: 2px solid color-mix(in srgb, currentColor 42%, transparent);
+  outline-offset: 1px;
+  filter: saturate(1.12);
+}
+
+.gallery-tag-count {
+  margin-left: 4px;
+  opacity: .72;
+  font-size: .9em;
+  font-weight: 700;
+}
+
+.gallery-tag-omit {
+  flex-shrink: 0;
+  background: var(--color-bg);
+  color: var(--color-text-2);
+  border-color: var(--color-border);
+  cursor: help;
+}

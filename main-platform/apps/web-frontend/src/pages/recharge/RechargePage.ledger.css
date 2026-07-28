@@ -1,0 +1,156 @@
+/* 充值页流水模块样式：负责余额记录筛选、列表和分页展示。 */
+.recharge-ledger-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.recharge-ledger-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 12px;
+  border: 1px solid #bae6fd;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #f0f9ff 0%, #fff 74%);
+  color: var(--color-text-2);
+  font-size: 12px;
+}
+
+.recharge-ledger-summary strong {
+  color: #0369a1;
+  white-space: nowrap;
+}
+
+.recharge-ledger-filters {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(120px, 1fr)) auto;
+  align-items: end;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(203, 213, 225, .86);
+  border-radius: 8px;
+  background: linear-gradient(180deg, #fff 0%, #f8fafc 100%);
+}
+
+.recharge-ledger-filters label {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.recharge-ledger-filters label span {
+  color: var(--color-text-2);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.recharge-ledger-filters .input {
+  height: 36px;
+  min-height: 36px;
+  border-radius: 8px;
+  border-color: rgba(203, 213, 225, .9);
+  font-size: 12px;
+}
+
+.recharge-ledger-table {
+  border: 1px solid rgba(203, 213, 225, .86);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.recharge-ledger-head,
+.recharge-ledger-row {
+  display: grid;
+  grid-template-columns: 120px 92px minmax(120px, 1fr) 70px 70px 100px minmax(150px, 1fr) minmax(88px, 0.9fr);
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+}
+
+.recharge-ledger-head {
+  background: linear-gradient(180deg, #f8fafc 0%, #eef4f9 100%);
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.recharge-ledger-row {
+  border-top: 1px solid rgba(226, 232, 240, .95);
+  color: var(--color-text);
+  font-size: 12px;
+  transition: background-color .16s ease;
+}
+
+.recharge-ledger-row:hover {
+  background: #f8fafc;
+}
+
+.recharge-ledger-row time,
+.recharge-ledger-row small {
+  color: var(--color-text-2);
+}
+
+.recharge-ledger-row strong {
+  text-align: right;
+  font-size: 13px;
+}
+
+.recharge-ledger-row strong.is-income {
+  color: #047857;
+}
+
+.recharge-ledger-row strong.is-expense {
+  color: #b91c1c;
+}
+
+.recharge-ledger-kind {
+  width: fit-content;
+  min-width: 42px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.recharge-ledger-kind.is-free {
+  color: #047857;
+  background: #ecfdf5;
+  box-shadow: inset 0 0 0 1px rgba(16, 185, 129, .2);
+}
+
+.recharge-ledger-kind.is-paid {
+  color: #b45309;
+  background: #fffbeb;
+  box-shadow: inset 0 0 0 1px rgba(245, 158, 11, .22);
+}
+
+.recharge-ledger-after {
+  color: var(--color-text-2);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.recharge-ledger-empty {
+  padding: 28px 12px;
+  text-align: center;
+  color: var(--color-text-2);
+  font-size: 13px;
+  border-top: 1px solid var(--color-border);
+}
+
+.recharge-ledger-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+
+.recharge-ledger-pager span {
+  color: var(--color-text-2);
+  font-size: 12px;
+}

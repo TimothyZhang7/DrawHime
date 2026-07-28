@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "noImplicitAny": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "verbatimModuleSyntax": true,
+    "baseUrl": ".",
+    "paths": {
+      "@aiimage/shared-contracts": ["packages/shared-contracts/src/index.ts"],
+      "@aiimage/core-utils": ["packages/core-utils/src/index.ts"],
+      "@aiimage/local-model-platform-shared": ["apps/local-model-platform/shared/src/index.ts"]
+    }
+  }
+}

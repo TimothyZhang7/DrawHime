@@ -1,0 +1,249 @@
+/* 图片混淆工具页样式：单图工作台，操作简化为上传、混淆、解混淆、还原、下载。 */
+.scrambler-shell {
+  display: grid;
+  gap: 12px;
+}
+
+/* 混淆页返回入口只服务本页布局，避免继承图片拆分页的全屏拉伸样式。 */
+.scrambler-shell > .tool-back-strip {
+  width: min(760px, 100%);
+  min-height: 36px;
+  margin: 0 auto;
+  border-radius: 9px;
+}
+
+.scrambler-workbench {
+  display: grid;
+  gap: 12px;
+  width: min(760px, 100%);
+  margin: 0 auto;
+}
+
+.scrambler-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 2px 2px 0;
+}
+
+.scrambler-head h1 {
+  margin: 0;
+  color: var(--color-text);
+  font-size: 24px;
+  font-weight: 950;
+}
+
+.scrambler-head p {
+  margin: 6px 0 0;
+  max-width: 520px;
+  color: var(--color-text-2);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.55;
+}
+
+.scrambler-head > span {
+  flex-shrink: 0;
+  padding: 6px 9px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+  color: var(--color-text-2);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.scrambler-dropzone {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: min(62vh, 520px);
+  overflow: hidden;
+  border: 1px dashed color-mix(in srgb, var(--color-primary) 38%, var(--color-border));
+  border-radius: 12px;
+  background:
+    linear-gradient(45deg, color-mix(in srgb, var(--color-bg) 82%, #fff) 25%, transparent 25%),
+    linear-gradient(-45deg, color-mix(in srgb, var(--color-bg) 82%, #fff) 25%, transparent 25%),
+    var(--color-surface);
+  cursor: pointer;
+}
+
+.scrambler-dropzone.is-dragging {
+  border-color: var(--color-primary);
+  background:
+    linear-gradient(45deg, color-mix(in srgb, var(--color-primary-soft) 72%, var(--color-surface)) 25%, transparent 25%),
+    linear-gradient(-45deg, color-mix(in srgb, var(--color-primary-soft) 72%, var(--color-surface)) 25%, transparent 25%),
+    color-mix(in srgb, var(--color-primary-soft) 62%, var(--color-surface));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 16%, transparent);
+}
+
+.scrambler-dropzone.has-image {
+  min-height: min(68vh, 620px);
+  border-style: solid;
+  background: #101827;
+}
+
+.scrambler-dropzone.has-image.is-dragging::after {
+  position: absolute;
+  inset: 12px;
+  display: grid;
+  place-items: center;
+  border: 1px dashed rgba(255, 255, 255, 0.68);
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.58);
+  color: #fff;
+  content: "松开替换图片";
+  font-size: 15px;
+  font-weight: 950;
+  pointer-events: none;
+}
+
+.scrambler-dropzone input {
+  display: none;
+}
+
+.scrambler-dropzone div {
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  padding: 28px;
+  color: var(--color-primary);
+  text-align: center;
+}
+
+.scrambler-dropzone strong {
+  color: var(--color-text);
+  font-size: 16px;
+  font-weight: 950;
+}
+
+.scrambler-dropzone small {
+  color: var(--color-text-2);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.scrambler-dropzone img {
+  display: block;
+  max-width: 100%;
+  max-height: min(68vh, 620px);
+  object-fit: contain;
+}
+
+.scrambler-filebar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 4px 0 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface);
+}
+
+.scrambler-filebar span {
+  overflow: hidden;
+  color: var(--color-text-2);
+  font-size: 12px;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scrambler-filebar button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text-2);
+  cursor: pointer;
+}
+
+.scrambler-filebar button:hover {
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+.scrambler-alert {
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--color-error) 30%, var(--color-border));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-error) 8%, var(--color-surface));
+  color: var(--color-error);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.scrambler-actions {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.scrambler-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 42px;
+  border: 1px solid var(--color-border);
+  border-radius: 9px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 950;
+  cursor: pointer;
+  transition: transform 0.16s ease, border-color 0.16s ease, background 0.16s ease;
+}
+
+.scrambler-action:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--color-primary) 42%, var(--color-border));
+  transform: translateY(-1px);
+}
+
+.scrambler-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.scrambler-action.is-primary {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  color: #fff;
+}
+
+.scrambler-action.is-accent {
+  border-color: color-mix(in srgb, #e11d48 62%, var(--color-border));
+  background: color-mix(in srgb, #e11d48 10%, var(--color-surface));
+  color: #be123c;
+}
+
+@media (max-width: 700px) {
+  .scrambler-head {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .scrambler-head h1 {
+    font-size: 20px;
+  }
+
+  .scrambler-dropzone {
+    min-height: 280px;
+  }
+
+  .scrambler-dropzone.has-image {
+    min-height: 320px;
+  }
+
+  .scrambler-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

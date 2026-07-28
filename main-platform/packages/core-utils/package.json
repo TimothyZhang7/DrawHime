@@ -1,0 +1,19 @@
+{
+  "name": "@aiimage/core-utils",
+  "private": true,
+  "version": "3.0.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "type-check": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aiimage/shared-contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.20",
+    "typescript": "~5.9.3"
+  }
+}

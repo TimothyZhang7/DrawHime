@@ -1,0 +1,170 @@
+/* 图片反推历史页：采用档案索引与接触印样风格，突出源图、状态和结构化结果摘要。 */
+.reverse-history-page {
+  --archive-blue: #2563eb;
+  --archive-ink: #162033;
+  display: grid;
+  gap: 18px;
+  width: min(1220px, 100%);
+  margin: 0 auto;
+  padding: 18px 4px 48px;
+}
+
+.reverse-history-hero {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 28px;
+  overflow: hidden;
+  padding: 28px 30px;
+  border: 1px solid color-mix(in srgb, var(--archive-blue) 34%, var(--color-border));
+  border-radius: 16px;
+  background:
+    linear-gradient(115deg, color-mix(in srgb, var(--archive-blue) 12%, var(--color-surface)), transparent 58%),
+    repeating-linear-gradient(90deg, transparent 0 31px, color-mix(in srgb, var(--color-border) 26%, transparent) 31px 32px),
+    var(--color-surface);
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.08);
+}
+
+.reverse-history-hero::after {
+  position: absolute;
+  top: -54px;
+  right: 19%;
+  width: 160px;
+  height: 160px;
+  border: 26px solid color-mix(in srgb, #0891b2 10%, transparent);
+  border-radius: 50%;
+  content: "";
+  pointer-events: none;
+}
+
+.reverse-history-hero-copy { position: relative; z-index: 1; }
+.reverse-history-back,
+.reverse-history-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--archive-blue);
+  font-size: 12px;
+  font-weight: 900;
+  text-decoration: none;
+}
+.reverse-history-kicker { margin-left: 16px; letter-spacing: 0.12em; text-transform: uppercase; }
+.reverse-history-hero h1 { margin: 18px 0 8px; color: var(--color-text); font-size: clamp(32px, 5vw, 58px); font-weight: 950; letter-spacing: -0.055em; line-height: 0.96; }
+.reverse-history-hero p { max-width: 680px; margin: 0; color: var(--color-text-2); font-size: 14px; line-height: 1.75; }
+
+.reverse-history-ledger {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(84px, 1fr));
+  align-self: end;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--archive-blue) 22%, var(--color-border));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--color-surface) 86%, transparent);
+  backdrop-filter: blur(12px);
+}
+.reverse-history-ledger div { display: grid; gap: 4px; padding: 16px; border-right: 1px solid var(--color-border); }
+.reverse-history-ledger div:last-child { border-right: 0; }
+.reverse-history-ledger strong { color: var(--color-text); font-size: 25px; font-weight: 950; line-height: 1; }
+.reverse-history-ledger span { color: var(--color-text-2); font-size: 11px; font-weight: 800; }
+
+.reverse-history-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.reverse-history-filters { display: flex; flex-wrap: wrap; gap: 7px; }
+.reverse-history-filters button,
+.reverse-history-refresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 0 13px;
+  border: 1px solid var(--color-border);
+  border-radius: 9px;
+  background: var(--color-surface);
+  color: var(--color-text-2);
+  font-size: 12px;
+  font-weight: 850;
+  cursor: pointer;
+}
+.reverse-history-filters button span { min-width: 20px; padding: 2px 6px; border-radius: 999px; background: var(--color-bg); font-size: 10px; text-align: center; }
+.reverse-history-filters button.is-active { border-color: var(--archive-blue); background: var(--archive-blue); color: white; }
+.reverse-history-filters button.is-active span { background: rgba(255,255,255,.18); }
+.reverse-history-refresh:disabled { opacity: .6; cursor: wait; }
+
+.reverse-history-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.reverse-history-card {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  min-height: 240px;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  background: var(--color-surface);
+  box-shadow: 0 13px 32px rgba(15, 23, 42, .055);
+  animation: reverse-history-enter .42s both;
+  animation-delay: calc(min(var(--history-index), 8) * 45ms);
+  transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
+}
+.reverse-history-card:hover { transform: translateY(-3px); border-color: color-mix(in srgb, var(--archive-blue) 34%, var(--color-border)); box-shadow: 0 19px 42px rgba(15, 23, 42, .09); }
+.reverse-history-preview { position: relative; display: grid; place-items: center; min-height: 100%; overflow: hidden; background: linear-gradient(145deg, #111827, #24324a); color: rgba(255,255,255,.42); }
+.reverse-history-preview::after { position: absolute; inset: 0; background: linear-gradient(180deg, transparent 55%, rgba(8,15,28,.78)); content: ""; }
+.reverse-history-preview img { width: 100%; height: 100%; object-fit: cover; transition: transform .35s ease; }
+.reverse-history-card:hover .reverse-history-preview img { transform: scale(1.035); }
+.reverse-history-preview > span { position: absolute; z-index: 1; bottom: 11px; left: 12px; color: white; font-size: 10px; font-weight: 950; letter-spacing: .18em; }
+.reverse-history-card-body { display: grid; align-content: start; gap: 10px; min-width: 0; padding: 16px; }
+.reverse-history-card-topline { display: flex; align-items: center; gap: 7px; }
+.reverse-history-status,
+.reverse-history-mode { padding: 4px 7px; border-radius: 6px; font-size: 10px; font-weight: 950; }
+.reverse-history-status.is-queued,
+.reverse-history-status.is-running { background: color-mix(in srgb, #d97706 13%, transparent); color: #b45309; }
+.reverse-history-status.is-succeeded { background: color-mix(in srgb, #16a34a 13%, transparent); color: #15803d; }
+.reverse-history-status.is-failed { background: color-mix(in srgb, #e11d48 12%, transparent); color: #be123c; }
+.reverse-history-mode { background: color-mix(in srgb, var(--mode-color) 11%, transparent); color: var(--mode-color); }
+.reverse-history-card h2 { overflow: hidden; margin: 0; color: var(--color-text); font-size: 16px; font-weight: 950; text-overflow: ellipsis; white-space: nowrap; }
+.reverse-history-card p { display: -webkit-box; min-height: 42px; overflow: hidden; margin: 0; color: var(--color-text-2); font-size: 12px; line-height: 1.65; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+/* 历史卡只展示独立轻量摘要，避免列表读取完整反推结果。 */
+.reverse-history-analysis { display: flex; flex-wrap: wrap; gap: 4px; min-height: 20px; }
+.reverse-history-analysis span { padding: 3px 6px; border-radius: 999px; background: color-mix(in srgb, var(--archive-blue) 8%, var(--color-bg)); color: var(--color-text-2); font-size: 9px; font-weight: 850; }
+.reverse-history-analysis span.is-succeeded { color: var(--color-success); }
+.reverse-history-analysis span.is-failed, .reverse-history-analysis span.is-warning { background: color-mix(in srgb, #d97706 10%, var(--color-bg)); color: #b45309; }
+.reverse-history-analysis span.is-skipped { opacity: .68; }
+.reverse-history-analysis span.is-anima { background: color-mix(in srgb, #7c3aed 11%, var(--color-bg)); color: #7c3aed; }
+.reverse-history-card dl { display: grid; gap: 5px; margin: 0; }
+.reverse-history-card dl div { display: grid; grid-template-columns: 38px minmax(0, 1fr); gap: 7px; font-size: 10px; }
+.reverse-history-card dt { color: var(--color-text-3); font-weight: 850; }
+.reverse-history-card dd { overflow: hidden; margin: 0; color: var(--color-text-2); font-weight: 750; text-overflow: ellipsis; white-space: nowrap; }
+.reverse-history-progress { height: 3px; overflow: hidden; border-radius: 999px; background: var(--color-bg); }
+.reverse-history-progress span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--archive-blue), #0891b2); transition: width .35s ease; }
+.reverse-history-open { display: flex; align-items: center; justify-content: space-between; margin-top: 2px; color: var(--archive-blue); font-size: 12px; font-weight: 950; text-decoration: none; }
+
+.reverse-history-alert,
+.reverse-history-loading,
+.reverse-history-empty { border: 1px solid var(--color-border); border-radius: 13px; background: var(--color-surface); color: var(--color-text-2); }
+.reverse-history-alert { padding: 12px 14px; border-color: color-mix(in srgb, #e11d48 32%, var(--color-border)); color: #be123c; font-size: 12px; font-weight: 800; }
+.reverse-history-loading { display: flex; align-items: center; justify-content: center; gap: 9px; min-height: 220px; }
+.reverse-history-empty { display: grid; place-items: center; gap: 8px; min-height: 320px; padding: 32px; text-align: center; }
+.reverse-history-empty strong { color: var(--color-text); font-size: 18px; }
+.reverse-history-empty span { font-size: 12px; }
+.reverse-history-empty a { margin-top: 8px; padding: 9px 14px; border-radius: 8px; background: var(--archive-blue); color: white; font-size: 12px; font-weight: 900; text-decoration: none; }
+
+@keyframes reverse-history-enter { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+@media (max-width: 900px) {
+  .reverse-history-hero { grid-template-columns: 1fr; }
+  .reverse-history-ledger { width: 100%; }
+  .reverse-history-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 560px) {
+  .reverse-history-page { padding: 8px 0 82px; }
+  .reverse-history-hero { padding: 22px 18px; border-radius: 12px; }
+  .reverse-history-kicker { display: none; }
+  .reverse-history-ledger div { padding: 12px 9px; }
+  .reverse-history-toolbar { align-items: flex-start; }
+  .reverse-history-filters { gap: 5px; }
+  .reverse-history-filters button { min-height: 32px; padding: 0 9px; }
+  .reverse-history-refresh { min-width: 36px; padding: 0 9px; font-size: 0; }
+  .reverse-history-card { grid-template-columns: 118px minmax(0, 1fr); min-height: 224px; }
+  .reverse-history-card-body { padding: 13px; }
+  .reverse-history-card dl div:nth-child(2) { display: none; }
+}

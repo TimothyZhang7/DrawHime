@@ -1,0 +1,734 @@
+/* 图片放大工具页样式：左右工作台，左侧提交，右侧展示异步任务进度和 GPU 超分结果。 */
+.upscale-shell {
+  display: grid;
+  gap: 12px;
+}
+
+.upscale-shell > .tool-back-strip {
+  width: min(1180px, 100%);
+  min-height: 36px;
+  margin: 0 auto;
+  border-radius: 9px;
+}
+
+.upscale-workbench {
+  display: grid;
+  grid-template-columns: minmax(340px, 420px) minmax(0, 1fr);
+  gap: 14px;
+  width: min(1180px, 100%);
+  margin: 0 auto;
+  align-items: start;
+}
+
+.upscale-control,
+.upscale-result {
+  min-width: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface);
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.08);
+}
+
+.upscale-control {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.upscale-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.upscale-head h1 {
+  margin: 0;
+  color: var(--color-text);
+  font-size: 24px;
+  font-weight: 950;
+}
+
+.upscale-head p {
+  margin: 6px 0 0;
+  color: var(--color-text-2);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.55;
+}
+
+.upscale-head-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 7px;
+}
+
+.upscale-model-chip {
+  flex: 0 0 auto;
+  max-width: 150px;
+  overflow: hidden;
+  padding: 6px 9px;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 26%, var(--color-border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-primary) 8%, var(--color-surface));
+  color: var(--color-primary);
+  font-size: 12px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.upscale-history-link {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 9px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg);
+  color: var(--color-text-2);
+  font-size: 12px;
+  font-weight: 900;
+  text-decoration: none;
+}
+
+.upscale-history-link:hover {
+  border-color: color-mix(in srgb, var(--color-primary) 36%, var(--color-border));
+  color: var(--color-primary);
+}
+
+.upscale-dropzone {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 300px;
+  overflow: hidden;
+  border: 1px dashed color-mix(in srgb, var(--color-primary) 38%, var(--color-border));
+  border-radius: 12px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--color-primary) 8%, transparent), transparent 46%),
+    linear-gradient(315deg, color-mix(in srgb, #16a34a 8%, transparent), transparent 48%),
+    var(--color-bg);
+  cursor: pointer;
+}
+
+.upscale-dropzone input {
+  display: none;
+}
+
+.upscale-dropzone.is-dragging {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 16%, transparent);
+}
+
+.upscale-dropzone.has-image {
+  min-height: 360px;
+  border-style: solid;
+  background: #101827;
+}
+
+.upscale-dropzone.has-image.is-dragging::after {
+  position: absolute;
+  inset: 12px;
+  display: grid;
+  place-items: center;
+  border: 1px dashed rgba(255, 255, 255, 0.68);
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.58);
+  color: #fff;
+  content: "松开替换图片";
+  font-size: 15px;
+  font-weight: 950;
+  pointer-events: none;
+}
+
+.upscale-dropzone div {
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  padding: 28px;
+  color: var(--color-primary);
+  text-align: center;
+}
+
+.upscale-dropzone strong {
+  color: var(--color-text);
+  font-size: 16px;
+  font-weight: 950;
+}
+
+.upscale-dropzone small {
+  color: var(--color-text-2);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.upscale-dropzone img {
+  display: block;
+  max-width: 100%;
+  max-height: 420px;
+  object-fit: contain;
+}
+
+.upscale-filebar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 4px 0 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-bg);
+}
+
+.upscale-filebar span {
+  overflow: hidden;
+  color: var(--color-text-2);
+  font-size: 12px;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.upscale-filebar button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text-2);
+  cursor: pointer;
+}
+
+.upscale-filebar button:hover {
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.upscale-scale-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.upscale-scale-row button {
+  min-height: 42px;
+  border: 1px solid var(--color-border);
+  border-radius: 9px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: 14px;
+  font-weight: 950;
+  cursor: pointer;
+}
+
+.upscale-scale-row button.is-active {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  color: #fff;
+}
+
+.upscale-scale-row button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.upscale-estimate {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-bg);
+}
+
+.upscale-estimate span,
+.upscale-estimate small {
+  color: var(--color-text-2);
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.upscale-estimate strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 950;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.upscale-estimate.is-warning {
+  border-color: color-mix(in srgb, var(--color-error) 32%, var(--color-border));
+  background: color-mix(in srgb, var(--color-error) 8%, var(--color-bg));
+}
+
+.upscale-option-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+}
+
+.upscale-option-grid label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.upscale-option-grid span {
+  color: var(--color-text-2);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.upscale-option-grid select {
+  width: 100%;
+  min-width: 0;
+  height: 40px;
+  padding: 0 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 9px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 850;
+  outline: none;
+}
+
+.upscale-model-hint {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-2);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.upscale-save-row {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  min-height: 42px;
+  padding: 9px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-bg);
+  cursor: pointer;
+}
+
+.upscale-save-row input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--color-primary);
+}
+
+.upscale-save-row span {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.upscale-save-row small {
+  color: var(--color-text-2);
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.upscale-alert {
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--color-error) 30%, var(--color-border));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-error) 8%, var(--color-surface));
+  color: var(--color-error);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.upscale-submit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--color-primary);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 950;
+  cursor: pointer;
+}
+
+.upscale-submit:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.upscale-result {
+  display: grid;
+  grid-template-rows: auto auto minmax(420px, 1fr);
+  overflow: hidden;
+}
+
+.upscale-result-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.upscale-result-head h2 {
+  margin: 0;
+  color: var(--color-text);
+  font-size: 16px;
+  font-weight: 950;
+}
+
+.upscale-result-head span {
+  display: block;
+  margin-top: 4px;
+  color: var(--color-text-2);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.upscale-result-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.upscale-progress-card {
+  display: grid;
+  gap: 9px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--color-primary) 5%, var(--color-surface));
+}
+
+.upscale-progress-copy {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.upscale-progress-copy strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 950;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.upscale-progress-copy span {
+  flex: 0 0 auto;
+  color: var(--color-text-2);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.upscale-progress-track {
+  height: 9px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-border) 72%, transparent);
+}
+
+.upscale-progress-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--color-primary), #16a34a);
+  transition: width 0.28s ease;
+}
+
+.upscale-progress-card.is-failed {
+  background: color-mix(in srgb, var(--color-error) 7%, var(--color-surface));
+}
+
+.upscale-progress-card.is-cancelled {
+  background: color-mix(in srgb, var(--color-text-2) 8%, var(--color-surface));
+}
+
+.upscale-progress-card.is-failed .upscale-progress-track span {
+  background: var(--color-error);
+}
+
+.upscale-progress-card.is-cancelled .upscale-progress-track span {
+  background: var(--color-text-2);
+}
+
+.upscale-progress-card p {
+  margin: 0;
+  color: var(--color-error);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.upscale-result-stage {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 420px;
+  overflow: auto;
+  background:
+    linear-gradient(45deg, color-mix(in srgb, var(--color-bg) 78%, #fff) 25%, transparent 25%),
+    linear-gradient(-45deg, color-mix(in srgb, var(--color-bg) 78%, #fff) 25%, transparent 25%),
+    var(--color-bg);
+  background-size: 28px 28px;
+}
+
+.upscale-result-stage img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: auto;
+}
+
+.upscale-empty,
+.upscale-loading {
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  padding: 28px;
+  color: var(--color-text-2);
+  font-size: 13px;
+  font-weight: 850;
+  text-align: center;
+}
+
+.upscale-loading strong {
+  color: var(--color-text);
+  font-size: 15px;
+  font-weight: 950;
+}
+
+.upscale-loading span {
+  color: var(--color-text-2);
+  font-size: 12px;
+}
+
+.upscale-job-panel {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.upscale-job-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.upscale-job-panel-head span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 950;
+}
+
+.upscale-job-panel-head small {
+  color: var(--color-text-2);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.upscale-job-list {
+  display: grid;
+  gap: 7px;
+  max-height: 260px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.upscale-job-item {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 3px 8px;
+  align-items: center;
+  min-height: 58px;
+  padding: 8px 9px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-bg);
+  text-align: left;
+  cursor: pointer;
+}
+
+.upscale-job-item.is-active {
+  border-color: color-mix(in srgb, var(--color-primary) 48%, var(--color-border));
+  background: color-mix(in srgb, var(--color-primary) 7%, var(--color-bg));
+}
+
+.upscale-job-state {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  min-height: 24px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-text-2) 12%, var(--color-surface));
+  color: var(--color-text-2);
+  font-size: 12px;
+  font-weight: 950;
+  grid-row: span 2;
+}
+
+.upscale-job-state.is-queued,
+.upscale-job-state.is-running {
+  background: color-mix(in srgb, var(--color-primary) 13%, var(--color-surface));
+  color: var(--color-primary);
+}
+
+.upscale-job-state.is-succeeded {
+  background: color-mix(in srgb, #16a34a 13%, var(--color-surface));
+  color: #15803d;
+}
+
+.upscale-job-state.is-failed {
+  background: color-mix(in srgb, var(--color-error) 12%, var(--color-surface));
+  color: var(--color-error);
+}
+
+.upscale-job-state.is-cancelled {
+  background: color-mix(in srgb, var(--color-text-2) 12%, var(--color-surface));
+  color: var(--color-text-2);
+}
+
+.upscale-job-item strong,
+.upscale-job-item small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.upscale-job-item strong {
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 950;
+}
+
+.upscale-job-item small {
+  color: var(--color-text-2);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.upscale-job-empty {
+  display: grid;
+  place-items: center;
+  min-height: 58px;
+  border: 1px dashed var(--color-border);
+  border-radius: 10px;
+  color: var(--color-text-2);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+@media (max-width: 980px) {
+  .upscale-workbench {
+    grid-template-columns: 1fr;
+  }
+
+  .upscale-result {
+    grid-template-rows: auto auto minmax(360px, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .upscale-control,
+  .upscale-result {
+    border-radius: 10px;
+  }
+
+  .upscale-head {
+    display: grid;
+  }
+
+  .upscale-head-actions {
+    justify-content: space-between;
+  }
+
+  .upscale-model-chip {
+    max-width: 100%;
+  }
+
+  .upscale-dropzone,
+  .upscale-dropzone.has-image,
+  .upscale-result-stage {
+    min-height: 280px;
+  }
+
+  .upscale-option-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .upscale-estimate {
+    grid-template-columns: 1fr;
+  }
+
+  .upscale-estimate span,
+  .upscale-estimate small {
+    white-space: normal;
+  }
+
+  .upscale-save-row {
+    grid-template-columns: 18px minmax(0, 1fr);
+  }
+
+  .upscale-save-row small {
+    grid-column: 2;
+    white-space: normal;
+  }
+
+  .upscale-result-head {
+    align-items: flex-start;
+  }
+
+  .upscale-result-actions {
+    display: grid;
+    min-width: 92px;
+  }
+
+  .upscale-progress-copy {
+    display: grid;
+    gap: 4px;
+  }
+
+  .upscale-progress-copy strong {
+    white-space: normal;
+  }
+
+  .upscale-job-list {
+    max-height: 220px;
+  }
+}

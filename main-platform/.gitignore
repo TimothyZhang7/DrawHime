@@ -1,0 +1,22 @@
+node_modules/
+dist/
+.next/
+coverage/
+.env
+.env.*
+!.env.example
+*.log
+*.tsbuildinfo
+*.tar.gz
+*.zip
+
+# 本地私有配置、媒体样例和历史归档只保留在本机，不参与源码交付。
+local/
+backup/
+
+# 服务运行时媒体目录由 local/media-storage 或生产环境变量管理。
+apps/*/media-storage/
+media-storage/
+# 卡密批次属于一次性敏感业务资料，禁止进入源码提交。
+batch_*.txt
+apps/backend/modules/recharge/card-batches/

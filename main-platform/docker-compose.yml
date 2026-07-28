@@ -1,0 +1,116 @@
+services:
+  mysql:
+    image: mariadb:latest
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MARIADB_DATABASE: aiimagev3
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+  redis:
+    image: redis:latest
+    ports:
+      - "6379:6379"
+
+  backend:
+    build: apps/backend
+    ports:
+      - "6369:6369"
+    environment:
+      BACKEND_PORT: "6369"
+      DATABASE_URL: mysql://root:${MYSQL_ROOT_PASSWORD}@mysql:3306/aiimagev3
+      REDIS_URL: redis://redis:6379
+      REDIS_KEY_PREFIX: aiimage:v3
+      JWT_SECRET: ${JWT_SECRET}
+      WS_PROXY_TOKEN: ${WS_PROXY_TOKEN}
+    depends_on:
+      - mysql
+      - redis
+
+  drawing-service:
+    build: apps/drawing-service
+    ports:
+      - "3005:3005"
+    environment:
+      DRAWING_PORT: "3005"
+      BACKEND_INTERNAL_URL: http://backend:6369
+      DRAWING_WORKER_URL: http://drawing-worker:3012
+      WS_PROXY_TOKEN: ${WS_PROXY_TOKEN}
+
+  drawing-worker:
+    build: apps/drawing-worker
+    ports:
+      - "3012:3012"
+    environment:
+      DRAWING_WORKER_PORT: "3012"
+      BACKEND_INTERNAL_URL: http://backend:6369
+      MEDIA_SERVICE_URL: http://media-service:3013
+      REDIS_URL: redis://redis:6379
+      REDIS_KEY_PREFIX: aiimage:v3
+      WS_PROXY_TOKEN: ${WS_PROXY_TOKEN}
+    depends_on:
+      - backend
+      - redis
+
+  media-service:
+    build: apps/media-service
+    ports:
+      - "3013:3013"
+    environment:
+      MEDIA_PORT: "3013"
+      STORAGE_DRIVER: local
+    volumes:
+      - media_storage:/app/media-storage
+
+  bot-service:
+    build: apps/bot-service
+    ports:
+      - "3004:3004"
+    environment:
+      BOT_PORT: "3004"
+      BACKEND_INTERNAL_URL: http://backend:6369
+      DRAWING_SERVICE_URL: http://drawing-service:3005
+      WSPROXY_SERVICE_URL: http://wsproxy-service:3011
+      BOT_RENDERER_URL: http://bot-renderer:3014
+      WS_PROXY_TOKEN: ${WS_PROXY_TOKEN}
+
+  wsproxy-service:
+    build: apps/wsproxy-service
+    ports:
+      - "3011:3011"
+    environment:
+      WSPROXY_PORT: "3011"
+      BACKEND_INTERNAL_URL: http://backend:6369
+      BOT_SERVICE_URL: http://bot-service:3004
+      WS_PROXY_TOKEN: ${WS_PROXY_TOKEN}
+
+  bot-renderer:
+    build: apps/bot-renderer
+    ports:
+      - "3014:3014"
+    environment:
+      BOT_RENDERER_PORT: "3014"
+
+  notification-worker:
+    build: apps/notification-worker
+    ports:
+      - "3015:3015"
+    environment:
+      NOTIFICATION_WORKER_PORT: "3015"
+      BACKEND_INTERNAL_URL: http://backend:6369
+      WS_PROXY_TOKEN: ${WS_PROXY_TOKEN}
+
+  ops-worker:
+    build: apps/ops-worker
+    ports:
+      - "3016:3016"
+    environment:
+      OPS_WORKER_PORT: "3016"
+      BACKEND_INTERNAL_URL: http://backend:6369
+      WS_PROXY_TOKEN: ${WS_PROXY_TOKEN}
+
+volumes:
+  mysql_data:
+  media_storage:

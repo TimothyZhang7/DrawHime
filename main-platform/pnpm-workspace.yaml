@@ -1,0 +1,15 @@
+packages:
+  - apps/*
+  - apps/local-model-platform/*
+  - packages/*
+
+onlyBuiltDependencies:
+  # 平台包安装脚本只负责校验和设置随 npm 包发布的 FFmpeg 可执行文件权限。
+  - '@ffmpeg-installer/linux-x64'
+  - '@ffmpeg-installer/win32-x64'
+  - '@prisma/client'
+  - '@prisma/engines'
+  - esbuild
+  - prisma
+  - puppeteer
+  - sharp

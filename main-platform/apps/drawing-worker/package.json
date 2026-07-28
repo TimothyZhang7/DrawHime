@@ -1,0 +1,22 @@
+{
+  "name": "@aiimage/drawing-worker",
+  "private": true,
+  "version": "3.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch --import tsx src/main.ts",
+    "build": "tsc -p tsconfig.json",
+    "type-check": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aiimage/core-utils": "workspace:*",
+    "@aiimage/shared-contracts": "workspace:*",
+    "ioredis": "^5.11.1",
+    "sharp": "^0.34.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.20",
+    "tsx": "^4.22.4",
+    "typescript": "~5.9.3"
+  }
+}

@@ -1,0 +1,655 @@
+/* 工作台页面样式：只负责页面骨架、侧栏、顶部栏和配置栏布局。 */
+.workbench-page {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  max-height: 100%;
+  display: grid;
+  grid-template-columns: 284px minmax(0, 1fr);
+  gap: 12px;
+  padding: 0;
+  overflow: hidden;
+}
+
+.workbench-sidebar,
+.workbench-chat {
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, .05);
+}
+
+.workbench-sidebar {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.workbench-sidebar-head,
+.workbench-chat-head {
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--color-surface) 92%, var(--color-bg));
+}
+
+.workbench-sidebar-head h2,
+.workbench-chat-head h1 {
+  margin: 0;
+  color: var(--color-text);
+  font-size: 18px;
+  font-weight: 900;
+  line-height: 1.2;
+}
+
+.workbench-sidebar-head span,
+.workbench-chat-head span {
+  display: block;
+  margin-top: 2px;
+  color: var(--color-text-2);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.workbench-sidebar-head button {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-primary);
+  color: #fff;
+  cursor: pointer;
+}
+
+.workbench-sidebar-head button:disabled {
+  opacity: .62;
+  cursor: not-allowed;
+}
+
+.workbench-conversation-list {
+  min-height: 0;
+  overflow: auto;
+  padding: 8px;
+}
+
+.workbench-conversation-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px;
+  align-items: stretch;
+  gap: 4px;
+  margin-bottom: 6px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+}
+
+.workbench-conversation-row:hover {
+  background: color-mix(in srgb, var(--color-bg) 72%, var(--color-surface));
+}
+
+.workbench-conversation-row.is-active {
+  border-color: color-mix(in srgb, var(--color-primary) 38%, var(--color-border));
+  background: var(--color-primary-soft);
+}
+
+.workbench-conversation-button {
+  width: 100%;
+  min-height: 74px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 8px;
+  padding: 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text);
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+}
+
+.workbench-conversation-button:hover {
+  background: transparent;
+}
+
+.workbench-conversation-delete {
+  width: 30px;
+  height: 30px;
+  align-self: center;
+  justify-self: center;
+  display: grid;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text-2);
+  cursor: pointer;
+}
+
+.workbench-conversation-delete:hover {
+  border-color: color-mix(in srgb, var(--color-error) 34%, var(--color-border));
+  background: var(--color-error-soft);
+  color: var(--color-error);
+}
+
+.workbench-conversation-delete:disabled {
+  opacity: .62;
+  cursor: not-allowed;
+}
+
+.workbench-conversation-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 860;
+}
+
+.workbench-conversation-preview {
+  grid-column: 1 / -1;
+  min-width: 0;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  color: var(--color-text-2);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.workbench-conversation-button time {
+  color: var(--color-text-2);
+  font-size: 11px;
+  font-weight: 740;
+}
+
+.workbench-state {
+  min-height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--color-text-2);
+  font-size: 13px;
+  font-weight: 780;
+}
+
+.workbench-chat {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+}
+
+.workbench-chat-title {
+  min-width: 0;
+}
+
+.workbench-chat-head h1 {
+  max-width: min(34vw, 520px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 15px;
+  line-height: 1.2;
+}
+
+/* 工作台绘图参数位于标题栏右侧，统一成一条紧凑控制带。 */
+.workbench-config-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
+  min-height: 34px;
+  padding: 0;
+  background: transparent;
+}
+
+.workbench-control-strip {
+  min-width: 0;
+  max-width: min(820px, 62vw);
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.workbench-control-section {
+  min-width: 0;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 7px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
+}
+
+.workbench-control-caption {
+  flex: 0 0 auto;
+  color: var(--color-text-2);
+  font-size: 11px;
+  font-weight: 820;
+  line-height: 1;
+}
+
+.workbench-model-picker {
+  position: relative;
+  min-width: 0;
+  flex: 1 1 220px;
+  border-color: color-mix(in srgb, var(--color-primary) 24%, var(--color-border));
+  background: color-mix(in srgb, var(--color-primary-soft) 34%, var(--color-surface));
+}
+
+.workbench-model-trigger,
+.workbench-count-stepper,
+.workbench-balance,
+.workbench-config-bar .workbench-privacy-control {
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  color: var(--color-text);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
+}
+
+.workbench-model-trigger {
+  height: 28px;
+  min-width: 128px;
+  max-width: 280px;
+  gap: 6px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  box-shadow: none;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 820;
+  transition: background-color .16s ease, color .16s ease;
+}
+
+.workbench-model-trigger:hover:not(:disabled) {
+  background: var(--color-bg);
+}
+
+.workbench-model-trigger span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workbench-model-trigger:disabled {
+  opacity: .6;
+  cursor: not-allowed;
+}
+
+.workbench-model-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
+  width: min(280px, 78vw);
+  max-height: 280px;
+  overflow: auto;
+  padding: 6px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface);
+  box-shadow: 0 18px 42px rgba(15, 23, 42, .16);
+}
+
+.workbench-model-menu button {
+  width: 100%;
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--color-text);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 760;
+  text-align: left;
+}
+
+.workbench-model-menu button:hover,
+.workbench-model-menu button.is-active {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+.workbench-count-control {
+  border-color: color-mix(in srgb, #64748b 18%, var(--color-border));
+  background: color-mix(in srgb, var(--color-bg) 62%, var(--color-surface));
+}
+
+.workbench-count-stepper {
+  height: 26px;
+  flex: 0 0 auto;
+  overflow: hidden;
+  border-color: color-mix(in srgb, var(--color-border) 72%, transparent);
+  background: color-mix(in srgb, var(--color-bg) 76%, var(--color-surface));
+  box-shadow: none;
+}
+
+.workbench-count-stepper button {
+  width: 26px;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 850;
+}
+
+.workbench-count-stepper button:disabled {
+  opacity: .42;
+  cursor: not-allowed;
+}
+
+.workbench-count-stepper strong {
+  min-width: 24px;
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 900;
+  text-align: center;
+}
+
+.workbench-config-bar .workbench-privacy-control {
+  flex: 0 0 auto;
+  gap: 5px;
+  padding: 0 10px;
+  border-color: color-mix(in srgb, #16a34a 30%, var(--color-border));
+  background: color-mix(in srgb, #dcfce7 58%, var(--color-surface));
+  color: #166534;
+}
+
+.workbench-config-bar .workbench-privacy-control:hover:not(:disabled) {
+  border-color: color-mix(in srgb, #16a34a 52%, var(--color-border));
+  background: color-mix(in srgb, #dcfce7 78%, var(--color-surface));
+}
+
+.workbench-config-bar .workbench-privacy-control.is-on {
+  border-color: color-mix(in srgb, var(--color-primary) 36%, var(--color-border));
+  background: color-mix(in srgb, var(--color-primary-soft) 70%, var(--color-surface));
+  color: var(--color-primary);
+}
+
+.workbench-config-bar .workbench-privacy-control .privacy-switch-track {
+  width: 14px;
+  height: 14px;
+  background: transparent;
+}
+
+.workbench-config-bar .workbench-privacy-control .privacy-switch-thumb {
+  position: static;
+  width: 14px;
+  height: 14px;
+  background: transparent;
+  color: currentColor;
+  box-shadow: none;
+  transform: none;
+}
+
+.workbench-config-bar .workbench-privacy-control.is-on .privacy-switch-thumb {
+  color: currentColor;
+  transform: none;
+}
+
+.workbench-config-bar .workbench-privacy-control .privacy-switch-label {
+  margin-top: 0;
+  color: currentColor;
+  font-size: 11px;
+  font-weight: 820;
+}
+
+.workbench-balance {
+  flex: 0 0 auto;
+  gap: 5px;
+  padding: 0 10px;
+  border-color: color-mix(in srgb, #f59e0b 32%, var(--color-border));
+  background: color-mix(in srgb, #fef3c7 58%, var(--color-surface));
+  color: #92400e;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.workbench-balance strong {
+  color: var(--color-text);
+  font-size: 12px;
+}
+
+@media (max-width: 920px) {
+  .workbench-page {
+    grid-template-columns: 1fr;
+    grid-template-rows: 160px minmax(0, 1fr);
+  }
+
+  .workbench-sidebar {
+    min-height: 0;
+  }
+
+  .workbench-conversation-list {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(220px, 280px);
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .workbench-conversation-row {
+    margin-bottom: 0;
+  }
+}
+
+@media (max-width: 640px) {
+  .workbench-page {
+    height: 100%;
+    min-height: 0;
+    max-height: 100%;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 52px minmax(0, 1fr);
+    gap: 6px;
+    overflow: hidden;
+  }
+
+  .workbench-sidebar {
+    height: 52px;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: 42px minmax(0, 1fr);
+    grid-template-rows: 1fr;
+    align-items: stretch;
+    overflow: hidden;
+    border-radius: 9px;
+    background: color-mix(in srgb, var(--color-surface) 92%, var(--color-bg));
+  }
+
+  .workbench-sidebar-head {
+    min-height: 0;
+    padding: 6px;
+    border-right: 1px solid color-mix(in srgb, var(--color-border) 78%, transparent);
+    border-bottom: 0;
+    background: transparent;
+  }
+
+  .workbench-sidebar-head > div {
+    display: none;
+  }
+
+  .workbench-sidebar-head button {
+    width: 100%;
+    height: 100%;
+    border-radius: 8px;
+  }
+
+  .workbench-conversation-list {
+    min-width: 0;
+    min-height: 0;
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(138px, 44vw);
+    align-items: stretch;
+    gap: 6px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 6px;
+    scrollbar-width: none;
+  }
+
+  .workbench-conversation-list::-webkit-scrollbar {
+    display: none;
+  }
+
+  .workbench-conversation-row {
+    height: 40px;
+    grid-template-columns: minmax(0, 1fr) 28px;
+    gap: 0;
+    margin: 0;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--color-bg) 62%, var(--color-surface));
+  }
+
+  .workbench-conversation-row.is-active {
+    background: var(--color-primary-soft);
+  }
+
+  .workbench-conversation-button {
+    min-height: 38px;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+    padding: 6px 8px;
+  }
+
+  .workbench-conversation-title {
+    font-size: 12px;
+    line-height: 1.25;
+  }
+
+  .workbench-conversation-preview,
+  .workbench-conversation-button time {
+    display: none;
+  }
+
+  .workbench-conversation-delete {
+    width: 26px;
+    height: 26px;
+    border-radius: 7px;
+  }
+
+  .workbench-chat {
+    min-height: 0;
+    border-radius: 9px;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    overflow: hidden;
+  }
+
+  .workbench-chat-head {
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+    gap: 7px;
+    padding: 8px;
+    background: color-mix(in srgb, var(--color-surface) 96%, var(--color-bg));
+  }
+
+  .workbench-chat-head h1 {
+    max-width: 100%;
+    font-size: 13px;
+    line-height: 1.25;
+  }
+
+  .workbench-config-bar {
+    width: 100%;
+    align-items: center;
+    justify-content: flex-start;
+    overflow: visible;
+  }
+
+  .workbench-control-strip {
+    width: 100%;
+    max-width: 100%;
+    min-height: 32px;
+    display: flex;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    gap: 5px;
+    overflow-x: auto;
+    overflow-y: visible;
+    padding-bottom: 1px;
+    scrollbar-width: none;
+  }
+
+  .workbench-control-strip::-webkit-scrollbar {
+    display: none;
+  }
+
+  .workbench-control-section,
+  .workbench-balance,
+  .workbench-config-bar .workbench-privacy-control {
+    height: 32px;
+    border-radius: 8px;
+  }
+
+  .workbench-count-stepper {
+    height: 24px;
+  }
+
+  .workbench-count-control {
+    flex: 0 0 auto;
+  }
+
+  .workbench-model-picker {
+    flex: 0 0 110px;
+  }
+
+  .workbench-model-trigger {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    font-size: 11px;
+  }
+
+  .workbench-config-bar .workbench-privacy-control,
+  .workbench-balance {
+    padding-right: 7px;
+    padding-left: 7px;
+  }
+
+  .workbench-chat-head .workbench-control-caption {
+    display: none;
+  }
+
+  .workbench-chat-head .workbench-balance span {
+    display: none;
+  }
+
+  .workbench-chat-head .workbench-balance svg {
+    display: none;
+  }
+}

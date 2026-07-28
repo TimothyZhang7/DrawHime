@@ -1,0 +1,1340 @@
+// 全新数据库结构定义；禁止为兼容 V2 旧表添加迁移标记表或历史只读表。
+generator client {
+  provider = "prisma-client-js"
+}
+
+// 后端服务唯一数据库连接；实际连接地址由部署环境注入。
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// 用户主表，负责网页用户身份、角色和默认偏好。
+model User {
+  id                  Int       @id @default(autoincrement())
+  username            String    @unique @db.VarChar(32)
+  email               String    @unique @db.VarChar(255)
+  passwordHash        String    @map("password_hash") @db.VarChar(255)
+  role                String    @default("user") @db.VarChar(16)
+  emailVerified       Boolean   @default(false) @map("email_verified")
+  defaultImagePrivate Boolean   @default(false) @map("default_image_private")
+  siteBackgroundEnabled Boolean @default(true) @map("site_background_enabled")
+  avatarFilename      String?   @map("avatar_filename") @db.VarChar(128)
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  qqBinding           QqBinding?
+  wsProxyEndpoints    WsProxyEndpoint[]
+  botConnections      BotConnection[]
+  generationBatches   GenerationBatch[]
+  generationTasks     GenerationTask[]
+  templates           Template[]
+  loraRepositoryItems LoraRepositoryItem[]
+  createdLoraBaseModels LoraBaseModel[]
+  templateFavorites   TemplateFavorite[]
+  imageLikes          ImageLike[]
+  rechargeBatches     RechargeBatch[]
+  rechargeCards       RechargeCard[]
+  wallets             Wallet[]
+  workflowLocalTasks  WorkflowLocalTask[]
+  imageUpscaleJobs    ImageUpscaleJob[]
+  imageReverseJobs    ImageReverseJob[]
+  workbenchConversations WorkbenchConversation[]
+  workbenchMessages   WorkbenchMessage[]
+  workbenchAttachments WorkbenchAttachment[]
+  workbenchAgentRuns WorkbenchAgentRun[]
+  inviteCode          UserInviteCode?
+  invitedUsers        UserReferral[] @relation("ReferralInviter")
+  invitedBy           UserReferral?  @relation("ReferralInvitee")
+  localPlatformBillingReservations LocalPlatformBillingReservation[]
+  localPlatformGalleryPublications LocalPlatformGalleryPublication[]
+
+  @@map("users")
+}
+
+// 用户邀请码表；邀请码只代表邀请入口，不直接发放余额。
+model UserInviteCode {
+  id         Int       @id @default(autoincrement())
+  userId     Int       @unique @map("user_id")
+  code       String    @unique @db.VarChar(16)
+  createdAt  DateTime  @default(now()) @map("created_at")
+  disabledAt DateTime? @map("disabled_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([code, disabledAt])
+  @@map("user_invite_codes")
+}
+
+// 用户邀请关系表；每个被邀请用户只能绑定一次邀请人，奖励发放必须幂等。
+model UserReferral {
+  id                   Int       @id @default(autoincrement())
+  inviteeUserId        Int       @unique @map("invitee_user_id")
+  inviterUserId        Int       @map("inviter_user_id")
+  inviteCode           String    @map("invite_code") @db.VarChar(16)
+  source               String    @db.VarChar(16)
+  status               String    @default("pending_email") @db.VarChar(24)
+  inviterRewardAmount  Decimal   @default(0.00) @map("inviter_reward_amount") @db.Decimal(10, 2)
+  inviteeRewardAmount  Decimal   @default(0.00) @map("invitee_reward_amount") @db.Decimal(10, 2)
+  rewardedAt           DateTime? @map("rewarded_at")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+
+  invitee User @relation("ReferralInvitee", fields: [inviteeUserId], references: [id], onDelete: Cascade)
+  inviter User @relation("ReferralInviter", fields: [inviterUserId], references: [id], onDelete: Cascade)
+
+  @@index([inviterUserId, status])
+  @@index([status, createdAt])
+  @@map("user_referrals")
+}
+
+// 邮箱验证 token 表，只保存哈希值，禁止保存明文 token。
+model EmailVerification {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @map("user_id")
+  tokenHash String   @unique @map("token_hash") @db.VarChar(128)
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@map("email_verifications")
+}
+
+// 密码重置 token 表，只保存哈希值，禁止保存明文 token。
+model PasswordReset {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @map("user_id")
+  tokenHash String   @unique @map("token_hash") @db.VarChar(128)
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@map("password_resets")
+}
+
+// QQ 绑定表，负责网页用户与 QQ 号的一对一绑定状态。
+model QqBinding {
+  id              Int      @id @default(autoincrement())
+  userId          Int      @unique @map("user_id")
+  qqNumber        BigInt?  @unique @map("qq_number")
+  verified        Boolean  @default(false)
+  verificationKey String   @unique @map("verification_key") @db.VarChar(16)
+  keyExpiresAt    DateTime @map("key_expires_at")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("qq_bindings")
+}
+
+// QQ 余额权威表；不保留 V2 用户余额迁移表。
+model QqQuota {
+  qqNumber    BigInt   @id @map("qq_number")
+  paidBalance Decimal  @default(0.00) @map("paid_balance") @db.Decimal(10, 2)
+  freeBalance Decimal  @default(0.00) @map("free_balance") @db.Decimal(10, 2)
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("qq_quotas")
+}
+
+// 身份钱包表；Web 用户和 QQ 号各自拥有独立钱包，绑定只共享访问权。
+model Wallet {
+  id          Int      @id @default(autoincrement())
+  ownerType   String   @map("owner_type") @db.VarChar(16)
+  ownerKey    String   @map("owner_key") @db.VarChar(64)
+  userId      Int?     @map("user_id")
+  freeBalance Decimal  @default(0.00) @map("free_balance") @db.Decimal(10, 2)
+  paidBalance Decimal  @default(0.00) @map("paid_balance") @db.Decimal(10, 2)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user          User?                  @relation(fields: [userId], references: [id], onDelete: SetNull)
+  ledger        WalletLedger[]
+  dailyGrants   DailyFreeGrant[]
+  chargeRecords TaskChargeAllocation[]
+  workflowChargeRecords WorkflowLocalTaskChargeAllocation[]
+  localPlatformBillingAllocations LocalPlatformBillingAllocation[]
+
+  @@unique([ownerType, ownerKey])
+  @@index([userId])
+  @@map("wallets")
+}
+
+// Web 用户与 QQ 钱包共享关系；解绑只关闭 active key，不转移或删除余额。
+model WalletLink {
+  id            Int       @id @default(autoincrement())
+  userId        Int       @map("user_id")
+  qqNumber      BigInt    @map("qq_number")
+  status        String    @default("active") @db.VarChar(16)
+  activeUserKey String?   @unique @map("active_user_key") @db.VarChar(64)
+  activeQqKey   String?   @unique @map("active_qq_key") @db.VarChar(64)
+  createdAt     DateTime  @default(now()) @map("created_at")
+  unboundAt     DateTime? @map("unbound_at")
+  createdByIp   String?   @map("created_by_ip") @db.VarChar(45)
+  unboundByIp   String?   @map("unbound_by_ip") @db.VarChar(45)
+
+  @@index([userId, status])
+  @@index([qqNumber, status])
+  @@map("wallet_links")
+}
+
+// 钱包流水表；充值、扣费、退款和每日免费发放都必须写入，便于审计和恢复。
+model WalletLedger {
+  id             Int      @id @default(autoincrement())
+  walletId       Int      @map("wallet_id")
+  type           String   @db.VarChar(32)
+  amount         Decimal  @db.Decimal(10, 2)
+  balanceKind    String   @map("balance_kind") @db.VarChar(16)
+  source         String   @db.VarChar(16)
+  taskId         String?  @map("task_id") @db.VarChar(64)
+  rechargeCardId Int?     @map("recharge_card_id")
+  metadata       Json?
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
+  @@index([walletId, createdAt])
+  @@index([taskId])
+  @@index([rechargeCardId])
+  @@map("wallet_ledger")
+}
+
+// 每日免费余额发放幂等表；同一钱包同一天只能发放一次。
+model DailyFreeGrant {
+  id        Int      @id @default(autoincrement())
+  walletId  Int      @map("wallet_id")
+  grantDate DateTime @map("grant_date") @db.Date
+  amount    Decimal  @db.Decimal(10, 2)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
+  @@unique([walletId, grantDate])
+  @@index([grantDate])
+  @@map("daily_free_grants")
+}
+
+// 任务扣费分账表；失败退款只按本表原路退回，不能重新计算当前绑定关系。
+model TaskChargeAllocation {
+  id         Int       @id @default(autoincrement())
+  taskId     String    @map("task_id") @db.VarChar(64)
+  walletId   Int       @map("wallet_id")
+  freeAmount Decimal   @default(0.00) @map("free_amount") @db.Decimal(10, 2)
+  paidAmount Decimal   @default(0.00) @map("paid_amount") @db.Decimal(10, 2)
+  createdAt  DateTime  @default(now()) @map("created_at")
+  refundedAt DateTime? @map("refunded_at")
+
+  task   GenerationTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  wallet Wallet         @relation(fields: [walletId], references: [id], onDelete: Restrict)
+
+  @@unique([taskId, walletId])
+  @@index([walletId])
+  @@map("task_charge_allocations")
+}
+
+// 独立本地模型平台价格镜像；主站按该表计算预留金额，不信任任务请求直接传入的金额。
+model LocalPlatformPriceVersion {
+  id             Int      @id @default(autoincrement())
+  productCode    String   @map("product_code") @db.VarChar(128)
+  pricingVersion Int      @map("pricing_version")
+  unitPrice      Decimal  @map("unit_price") @db.Decimal(10, 2)
+  billingUnit    String   @default("image") @map("billing_unit") @db.VarChar(32)
+  currency       String   @default("CNY") @db.Char(3)
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  reservations LocalPlatformBillingReservation[]
+
+  @@unique([productCode, pricingVersion])
+  @@index([active, productCode])
+  @@map("local_platform_price_versions")
+}
+
+// 独立平台钱包预留；资金在 RESERVED 时已经从身份钱包扣除，提交只转终态，释放按原分账退回。
+model LocalPlatformBillingReservation {
+  id             String    @id @default(uuid()) @db.VarChar(36)
+  externalTaskId String    @unique @map("external_task_id") @db.VarChar(64)
+  idempotencyKey String    @unique @map("idempotency_key") @db.VarChar(191)
+  commitIdempotencyKey String? @unique @map("commit_idempotency_key") @db.VarChar(191)
+  releaseIdempotencyKey String? @unique @map("release_idempotency_key") @db.VarChar(191)
+  userId         Int?      @map("user_id")
+  qqNumber       BigInt?   @map("qq_number")
+  priceVersionId Int       @map("price_version_id")
+  quantity       Decimal   @db.Decimal(12, 3)
+  reservedAmount Decimal  @map("reserved_amount") @db.Decimal(10, 2)
+  currency       String    @default("CNY") @db.Char(3)
+  status         String    @default("reserved") @db.VarChar(16)
+  expiresAt      DateTime? @map("expires_at")
+  committedAt    DateTime? @map("committed_at")
+  releasedAt     DateTime? @map("released_at")
+  releaseReason  String?   @map("release_reason") @db.VarChar(500)
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  user         User?                        @relation(fields: [userId], references: [id], onDelete: Restrict)
+  priceVersion LocalPlatformPriceVersion    @relation(fields: [priceVersionId], references: [id], onDelete: Restrict)
+  allocations  LocalPlatformBillingAllocation[]
+
+  @@index([userId, createdAt])
+  @@index([qqNumber, createdAt])
+  @@index([status, expiresAt])
+  @@map("local_platform_billing_reservations")
+}
+
+// 独立平台预留的钱包分账；释放只能按本表原路退回，绑定关系变化不影响退款钱包。
+model LocalPlatformBillingAllocation {
+  id            Int       @id @default(autoincrement())
+  reservationId String    @map("reservation_id") @db.VarChar(36)
+  walletId      Int       @map("wallet_id")
+  freeAmount    Decimal   @default(0.00) @map("free_amount") @db.Decimal(10, 2)
+  paidAmount    Decimal   @default(0.00) @map("paid_amount") @db.Decimal(10, 2)
+  releasedAt    DateTime? @map("released_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  reservation LocalPlatformBillingReservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  wallet      Wallet                          @relation(fields: [walletId], references: [id], onDelete: Restrict)
+
+  @@unique([reservationId, walletId])
+  @@index([walletId])
+  @@map("local_platform_billing_allocations")
+}
+
+// 独立本地模型平台正式图库发布镜像；媒体落盘后才关联主站生成任务。
+model LocalPlatformGalleryPublication {
+  id                String   @id @default(uuid()) @db.VarChar(36)
+  externalTaskId    String   @map("external_task_id") @db.VarChar(64)
+  artifactId        String   @map("artifact_id") @db.VarChar(64)
+  artifactSha256    String   @map("artifact_sha256") @db.Char(64)
+  idempotencyKey    String   @unique @map("idempotency_key") @db.VarChar(191)
+  userId            Int?     @map("user_id")
+  qqNumber          BigInt?  @map("qq_number")
+  mainTaskId        String?  @unique @map("main_task_id") @db.VarChar(64)
+  mediaFilename     String?  @map("media_filename") @db.VarChar(128)
+  thumbnailFilename String?  @map("thumbnail_filename") @db.VarChar(128)
+  mimeType          String   @map("mime_type") @db.VarChar(64)
+  byteSize          BigInt   @map("byte_size")
+  width             Int
+  height            Int
+  isPrivate         Boolean  @map("is_private")
+  effectivePrompt   String   @map("effective_prompt") @db.LongText
+  modelDisplayName  String   @map("model_display_name") @db.VarChar(191)
+  parameters        Json
+  status            String   @default("pending") @db.VarChar(16)
+  errorMessage      String?  @map("error_message") @db.Text
+  publishedAt       DateTime? @map("published_at")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([externalTaskId, artifactSha256])
+  @@unique([artifactId])
+  @@index([userId, createdAt])
+  @@index([qqNumber, createdAt])
+  @@index([status, createdAt])
+  @@map("local_platform_gallery_publications")
+}
+
+// 工作流本地模型任务扣费分账表；失败退款只按本表原路退回，不能重新计算当前绑定关系。
+model WorkflowLocalTaskChargeAllocation {
+  id             Int       @id @default(autoincrement())
+  workflowTaskId String    @map("workflow_task_id") @db.VarChar(64)
+  walletId       Int       @map("wallet_id")
+  freeAmount     Decimal   @default(0.00) @map("free_amount") @db.Decimal(10, 2)
+  paidAmount     Decimal   @default(0.00) @map("paid_amount") @db.Decimal(10, 2)
+  createdAt      DateTime  @default(now()) @map("created_at")
+  refundedAt     DateTime? @map("refunded_at")
+
+  task   WorkflowLocalTask @relation(fields: [workflowTaskId], references: [id], onDelete: Cascade)
+  wallet Wallet            @relation(fields: [walletId], references: [id], onDelete: Restrict)
+
+  @@unique([workflowTaskId, walletId], map: "wlt_charge_task_wallet_key")
+  @@index([walletId], map: "wlt_charge_wallet_idx")
+  @@map("workflow_local_task_charge_allocations")
+}
+
+// 工作流本地模型独立任务表；由 backend 权威扣费、提交 LocalRun 和写入最终状态。
+model WorkflowLocalTask {
+  id                   String    @id @db.VarChar(64)
+  clientRequestId      String    @unique @map("client_request_id") @db.VarChar(96)
+  userId               Int       @map("user_id")
+  workflowId           String    @map("workflow_id") @db.VarChar(64)
+  workflowRunId        String    @map("workflow_run_id") @db.VarChar(64)
+  nodeId               String    @map("node_id") @db.VarChar(64)
+  mode                 String    @db.VarChar(24)
+  prompt               String    @db.Text
+  sourceImageUrls      Json?     @map("source_image_urls")
+  isPrivate            Boolean   @default(false) @map("is_private")
+  templateKey          String    @map("template_key") @db.VarChar(128)
+  templateId           Int?      @map("template_id")
+  templateVersionId    Int?      @map("template_version_id")
+  providerId           Int?      @map("provider_id")
+  modelId              Int?      @map("model_id")
+  localInferenceParams Json?     @map("local_inference_params")
+  localRunId           String?   @map("local_run_id") @db.VarChar(64)
+  status               String    @default("queued") @db.VarChar(24)
+  error                String?   @db.Text
+  chargedSource        String?   @map("charged_source") @db.VarChar(8)
+  chargedAmount        String?   @map("charged_amount") @db.VarChar(16)
+  chargedFreeAmount    String?   @map("charged_free_amount") @db.VarChar(16)
+  chargedPaidAmount    String?   @map("charged_paid_amount") @db.VarChar(16)
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+  startedAt            DateTime? @map("started_at")
+  finishedAt           DateTime? @map("finished_at")
+
+  user              User                                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  template          LocalWorkflowTemplate?              @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  templateVersion   LocalWorkflowTemplateVersion?       @relation(fields: [templateVersionId], references: [id], onDelete: SetNull)
+  provider          LocalModelProvider?                 @relation(fields: [providerId], references: [id], onDelete: SetNull)
+  model             LocalModel?                         @relation(fields: [modelId], references: [id], onDelete: SetNull)
+  localRuns         LocalRun[]
+  artifacts         WorkflowLocalTaskArtifact[]
+  chargeAllocations WorkflowLocalTaskChargeAllocation[]
+
+  @@index([userId, createdAt])
+  @@index([workflowId, workflowRunId])
+  @@index([status, createdAt])
+  @@index([templateKey])
+  @@index([localRunId])
+  @@map("workflow_local_tasks")
+}
+
+// 工作流本地模型产物表；保存独立任务输出图片引用，真实文件生命周期仍由 media-service 控制。
+model WorkflowLocalTaskArtifact {
+  id            String   @id @default(uuid()) @db.VarChar(64)
+  workflowTaskId String  @map("workflow_task_id") @db.VarChar(64)
+  localRunId    String?  @map("local_run_id") @db.VarChar(64)
+  kind          String   @default("image") @db.VarChar(24)
+  filename      String?  @db.VarChar(255)
+  thumbnailFilename String? @map("thumbnail_filename") @db.VarChar(255)
+  mediaUrl      String?  @map("media_url") @db.VarChar(1024)
+  thumbnailUrl  String?  @map("thumbnail_url") @db.VarChar(1024)
+  mimeType      String?  @map("mime_type") @db.VarChar(128)
+  sizeBytes     BigInt?  @map("size_bytes")
+  width         Int?
+  height        Int?
+  metadataJson  Json?    @map("metadata_json")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  task WorkflowLocalTask @relation(fields: [workflowTaskId], references: [id], onDelete: Cascade)
+
+  @@index([workflowTaskId, kind])
+  @@index([localRunId])
+  @@map("workflow_local_task_artifacts")
+}
+
+// 图片放大异步任务表；只持久化任务状态、结果引用和用户可见元数据，不保存用户上传原图。
+model ImageUpscaleJob {
+  id              String    @id @db.VarChar(64)
+  userId          Int       @map("user_id")
+  status          String    @default("queued") @db.VarChar(16)
+  progressText    String    @default("已提交，等待 GPU 队列") @map("progress_text") @db.VarChar(128)
+  sourceFileName  String    @map("source_file_name") @db.VarChar(255)
+  sourceStoredName String?   @unique @map("source_stored_name") @db.VarChar(128)
+  previewStoredName String?  @unique @map("preview_stored_name") @db.VarChar(128)
+  sourceMimeType  String?   @map("source_mime_type") @db.VarChar(64)
+  sourceSizeBytes BigInt    @map("source_size_bytes")
+  sourceWidth     Int?      @map("source_width")
+  sourceHeight    Int?      @map("source_height")
+  scale           Int
+  model           String    @db.VarChar(128)
+  outputFormat    String    @default("webp") @map("output_format") @db.VarChar(16)
+  saveToLibrary   Boolean   @default(false) @map("save_to_library")
+  isPrivate       Boolean?  @map("is_private")
+  resultJson      Json?     @map("result_json")
+  error           String?   @db.Text
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  startedAt       DateTime? @map("started_at")
+  finishedAt      DateTime? @map("finished_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([status, updatedAt])
+  @@map("image_upscale_jobs")
+}
+
+// 图片反推异步任务表；保存私有源图引用、运行状态、提取选项和结构化结果，页面刷新后可完整恢复。
+model ImageReverseJob {
+  id                String    @id @db.VarChar(64)
+  userId            Int       @map("user_id")
+  status            String    @default("queued") @db.VarChar(16)
+  progressText      String    @default("已提交，等待识图处理") @map("progress_text") @db.VarChar(128)
+  mode              String    @db.VarChar(24)
+  model             String    @db.VarChar(128)
+  optionsJson       Json      @map("options_json")
+  sourceFileName    String    @map("source_file_name") @db.VarChar(255)
+  sourceStoredName  String    @unique @map("source_stored_name") @db.VarChar(128)
+  previewStoredName String    @unique @map("preview_stored_name") @db.VarChar(128)
+  sourceMimeType    String    @map("source_mime_type") @db.VarChar(64)
+  sourceSizeBytes   BigInt    @map("source_size_bytes")
+  sourceWidth       Int       @map("source_width")
+  sourceHeight      Int       @map("source_height")
+  resultSummary     String?   @map("result_summary") @db.VarChar(1024)
+  analysisSummaryJson Json?   @map("analysis_summary_json")
+  resultJson        Json?     @map("result_json")
+  error             String?   @db.Text
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+  startedAt         DateTime? @map("started_at")
+  finishedAt        DateTime? @map("finished_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([status, updatedAt])
+  @@map("image_reverse_jobs")
+}
+
+// 网页导航工作台会话表；保存用户多窗口上下文，服务重启后可恢复。
+model WorkbenchConversation {
+  id                 String   @id @db.VarChar(64)
+  userId             Int      @map("user_id")
+  title              String   @db.VarChar(128)
+  model              String?  @db.VarChar(128)
+  count              Int      @default(1)
+  isPrivate          Boolean  @default(false) @map("is_private")
+  lastMessagePreview String?  @map("last_message_preview") @db.VarChar(255)
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+  lastMessageAt      DateTime @default(now()) @map("last_message_at")
+
+  user     User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages WorkbenchMessage[]
+  attachments WorkbenchAttachment[]
+  agentRuns WorkbenchAgentRun[]
+
+  @@index([userId, lastMessageAt])
+  @@map("workbench_conversations")
+}
+
+// 网页导航工作台消息表；保存用户原始输入、系统回复和关联生成任务 ID。
+model WorkbenchMessage {
+  id             String   @id @db.VarChar(64)
+  conversationId String   @map("conversation_id") @db.VarChar(64)
+  userId         Int      @map("user_id")
+  role           String   @db.VarChar(16)
+  content        String   @db.Text
+  status         String   @default("sent") @db.VarChar(16)
+  kind           String   @default("chat") @db.VarChar(16)
+  taskIds        Json?    @map("task_ids")
+  attachmentIds  Json?    @map("attachment_ids")
+  toolCalls      Json?    @map("tool_calls")
+  model          String?  @db.VarChar(128)
+  error          String?  @db.Text
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  conversation WorkbenchConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@index([userId, createdAt])
+  @@map("workbench_messages")
+}
+
+// 网页导航工作台 Agent 单次运行表；一条用户消息可拆成多个模型/工具步骤并持续返回。
+model WorkbenchAgentRun {
+  id             String    @id @db.VarChar(64)
+  conversationId String    @map("conversation_id") @db.VarChar(64)
+  userId         Int       @map("user_id")
+  userMessageId  String    @map("user_message_id") @db.VarChar(64)
+  status         String    @default("running") @db.VarChar(16)
+  currentStage   String?   @map("current_stage") @db.VarChar(32)
+  planJson       Json?     @map("plan_json")
+  selectedAttachmentIds Json? @map("selected_attachment_ids")
+  error          String?   @db.Text
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+  finishedAt     DateTime? @map("finished_at")
+
+  user         User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation WorkbenchConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  steps        WorkbenchAgentStep[]
+
+  @@index([conversationId, createdAt])
+  @@index([userId, createdAt])
+  @@index([status, updatedAt])
+  @@map("workbench_agent_runs")
+}
+
+// 网页导航工作台 Agent 分段步骤表；只保存阶段摘要，不保存模型隐藏推理内容。
+model WorkbenchAgentStep {
+  id            String    @id @db.VarChar(64)
+  runId         String    @map("run_id") @db.VarChar(64)
+  stepType      String    @map("step_type") @db.VarChar(32)
+  title         String    @db.VarChar(128)
+  status        String    @default("running") @db.VarChar(16)
+  inputSummary  String?   @map("input_summary") @db.Text
+  outputSummary String?   @map("output_summary") @db.Text
+  error         String?   @db.Text
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  finishedAt    DateTime? @map("finished_at")
+
+  run WorkbenchAgentRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId, createdAt])
+  @@map("workbench_agent_steps")
+}
+
+// 网页导航工作台附件表；图片先落 backend 本地私有目录，再通过短 URL 供当前用户上下文使用。
+model WorkbenchAttachment {
+  id             String   @id @db.VarChar(64)
+  userId         Int      @map("user_id")
+  conversationId String?  @map("conversation_id") @db.VarChar(64)
+  kind           String   @default("image") @db.VarChar(16)
+  filename       String   @db.VarChar(128)
+  originalName   String   @map("original_name") @db.VarChar(255)
+  mimeType       String   @map("mime_type") @db.VarChar(64)
+  sizeBytes      Int      @map("size_bytes")
+  width          Int?
+  height         Int?
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  user         User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation WorkbenchConversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([conversationId, createdAt])
+  @@map("workbench_attachments")
+}
+
+// 系统配置表，用于 全新配置结构，不兼容 V2 meta 表。
+model SystemConfig {
+  key       String   @id @db.VarChar(96)
+  value     String   @db.Text
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("system_configs")
+}
+
+// Bot 连接状态表，保存 wsproxy 登记的 Bot 在线状态和用户绑定关系。
+model BotConnection {
+  id                 Int       @id @default(autoincrement())
+  qqNumber           BigInt    @unique @map("qq_number")
+  nickname           String    @default("") @db.VarChar(128)
+  avatar             String    @default("") @db.VarChar(512)
+  selfId             BigInt    @unique @map("self_id")
+  status             String    @default("offline") @db.VarChar(16)
+  lastSeenAt         DateTime  @default(now()) @map("last_seen_at")
+  connectedAt        DateTime? @map("connected_at")
+  totalUptimeSeconds Int       @default(0) @map("total_uptime_seconds")
+  messageCount       Int       @default(0) @map("message_count")
+  boundUserId        Int?      @map("bound_user_id")
+  banned             Boolean   @default(false)
+  bannedAt           DateTime? @map("banned_at")
+  bannedReason       String?   @map("banned_reason") @db.VarChar(512)
+
+  boundUser User? @relation(fields: [boundUserId], references: [id], onDelete: SetNull)
+
+  @@index([status, lastSeenAt])
+  @@map("bot_connections")
+}
+
+// wsproxy 动态端点表，只保存 token 哈希，明文 token 只在创建响应中返回一次。
+model WsProxyEndpoint {
+  id           Int      @id @default(autoincrement())
+  userId       Int      @map("user_id")
+  pathSuffix   String   @unique @map("path_suffix") @db.VarChar(32)
+  tokenHash    String   @unique @map("token_hash") @db.VarChar(128)
+  createdAt    DateTime @default(now()) @map("created_at")
+  expiresAt    DateTime @map("expires_at")
+  used         Boolean  @default(false)
+  usedBySelfId BigInt?  @map("used_by_self_id")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([usedBySelfId])
+  @@map("ws_proxy_endpoints")
+}
+
+// 生成批次表；一次多图提交创建一个批次，每张图仍由 generation_tasks 单图任务承载。
+model GenerationBatch {
+  id                              String    @id @db.VarChar(64)
+  clientRequestId                 String    @unique @map("client_request_id") @db.VarChar(96)
+  userId                          Int?      @map("user_id")
+  qqNumber                        BigInt?   @map("qq_number")
+  source                          String    @db.VarChar(16)
+  mode                            String    @db.VarChar(24)
+  prompt                          String    @db.Text
+  status                          String    @default("queued") @db.VarChar(24)
+  count                           Int
+  concurrency                     Int       @default(1)
+  stopAfterConsecutiveFailures    Int       @default(1) @map("stop_after_consecutive_failures")
+  successCount                    Int       @default(0) @map("success_count")
+  failedCount                     Int       @default(0) @map("failed_count")
+  consecutiveFailures             Int       @default(0) @map("consecutive_failures")
+  createdAt                       DateTime  @default(now()) @map("created_at")
+  updatedAt                       DateTime  @updatedAt @map("updated_at")
+  finishedAt                      DateTime? @map("finished_at")
+
+  user  User?            @relation(fields: [userId], references: [id], onDelete: SetNull)
+  tasks GenerationTask[]
+
+  @@index([userId, createdAt])
+  @@index([qqNumber, createdAt])
+  @@index([status, createdAt])
+  @@map("generation_batches")
+}
+
+// 生成主任务表；任务始终代表一张最终图，多图批次通过 batchId 聚合多个单图任务。
+model GenerationTask {
+  id              String    @id @db.VarChar(64)
+  clientRequestId String    @unique @map("client_request_id") @db.VarChar(96)
+  batchId         String?   @map("batch_id") @db.VarChar(64)
+  batchIndex      Int?      @map("batch_index")
+  batchTotal      Int?      @map("batch_total")
+  userId          Int?      @map("user_id")
+  source          String    @db.VarChar(16)
+  mode            String    @db.VarChar(24)
+  prompt          String    @db.Text
+  qqNumber        BigInt?   @map("qq_number")
+  templateId      Int?      @map("template_id")
+  sourceImageUrls Json?     @map("source_image_urls")
+  isPrivate       Boolean   @default(false) @map("is_private")
+  status          String    @default("queued") @db.VarChar(16)
+  error           String?   @db.Text
+  chargedSource      String?   @map("charged_source") @db.VarChar(8)
+  chargedAmount      String?   @map("charged_amount") @db.VarChar(16)
+  chargedFreeAmount  String?   @map("charged_free_amount") @db.VarChar(16)
+  chargedPaidAmount  String?   @map("charged_paid_amount") @db.VarChar(16)
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  startedAt       DateTime? @map("started_at")
+  finishedAt      DateTime? @map("finished_at")
+
+  batch    GenerationBatch?    @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  user     User?               @relation(fields: [userId], references: [id], onDelete: SetNull)
+  subTasks GenerationSubTask[]
+  chargeAllocations TaskChargeAllocation[]
+  localRuns LocalRun[]
+  tags GenerationTaskTag[]
+  taggingJob GalleryTaggingJob?
+
+  @@index([userId, createdAt])
+  @@index([qqNumber, createdAt])
+  @@index([status, createdAt])
+  @@index([batchId, batchIndex])
+  @@map("generation_tasks")
+}
+
+// 图库中文标签字典；同名标签全站共享同一配色，避免每张图重复生成颜色。
+model GalleryTag {
+  id         Int      @id @default(autoincrement())
+  name       String   @unique @db.VarChar(32)
+  slug       String   @unique @db.VarChar(64)
+  category   String   @db.VarChar(24)
+  colorBg    String   @map("color_bg") @db.VarChar(16)
+  colorText  String   @map("color_text") @db.VarChar(16)
+  colorBorder String  @map("color_border") @db.VarChar(16)
+  usageCount Int      @default(0) @map("usage_count")
+  disabled   Boolean  @default(false)
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  taskLinks GenerationTaskTag[]
+
+  @@index([category, disabled])
+  @@map("gallery_tags")
+}
+
+// 任务与图库标签关联表；weight 是该标签在当前图片上的展示排序权重。
+model GenerationTaskTag {
+  id         Int      @id @default(autoincrement())
+  taskId     String   @map("task_id") @db.VarChar(64)
+  tagId      Int      @map("tag_id")
+  weight     Int
+  confidence Float    @default(0)
+  source     String   @default("ai") @db.VarChar(16)
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  task GenerationTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  tag  GalleryTag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, tagId])
+  @@index([taskId, weight])
+  @@index([tagId, weight])
+  @@map("generation_task_tags")
+}
+
+// 图库自动打标任务；AI 慢或失败只影响标签，不影响生成任务状态和余额。
+model GalleryTaggingJob {
+  id            Int       @id @default(autoincrement())
+  taskId        String    @unique @map("task_id") @db.VarChar(64)
+  status        String    @default("pending") @db.VarChar(16)
+  attemptCount  Int       @default(0) @map("attempt_count")
+  error         String?   @db.Text
+  model         String?   @db.VarChar(128)
+  rawResultJson Json?     @map("raw_result_json")
+  startedAt     DateTime? @map("started_at")
+  finishedAt    DateTime? @map("finished_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  task GenerationTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
+  @@map("gallery_tagging_jobs")
+}
+
+// 生成子任务表；后端调度、绘图服务接收、同站重试、换站重试和上游尝试都必须挂到主任务下。
+model GenerationSubTask {
+  id         String    @id @default(uuid()) @db.VarChar(64)
+  taskId     String    @map("task_id") @db.VarChar(64)
+  sequence   Int
+  kind       String    @db.VarChar(32)
+  status     String    @default("queued") @db.VarChar(16)
+  attemptNo  Int?      @map("attempt_no")
+  siteId     Int?      @map("site_id")
+  siteName   String?   @map("site_name") @db.VarChar(128)
+  model      String?   @db.VarChar(96)
+  retryable  Boolean?  @map("retryable")
+  nextAction String?   @map("next_action") @db.VarChar(32)
+  latencyMs  Int?      @map("latency_ms")
+  error      String?   @db.Text
+  rawError   String?   @map("raw_error") @db.LongText
+  startedAt  DateTime? @map("started_at")
+  finishedAt DateTime? @map("finished_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  task GenerationTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, sequence])
+  @@index([taskId, kind])
+  @@index([status, createdAt])
+  @@index([kind, status, createdAt, siteId, latencyMs], map: "generation_sub_tasks_status_runtime_idx")
+  @@map("generation_sub_tasks")
+}
+
+// 模板表，保存用户创建的绘图模板，支持变量占位和封面图。
+model Template {
+  id                Int      @id @default(autoincrement())
+  userId            Int      @map("user_id")
+  sourceTemplateId  Int?     @map("source_template_id")
+  name              String   @db.VarChar(128)
+  description       String   @default("") @db.VarChar(2048)
+  promptTemplate    String   @map("prompt_template") @db.Text
+  defaultValues     String?  @map("default_values") @db.Text
+  size              String   @default("auto") @db.VarChar(32)
+  quality           String   @default("auto") @db.VarChar(32)
+  moderation        String   @default("auto") @db.VarChar(32)
+  coverImageUrls    String?  @map("cover_image_urls") @db.LongText
+  isPublic          Boolean  @default(false) @map("is_public")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  user            User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sourceTemplate  Template?          @relation("TemplateCopies", fields: [sourceTemplateId], references: [id], onDelete: SetNull)
+  copies          Template[]         @relation("TemplateCopies")
+  favorites       TemplateFavorite[]
+
+  @@index([userId, createdAt])
+  @@index([sourceTemplateId])
+  @@map("templates")
+}
+
+// 模板收藏表，同一用户同一模板只能收藏一次。
+model TemplateFavorite {
+  id         Int      @id @default(autoincrement())
+  userId     Int      @map("user_id")
+  templateId Int      @map("template_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  template Template @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, templateId])
+  @@map("template_favorites")
+}
+
+// LoRA 仓库主表；模型文件只保存安全短文件名和哈希，实际内容位于 backend 本地目录。
+model LoraRepositoryItem {
+  id               Int       @id @default(autoincrement())
+  userId           Int       @map("user_id")
+  title            String    @db.VarChar(120)
+  description      String    @db.Text
+  baseModel        String    @default("anima") @map("base_model") @db.VarChar(128)
+  loraType         String    @default("style") @map("lora_type") @db.VarChar(24)
+  status           String    @default("draft") @db.VarChar(16)
+  storedName       String?   @unique @map("stored_name") @db.VarChar(160)
+  originalFileName String?   @map("original_file_name") @db.VarChar(255)
+  fileSizeBytes    BigInt?   @map("file_size_bytes")
+  sha256           String?   @db.Char(64)
+  downloadCount    Int       @default(0) @map("download_count")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+  publishedAt      DateTime? @map("published_at")
+
+  user          User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  exampleImages LoraExampleImage[]
+
+  @@index([status, publishedAt])
+  @@index([userId, createdAt])
+  @@index([baseModel, status, publishedAt])
+  @@index([loraType, status, publishedAt])
+  @@map("lora_repository_items")
+}
+
+// LoRA 主模型全局词表；系统预置系列与用户新增系列统一供筛选和上传选择。
+model LoraBaseModel {
+  id              Int      @id @default(autoincrement())
+  name            String   @unique @db.VarChar(64)
+  displayName     String   @map("display_name") @db.VarChar(64)
+  isSystem        Boolean  @default(false) @map("is_system")
+  createdByUserId Int?     @map("created_by_user_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  createdBy User? @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([isSystem, displayName])
+  @@index([createdByUserId])
+  @@map("lora_base_models")
+}
+
+// LoRA 示例图表；图片统一转成 WebP，最多数量由业务层限制。
+model LoraExampleImage {
+  id         Int      @id @default(autoincrement())
+  loraId     Int      @map("lora_id")
+  storedName String   @unique @map("stored_name") @db.VarChar(160)
+  width      Int
+  height     Int
+  sizeBytes  Int      @map("size_bytes")
+  sortOrder  Int      @default(0) @map("sort_order")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  lora LoraRepositoryItem @relation(fields: [loraId], references: [id], onDelete: Cascade)
+
+  @@index([loraId, sortOrder])
+  @@map("lora_example_images")
+}
+
+// 图片浏览记录表，按 IP + 图片 ID 去重。
+model ImageView {
+  id        Int      @id @default(autoincrement())
+  imageId   String   @map("image_id") @db.VarChar(64)
+  ipAddress String   @map("ip_address") @db.VarChar(45)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([imageId, ipAddress])
+  @@map("image_views")
+}
+
+// 图片点赞表，同一用户同一图片只能点赞一次。
+model ImageLike {
+  id        Int      @id @default(autoincrement())
+  imageId   String   @map("image_id") @db.VarChar(64)
+  userId    Int      @map("user_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([imageId, userId])
+  @@map("image_likes")
+}
+
+// API 站点配置表，存储绘图上游站点的连接参数和模型选项。
+model ApiSite {
+  id                   Int       @id @default(autoincrement())
+  name                 String    @db.VarChar(64)
+  apiKey               String    @default("") @map("api_key") @db.VarChar(256)
+  baseUrl              String    @map("base_url") @db.VarChar(512)
+  model                String    @default("gpt-image-2") @db.VarChar(64)
+  weight               Int       @default(1)
+  streamMode           Boolean   @default(false) @map("stream_mode")
+  isEnabled            Boolean   @default(true) @map("is_enabled")
+  timeoutSec           Int       @default(300) @map("timeout_sec")
+  responseFormat       String    @default("auto") @map("response_format") @db.VarChar(32)
+  sendResponseFormat   Boolean   @default(true) @map("send_response_format")
+  sendPromptCacheKey   Boolean   @default(false) @map("send_prompt_cache_key")
+  autoSizeFromReference Boolean  @default(false) @map("auto_size_from_reference")
+  failedCount          Int       @default(0) @map("failed_count")
+  maxConcurrency       Int       @default(10) @map("max_concurrency")
+  disabledUntil        DateTime? @map("disabled_until")
+  autoDisabledUntil    DateTime? @map("auto_disabled_until")
+  autoDisabledReason   String?   @map("auto_disabled_reason") @db.Text
+  consecutiveFailures  Int       @default(0) @map("consecutive_failures")
+  modelOptions         String?   @map("model_options") @db.Text
+  totalCalls           Int       @default(0) @map("total_calls")
+  successCount         Int       @default(0) @map("success_count")
+  avgLatencyMs         Int       @default(0) @map("avg_latency_ms")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+
+  @@index([isEnabled, autoDisabledUntil])
+  @@map("api_sites")
+}
+
+// 本地推理主机表；只保存本项目 GPU 服务配置和健康摘要，不保存任何生产明文凭证。
+model LocalInferenceHost {
+  id              Int       @id @default(autoincrement())
+  hostKey         String    @unique @map("host_key") @db.VarChar(64)
+  name            String    @db.VarChar(128)
+  serviceUrl      String    @map("service_url") @db.VarChar(512)
+  enabled         Boolean   @default(true)
+  acceptsNewTasks Boolean   @default(true) @map("accepts_new_tasks")
+  maxConcurrency  Int       @default(1) @map("max_concurrency")
+  queueWeight     Int       @default(1) @map("queue_weight")
+  status          String    @default("unconfigured") @db.VarChar(24)
+  lastHealthAt    DateTime? @map("last_health_at")
+  lastError       String?   @map("last_error") @db.Text
+  metadataJson    Json?     @map("metadata_json")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  providers LocalModelProvider[]
+  localRuns LocalRun[]
+
+  @@index([enabled, acceptsNewTasks])
+  @@index([status, lastHealthAt])
+  @@map("local_inference_hosts")
+}
+
+// 本地模型 Provider 配置表；token 等敏感值只能通过 secret_ref 指向服务器私有环境，不落明文。
+model LocalModelProvider {
+  id                  Int       @id @default(autoincrement())
+  hostId              Int       @map("host_id")
+  providerKey         String    @map("provider_key") @db.VarChar(64)
+  type                String    @db.VarChar(32)
+  label               String    @db.VarChar(128)
+  baseUrl             String?   @map("base_url") @db.VarChar(512)
+  enabled             Boolean   @default(true)
+  acceptsNewTasks     Boolean   @default(true) @map("accepts_new_tasks")
+  maxConcurrency      Int       @default(1) @map("max_concurrency")
+  queueWeight         Int       @default(1) @map("queue_weight")
+  requestTimeoutSec   Int       @default(300) @map("request_timeout_sec")
+  websocketTimeoutSec Int       @default(300) @map("websocket_timeout_sec")
+  uploadPolicy        String    @default("input") @map("upload_policy") @db.VarChar(32)
+  outputPolicy        String    @default("media_service") @map("output_policy") @db.VarChar(32)
+  secretRef           String?   @map("secret_ref") @db.VarChar(128)
+  configJson          Json?     @map("config_json")
+  lastSyncAt          DateTime? @map("last_sync_at")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  host             LocalInferenceHost              @relation(fields: [hostId], references: [id], onDelete: Cascade)
+  models           LocalModel[]
+  modelFiles       LocalModelFile[]
+  nodeCatalogItems LocalNodeCatalog[]
+  templateVersions LocalWorkflowTemplateVersion[]
+  localRuns        LocalRun[]
+  workflowLocalTasks WorkflowLocalTask[]
+
+  @@unique([hostId, providerKey])
+  @@index([type, enabled])
+  @@index([acceptsNewTasks, enabled])
+  @@map("local_model_providers")
+}
+
+// 本地模型注册表；业务只读取启用状态、可见范围和安全上限，不直接操作 GPU 服务器模型文件。
+model LocalModel {
+  id                 Int      @id @default(autoincrement())
+  providerId         Int      @map("provider_id")
+  modelKey           String   @map("model_key") @db.VarChar(128)
+  displayName        String   @map("display_name") @db.VarChar(128)
+  modelType          String   @map("model_type") @db.VarChar(32)
+  family             String?  @db.VarChar(64)
+  capabilities       Json?
+  previewImageUrl    String?  @map("preview_image_url") @db.VarChar(512)
+  enabled            Boolean  @default(false)
+  visibility         String   @default("admin_only") @db.VarChar(24)
+  vramMinGb          Int?     @map("vram_min_gb")
+  vramRecommendedGb  Int?     @map("vram_recommended_gb")
+  modelPrecision     String?  @map("model_precision") @db.VarChar(32)
+  quantization       String?  @db.VarChar(32)
+  defaultWidth       Int      @default(1024) @map("default_width")
+  defaultHeight      Int      @default(1024) @map("default_height")
+  maxWidth           Int      @default(1024) @map("max_width")
+  maxHeight          Int      @default(1024) @map("max_height")
+  defaultSteps       Int      @default(24) @map("default_steps")
+  maxSteps           Int      @default(40) @map("max_steps")
+  defaultCfg         Decimal? @map("default_cfg") @db.Decimal(6, 2)
+  maxBatchSize       Int      @default(1) @map("max_batch_size")
+  maxConcurrency     Int      @default(1) @map("max_concurrency")
+  queueWeight        Int      @default(1) @map("queue_weight")
+  priceWeight        Decimal  @default(1.000) @map("price_weight") @db.Decimal(8, 3)
+  licenseNote        String?  @map("license_note") @db.VarChar(512)
+  metadataJson       Json?    @map("metadata_json")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  provider         LocalModelProvider             @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  files            LocalModelFile[]
+  templateVersions LocalWorkflowTemplateVersion[]
+  localRuns        LocalRun[]
+  workflowLocalTasks WorkflowLocalTask[]
+
+  @@unique([providerId, modelKey])
+  @@index([modelType, enabled])
+  @@index([visibility, enabled])
+  @@map("local_models")
+}
+
+// 本地模型文件摘要表；只保存同步发现的路径和哈希，禁止作为删除真实模型文件的依据。
+model LocalModelFile {
+  id           Int       @id @default(autoincrement())
+  modelId      Int       @map("model_id")
+  providerId   Int       @map("provider_id")
+  filePath     String    @map("file_path") @db.VarChar(512)
+  fileName     String    @map("file_name") @db.VarChar(255)
+  fileType     String    @map("file_type") @db.VarChar(32)
+  sizeBytes    BigInt?   @map("size_bytes")
+  sha256Hash   String?   @map("sha256_hash") @db.VarChar(128)
+  lastSeenAt   DateTime? @map("last_seen_at")
+  metadataJson Json?     @map("metadata_json")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  model    LocalModel         @relation(fields: [modelId], references: [id], onDelete: Cascade)
+  provider LocalModelProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, filePath])
+  @@index([modelId])
+  @@index([fileType, lastSeenAt])
+  @@map("local_model_files")
+}
+
+// 本地节点目录表；保存 Provider 节点快照、危险级别和可见范围，前端不能绕过 backend 白名单。
+model LocalNodeCatalog {
+  id           Int       @id @default(autoincrement())
+  providerId   Int       @map("provider_id")
+  classType    String    @map("class_type") @db.VarChar(160)
+  displayName  String    @map("display_name") @db.VarChar(160)
+  category     String?   @db.VarChar(160)
+  inputSchema  Json?     @map("input_schema")
+  outputSchema Json?     @map("output_schema")
+  dangerLevel  String    @default("safe") @map("danger_level") @db.VarChar(24)
+  visibility   String    @default("admin_only") @db.VarChar(24)
+  enabled      Boolean   @default(false)
+  rawSchema    Json?     @map("raw_schema")
+  syncedAt     DateTime? @map("synced_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  provider LocalModelProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, classType])
+  @@index([category])
+  @@index([visibility, enabled])
+  @@map("local_node_catalog")
+}
+
+// 本地工作流模板表；模板入口可软归档，可见范围不再按用户分层，避免破坏历史 LocalRun 关联。
+model LocalWorkflowTemplate {
+  id           Int      @id @default(autoincrement())
+  templateKey  String   @unique @map("template_key") @db.VarChar(128)
+  name         String   @db.VarChar(128)
+  category     String   @db.VarChar(64)
+  description  String   @default("") @db.VarChar(1024)
+  enabled      Boolean  @default(false)
+  visibility   String   @default("admin_only") @db.VarChar(24)
+  status       String   @default("draft") @db.VarChar(24)
+  metadataJson Json?    @map("metadata_json")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  versions  LocalWorkflowTemplateVersion[]
+  localRuns LocalRun[]
+  workflowLocalTasks WorkflowLocalTask[]
+
+  @@index([category, enabled])
+  @@index([visibility, status])
+  @@map("local_workflow_templates")
+}
+
+// 本地工作流模板版本表；Provider runtime JSON 版本化保存，管理员发布新版本不覆盖历史引用。
+model LocalWorkflowTemplateVersion {
+  id                  Int       @id @default(autoincrement())
+  templateId          Int       @map("template_id")
+  version             Int
+  status              String    @default("draft") @db.VarChar(24)
+  providerId          Int?      @map("provider_id")
+  modelId             Int?      @map("model_id")
+  runtimeTarget       String    @default("comfyui") @map("runtime_target") @db.VarChar(32)
+  inputSchema         Json?     @map("input_schema")
+  providerRuntimeJson Json?     @map("provider_runtime_json")
+  artifactRules       Json?     @map("artifact_rules")
+  priceWeight         Decimal   @default(1.000) @map("price_weight") @db.Decimal(8, 3)
+  timeoutSec          Int       @default(600) @map("timeout_sec")
+  createdById         Int?      @map("created_by_id")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  activatedAt         DateTime? @map("activated_at")
+
+  template  LocalWorkflowTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  provider  LocalModelProvider?   @relation(fields: [providerId], references: [id], onDelete: SetNull)
+  model     LocalModel?           @relation(fields: [modelId], references: [id], onDelete: SetNull)
+  localRuns LocalRun[]
+  workflowLocalTasks WorkflowLocalTask[]
+
+  @@unique([templateId, version])
+  @@index([providerId, status])
+  @@index([modelId])
+  @@map("local_workflow_template_versions")
+}
+
+// 本地推理运行表；记录 Provider prompt 和业务任务映射，余额扣费和失败退款仍由 backend 任务链路处理。
+model LocalRun {
+  id                String    @id @db.VarChar(64)
+  taskId            String?   @map("task_id") @db.VarChar(64)
+  workflowTaskId    String?   @map("workflow_task_id") @db.VarChar(64)
+  workflowId        String?   @map("workflow_id") @db.VarChar(64)
+  workflowVersionId String?   @map("workflow_version_id") @db.VarChar(64)
+  templateId        Int?      @map("template_id")
+  templateVersionId Int?      @map("template_version_id")
+  providerId        Int?      @map("provider_id")
+  hostId            Int?      @map("host_id")
+  modelId           Int?      @map("model_id")
+  status            String    @default("queued") @db.VarChar(24)
+  providerPromptId  String?   @map("provider_prompt_id") @db.VarChar(128)
+  inputsJson        Json?     @map("inputs_json")
+  callbackJson      Json?     @map("callback_json")
+  errorSummary      String?   @map("error_summary") @db.VarChar(512)
+  rawError          String?   @map("raw_error") @db.LongText
+  queuedAt          DateTime  @default(now()) @map("queued_at")
+  startedAt         DateTime? @map("started_at")
+  finishedAt        DateTime? @map("finished_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  task            GenerationTask?               @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  workflowTask    WorkflowLocalTask?            @relation(fields: [workflowTaskId], references: [id], onDelete: SetNull)
+  template        LocalWorkflowTemplate?        @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  templateVersion LocalWorkflowTemplateVersion? @relation(fields: [templateVersionId], references: [id], onDelete: SetNull)
+  provider        LocalModelProvider?           @relation(fields: [providerId], references: [id], onDelete: SetNull)
+  host            LocalInferenceHost?           @relation(fields: [hostId], references: [id], onDelete: SetNull)
+  model           LocalModel?                   @relation(fields: [modelId], references: [id], onDelete: SetNull)
+  nodes           LocalRunNode[]
+  artifacts       LocalRunArtifact[]
+
+  @@index([taskId])
+  @@index([workflowTaskId])
+  @@index([status, queuedAt])
+  @@index([providerPromptId])
+  @@index([providerId, status])
+  @@map("local_runs")
+}
+
+// 本地推理节点运行表；节点级进度和错误放在这里，避免膨胀 generation_sub_tasks。
+model LocalRunNode {
+  id           String    @id @default(uuid()) @db.VarChar(64)
+  localRunId   String    @map("local_run_id") @db.VarChar(64)
+  nodeKey      String    @map("node_key") @db.VarChar(128)
+  classType    String?   @map("class_type") @db.VarChar(160)
+  title        String?   @db.VarChar(160)
+  status       String    @default("queued") @db.VarChar(24)
+  progress     Int?
+  orderIndex   Int       @default(0) @map("order_index")
+  errorSummary String?   @map("error_summary") @db.VarChar(512)
+  rawError     String?   @map("raw_error") @db.LongText
+  metadataJson Json?     @map("metadata_json")
+  startedAt    DateTime? @map("started_at")
+  finishedAt   DateTime? @map("finished_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  localRun  LocalRun           @relation(fields: [localRunId], references: [id], onDelete: Cascade)
+  artifacts LocalRunArtifact[]
+
+  @@unique([localRunId, nodeKey])
+  @@index([localRunId, status])
+  @@map("local_run_nodes")
+}
+
+// 本地推理产物表；只保存产物引用和媒体摘要，真实文件生命周期仍由 media-service 控制。
+model LocalRunArtifact {
+  id           String   @id @default(uuid()) @db.VarChar(64)
+  localRunId   String   @map("local_run_id") @db.VarChar(64)
+  nodeId       String?  @map("node_id") @db.VarChar(64)
+  kind         String   @default("image") @db.VarChar(24)
+  filename     String?  @db.VarChar(255)
+  mediaUrl     String?  @map("media_url") @db.VarChar(1024)
+  mimeType     String?  @map("mime_type") @db.VarChar(128)
+  sizeBytes    BigInt?  @map("size_bytes")
+  width        Int?
+  height       Int?
+  metadataJson Json?    @map("metadata_json")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  localRun LocalRun      @relation(fields: [localRunId], references: [id], onDelete: Cascade)
+  node     LocalRunNode? @relation(fields: [nodeId], references: [id], onDelete: SetNull)
+
+  @@index([localRunId, kind])
+  @@index([nodeId])
+  @@map("local_run_artifacts")
+}
+
+// 充值批次表，记录每批卡密的生成信息。
+model RechargeBatch {
+  id          Int      @id @default(autoincrement())
+  amount      Decimal  @map("amount") @db.Decimal(10, 2)
+  count       Int
+  fileName    String   @map("file_name") @db.VarChar(255)
+  createdById Int      @map("created_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  createdBy User            @relation(fields: [createdById], references: [id])
+  cards     RechargeCard[]
+
+  @@index([createdById, createdAt])
+  @@map("recharge_batches")
+}
+
+// 卡密表，只存 SHA-256 哈希，明文只在生成响应和批次文件中出现。
+model RechargeCard {
+  id            Int       @id @default(autoincrement())
+  batchId       Int       @map("batch_id")
+  amount        Decimal   @map("amount") @db.Decimal(10, 2)
+  codeHash      String    @unique @map("code_hash") @db.VarChar(128)
+  status        String    @default("unused") @db.VarChar(16)
+  redeemedById  Int?      @map("redeemed_by_id")
+  redeemedQq    BigInt?   @map("redeemed_qq")
+  redeemedWalletId Int?    @map("redeemed_wallet_id")
+  redeemedAt    DateTime? @map("redeemed_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  batch     RechargeBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  redeemedBy User?        @relation(fields: [redeemedById], references: [id], onDelete: SetNull)
+
+  @@index([codeHash, status])
+  @@index([batchId])
+  @@index([redeemedWalletId])
+  @@map("recharge_cards")
+}
+
+// 模块配置表，全新配置结构，按模块名和 key 组织。
+model ModuleConfig {
+  id        Int      @id @default(autoincrement())
+  module    String   @db.VarChar(64)
+  key       String   @db.VarChar(96)
+  value     String   @db.Text
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([module, key])
+  @@map("module_configs")
+}
+
+// 用户模型偏好表，Bot /模型 命令按 QQ/userId 保存默认模型。
+model UserModelPref {
+  id           Int      @id @default(autoincrement())
+  userId       Int?     @map("user_id")
+  qqNumber     BigInt?  @map("qq_number")
+  model        String   @db.VarChar(64)
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@unique([userId])
+  @@unique([qqNumber])
+  @@map("user_model_prefs")
+}
+
+// QQ 图片隐私偏好表，QQ 用户独立于 Web 用户的默认图片公开/私密设置。
+model QqImagePrivacyPref {
+  qqNumber  BigInt   @id @map("qq_number")
+  isPrivate Boolean  @default(false) @map("is_private")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("qq_image_privacy_prefs")
+}
