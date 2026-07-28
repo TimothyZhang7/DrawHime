@@ -42,7 +42,7 @@
 | `GET /v1/inference/jobs/:id/loras/:versionId/cover` | web/admin | api | 经任务归属鉴权读取该任务实际选用 LoRA 的首张示例封面；即使 LoRA 后续下架，历史任务仍可审计展示 |
 | `GET /internal/gallery-publications/:externalTaskId/loras/:versionId/cover` | 主站 backend | api | 校验 `x-local-platform-token`、正式图库发布终态和任务 LoRA 快照后读取首张示例封面；用于主站图库封面代理，不开放对象存储地址 |
 | `GET /internal/gallery-publications/:externalTaskId/loras` | 主站 backend | api | 校验服务凭证和正式图库发布终态，按任务固化版本 ID 返回对应 LoRA 当前条目 ID、实时标题与类型，并返回任务独立保存的用户负面提示词；标题编辑后主站图库详情无需改写历史任务即可刷新 |
-| `POST /v1/inference/jobs/:id/cancel` | web | api | `InferenceJobCancelRequest`，只取消尚未运行任务并释放资金预留 |
+| `POST /v1/inference/jobs/:id/cancel` | web | api | `InferenceJobCancelRequest`，只取消尚未运行任务并释放资金预留；若该任务仍是所属身份最后一次提交，则在同一事务中清除该身份的本地模型提交冷却 |
 | `DELETE /v1/inference/jobs/:id` | web | api | 删除已结束推理记录；已发布作品先同步删除主站正式图库，余额、计费和产物审计不删除 |
 | `GET /v1/artifacts/:id/content` | web/admin | api | 经会话鉴权读取所属任务的对象存储产物 |
 | `GET /v1/loras` | web/admin | api | 已上传有效模型文件且当前身份可访问的 LoRA 列表 |

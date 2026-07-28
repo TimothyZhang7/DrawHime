@@ -635,7 +635,12 @@ async function ensureMainReservation(jobId: string): Promise<void> {
 async function cancelInferenceJob(jobId: string, reason: string): Promise<void> {
   const job = await database.inferenceJob.findUnique({ where: { id: jobId }, include: { billingReservation: true } });
   if (!job) throw new ApiOperationError(404, "job_not_found", "任务不存在");
-  if (["SUCCEEDED", "FAILED", "CANCELLED"].includes(job.status)) return;
+  if (job.status === "CANCELLED") {
+    // 幂等重试仍修复旧版本遗留的冷却闸门，但只清理仍指向该任务的身份记录。
+    await resetCancelledJobSubmissionCooldown(job.externalIdentityId, job.id);
+    return;
+  }
+  if (["SUCCEEDED", "FAILED"].includes(job.status)) return;
   if (job.status === "RUNNING") throw new ApiOperationError(409, "job_running", "任务已经进入 GPU 运行阶段");
   if (job.status === "RESERVING") await ensureMainReservation(job.id);
   const refreshed = await database.billingReservationMirror.findUnique({ where: { jobId } });
@@ -646,7 +651,14 @@ async function cancelInferenceJob(jobId: string, reason: string): Promise<void> 
     database.inferenceJob.update({ where: { id: jobId }, data: { status: "CANCELLED", progress: 100, errorCode: "cancelled_by_user", errorMessage: reason, completedAt: new Date() } }),
     database.billingReservationMirror.update({ where: { jobId }, data: { status: "RELEASED", lastSynchronizedAt: new Date(), errorMessage: null } }),
     database.jobStage.updateMany({ where: { jobId, status: { in: ["PENDING", "RUNNING"] } }, data: { status: "CANCELLED", errorMessage: reason, completedAt: new Date() } }),
+    // 只重置仍指向本任务的闸门，避免取消旧任务时覆盖用户更新任务建立的新冷却。
+    database.inferenceSubmissionGate.updateMany({ where: { externalIdentityId: job.externalIdentityId, lastJobId: job.id }, data: { lastSubmittedAt: new Date(0), lastJobId: null } }),
   ]);
+}
+
+/** 幂等清理已取消任务仍占用的身份提交冷却。 */
+async function resetCancelledJobSubmissionCooldown(externalIdentityId: string, jobId: string): Promise<void> {
+  await database.inferenceSubmissionGate.updateMany({ where: { externalIdentityId, lastJobId: jobId }, data: { lastSubmittedAt: new Date(0), lastJobId: null } });
 }
 
 /** 删除已结束推理记录；用户入口先清理主站图库，主站回调入口只执行本地软删除以避免循环调用。 */

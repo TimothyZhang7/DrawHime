@@ -2,12 +2,21 @@
  * 本文件实现分阶段 LoRA 训练工作区：数据上传、持久化自动打标、人工确认、动态计价、训练提交与历史审计。
  */
 import type { InferenceModelView, TrainingCaptionStageView, TrainingDatasetView, TrainingJobView, TrainingParameters, TrainingPriceQuoteView } from "@drawhime/contracts";
-import { BrainCircuit, Check, Circle, Eye, ImagePlus, LoaderCircle, Play, RefreshCw, Sparkles, Tags, Trash2, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, BrainCircuit, Check, Circle, Eye, ImagePlus, LoaderCircle, Play, RefreshCw, Sparkles, Tags, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { formatQueueCompletion, formatQueueSummary } from "./queue-display";
+import { TrainingCaptionReview, TrainingPrivateImage } from "./TrainingCaptionReview";
+import { trainingBinary, trainingJson } from "./training-client";
 
-const apiBase = import.meta.env.VITE_LOCAL_API_BASE || "/local-model-api";
 const minimumTrainingImages = 5;
+type TrainingStepId = "images" | "caption" | "review" | "configure" | "jobs";
+const trainingSteps: Array<{ id: TrainingStepId; label: string; hint: string }> = [
+  { id: "images", label: "准备图片", hint: "上传并检查训练素材" },
+  { id: "caption", label: "自动打标", hint: "生成当前图片快照标签" },
+  { id: "review", label: "核对标签", hint: "逐图编辑并确认" },
+  { id: "configure", label: "训练设置", hint: "参数、价格与提交" },
+  { id: "jobs", label: "训练任务", hint: "排队、进度与结果" },
+];
 
 /** 用户训练工作区。 */
 export function TrainingPage({ token, models }: { token: string; models: InferenceModelView[] }) {
@@ -18,8 +27,8 @@ export function TrainingPage({ token, models }: { token: string; models: Inferen
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
 
-  const refresh = useCallback(async (quiet = false) => {
-    if (!token) { setDatasets([]); setJobs([]); setLoading(false); return; }
+  const refresh = useCallback(async (quiet = false): Promise<{ datasets: TrainingDatasetView[]; jobs: TrainingJobView[] } | null> => {
+    if (!token) { setDatasets([]); setJobs([]); setLoading(false); return null; }
     if (!quiet) setLoading(true);
     try {
       const [datasetPayload, jobPayload] = await Promise.all([
@@ -34,12 +43,13 @@ export function TrainingPage({ token, models }: { token: string; models: Inferen
         return datasetPayload.datasets.some((item) => item.id === current) ? current : datasetPayload.datasets[0]?.id || "";
       });
       if (!quiet) setMessage("");
-    } catch (error) { setMessage(errorMessage(error)); }
+      return { datasets: datasetPayload.datasets, jobs: jobPayload.jobs };
+    } catch (error) { setMessage(errorMessage(error)); return null; }
     finally { if (!quiet) setLoading(false); }
   }, [token]);
 
   useEffect(() => { void refresh(); }, [refresh]);
-  const hasActiveWork = jobs.some((job) => !isTrainingFinal(job.status)) || datasets.some((dataset) => ["queued", "running"].includes(dataset.captionStage?.status || ""));
+  const hasActiveWork = jobs.some((job) => !isTrainingFinal(job.status)) || datasets.some((dataset) => [dataset.captionStage, ...dataset.assets.map((asset) => asset.captionStage)].some((stage) => ["queued", "running"].includes(stage?.status || "")));
   useEffect(() => {
     if (!token || !hasActiveWork) return;
     const timer = window.setInterval(() => void refresh(true), 3000);
@@ -47,32 +57,90 @@ export function TrainingPage({ token, models }: { token: string; models: Inferen
   }, [hasActiveWork, refresh, token]);
 
   const selected = datasets.find((item) => item.id === selectedId) ?? null;
+  /** 数据集切换同步地址栏并回到该数据集的权威进度，避免轮询把选择恢复成旧项目。 */
+  const selectDataset = (datasetId: string) => {
+    setSelectedId(datasetId);
+    const url = new URL(window.location.href);
+    url.searchParams.set("dataset", datasetId);
+    url.searchParams.delete("trainingStep");
+    window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+  };
   return (
     <div className="training-page">
       <section className="training-sidebar card">
         <div className="card-head"><div><span>训练项目</span><h2>我的数据集</h2></div><button className="small-icon" onClick={() => void refresh()} aria-label="刷新训练数据"><RefreshCw size={15} className={loading ? "spin" : ""} /></button></div>
-        <DatasetCreator token={token} onCreated={async (dataset) => { await refresh(); setSelectedId(dataset.id); }} onError={setMessage} />
-        {datasets.length === 0 ? <div className="training-empty">先建立项目，再按页面引导完成数据准备</div> : <div className="dataset-list">{datasets.map((dataset) => <button className={dataset.id === selectedId ? "active" : ""} key={dataset.id} onClick={() => setSelectedId(dataset.id)}><strong>{dataset.title}</strong><small>{dataset.assets.length} 张 · {captionStageShortLabel(dataset.captionStage)}</small></button>)}</div>}
+        <DatasetCreator token={token} onCreated={async (dataset) => { selectDataset(dataset.id); await refresh(); }} onError={setMessage} />
+        {datasets.length === 0 ? <div className="training-empty">先建立项目，再按页面引导完成数据准备</div> : <div className="dataset-list">{datasets.map((dataset) => <button className={dataset.id === selectedId ? "active" : ""} key={dataset.id} onClick={() => selectDataset(dataset.id)}><strong>{dataset.title}</strong><small>{dataset.assets.length} 张 · {captionStageShortLabel(dataset.captionStage)}</small></button>)}</div>}
       </section>
       <main className="training-main">
         {message && <div className="notice error training-message"><span>{message}</span><button onClick={() => setMessage("")} aria-label="关闭提示"><X size={14} /></button></div>}
-        {selected ? <>
-          <TrainingGuide dataset={selected} />
-          <DatasetEditor token={token} dataset={selected} onChanged={() => refresh(true)} onDeleted={() => refresh()} onError={setMessage} />
-          <CaptionStage token={token} dataset={selected} onChanged={() => refresh(true)} onError={setMessage} />
-          <TrainingCreator token={token} dataset={selected} models={models} onCreated={() => refresh(true)} />
-        </> : <section className="card training-welcome"><BrainCircuit size={38} /><h2>建立专属 LoRA</h2><p>页面会依次引导上传、自动打标、人工确认、参数试算和正式训练；所有阶段刷新后都可恢复。</p></section>}
-        <TrainingJobs token={token} jobs={jobs} onChanged={() => refresh(true)} onDetail={setSelectedJob} onError={setMessage} />
+        {selected ? <TrainingWorkspace key={selected.id} token={token} dataset={selected} jobs={jobs.filter((job) => job.datasetId === selected.id)} models={models} onReload={async () => { const payload = await refresh(true); return payload?.datasets.find((item) => item.id === selected.id) || null; }} onDeleted={async () => { const url = new URL(window.location.href); url.searchParams.delete("dataset"); url.searchParams.delete("trainingStep"); window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`); await refresh(); }} onDetail={setSelectedJob} onError={setMessage} /> : <section className="card training-welcome"><BrainCircuit size={38} /><h2>建立专属 LoRA</h2><p>每个阶段使用独立页面；上一步通过服务端校验后才开放下一步，刷新后按权威状态恢复。</p></section>}
       </main>
       {selectedJob && <TrainingJobDialog token={token} job={selectedJob} onClose={() => setSelectedJob(null)} />}
     </div>
   );
 }
 
-/** 展示当前数据集的四阶段完成进度。 */
-function TrainingGuide({ dataset }: { dataset: TrainingDatasetView }) {
-  const steps = trainingGuideSteps(dataset);
-  return <section className="card training-guide"><div><span>训练引导</span><h2>按顺序完成每个阶段</h2><p>自动打标完成后先检查每张 Caption，只有明确确认后才开放训练提交。</p></div><ol>{steps.map((step, index) => <li className={step.state} key={step.label}>{step.state === "done" ? <Check /> : <span>{index + 1}</span>}<div><strong>{step.label}</strong><small>{step.detail}</small></div></li>)}</ol></section>;
+/** 单个训练集使用独立分步页面；回退会截断前端通行状态，重新前进时再次读取服务端校验。 */
+function TrainingWorkspace({ token, dataset, jobs, models, onReload, onDeleted, onDetail, onError }: { token: string; dataset: TrainingDatasetView; jobs: TrainingJobView[]; models: InferenceModelView[]; onReload: () => Promise<TrainingDatasetView | null>; onDeleted: () => Promise<void>; onDetail: (job: TrainingJobView) => void; onError: (message: string) => void }) {
+  const initialIndex = initialTrainingStepIndex(dataset);
+  const [activeIndex, setActiveIndex] = useState(initialIndex);
+  const [verifiedIndex, setVerifiedIndex] = useState(initialIndex);
+  const [visited, setVisited] = useState<Set<TrainingStepId>>(() => new Set([trainingSteps[initialIndex]!.id]));
+  const [checking, setChecking] = useState(false);
+  const activeStep = trainingSteps[activeIndex]!.id;
+
+  useEffect(() => { writeTrainingStep(activeStep); }, [activeStep]);
+  useEffect(() => {
+    if (isTrainingStepReachable(dataset, activeStep)) return;
+    const fallback = highestReachableStepIndex(dataset);
+    setActiveIndex(fallback);
+    setVerifiedIndex(fallback);
+    setVisited((current) => new Set(current).add(trainingSteps[fallback]!.id));
+  }, [activeStep, dataset]);
+
+  /** 回到之前阶段时立即收回后续页面通行权，后续必须逐页重新校验。 */
+  const openStep = (index: number) => {
+    if (index > verifiedIndex) return;
+    setActiveIndex(index);
+    if (index < activeIndex) setVerifiedIndex(index);
+    setVisited((current) => new Set(current).add(trainingSteps[index]!.id));
+  };
+  /** 下一步前重新请求当前数据集，避免使用页面缓存跳过图片快照或确认状态校验。 */
+  const advance = async () => {
+    setChecking(true);
+    try {
+      const current = await onReload();
+      if (!current) return onError("训练集刷新失败，请重试");
+      const issue = trainingStepIssue(current, activeStep);
+      if (issue) return onError(issue);
+      const nextIndex = Math.min(trainingSteps.length - 1, activeIndex + 1);
+      setVerifiedIndex(nextIndex);
+      setActiveIndex(nextIndex);
+      setVisited((items) => new Set(items).add(trainingSteps[nextIndex]!.id));
+    } finally { setChecking(false); }
+  };
+  const changed = async () => { await onReload(); };
+  const finishTraining = async () => { await onReload(); setVerifiedIndex(4); setActiveIndex(4); setVisited((current) => new Set(current).add("jobs")); };
+
+  return <div className="training-flow">
+    <TrainingStepNavigation dataset={dataset} activeIndex={activeIndex} verifiedIndex={verifiedIndex} onOpen={openStep} />
+    {visited.has("images") && <div className="training-flow-panel" hidden={activeStep !== "images"}><DatasetEditor token={token} dataset={dataset} onChanged={changed} onDeleted={onDeleted} onError={onError} /><TrainingFlowFooter activeIndex={activeIndex} checking={checking} onBack={() => openStep(activeIndex - 1)} onNext={() => void advance()} /></div>}
+    {visited.has("caption") && <div className="training-flow-panel" hidden={activeStep !== "caption"}><CaptionStage token={token} dataset={dataset} onChanged={changed} onError={onError} /><TrainingFlowFooter activeIndex={activeIndex} checking={checking} onBack={() => openStep(activeIndex - 1)} onNext={() => void advance()} /></div>}
+    {visited.has("review") && <div className="training-flow-panel" hidden={activeStep !== "review"}><TrainingCaptionReview token={token} dataset={dataset} onChanged={changed} onConfirmed={async () => undefined} onError={onError} /><TrainingFlowFooter activeIndex={activeIndex} checking={checking} onBack={() => openStep(activeIndex - 1)} onNext={() => void advance()} /></div>}
+    {visited.has("configure") && <div className="training-flow-panel" hidden={activeStep !== "configure"}><TrainingCreator token={token} dataset={dataset} models={models} onCreated={finishTraining} /><TrainingFlowFooter activeIndex={activeIndex} checking={checking} onBack={() => openStep(activeIndex - 1)} onNext={dataset.trainingJobCount > 0 ? () => void advance() : undefined} /></div>}
+    {visited.has("jobs") && <div className="training-flow-panel" hidden={activeStep !== "jobs"}><TrainingJobs token={token} jobs={jobs} onChanged={changed} onDetail={onDetail} onError={onError} /><TrainingFlowFooter activeIndex={activeIndex} checking={checking} onBack={() => openStep(activeIndex - 1)} /></div>}
+  </div>;
+}
+
+/** 顶部步骤条复用 Bot 绑定式单页流程，禁用尚未通过重新校验的后续页面。 */
+function TrainingStepNavigation({ dataset, activeIndex, verifiedIndex, onOpen }: { dataset: TrainingDatasetView; activeIndex: number; verifiedIndex: number; onOpen: (index: number) => void }) {
+  return <nav className="training-step-navigation" aria-label="LoRA 训练步骤">{trainingSteps.map((step, index) => { const completed = trainingStepCompleted(dataset, step.id); const needsRecheck = completed && index > verifiedIndex; return <button key={step.id} className={`${index === activeIndex ? "active" : ""}${completed && !needsRecheck ? " done" : ""}${needsRecheck ? " recheck" : ""}`} disabled={index > verifiedIndex} onClick={() => onOpen(index)}><i>{completed && !needsRecheck ? <Check size={13} /> : index + 1}</i><span><strong>{step.label}</strong><small>{needsRecheck ? "需重新校验" : step.hint}</small></span></button>; })}</nav>;
+}
+
+/** 每个阶段底部只提供回退或重新校验后继续，避免跨页跳步。 */
+function TrainingFlowFooter({ activeIndex, checking, onBack, onNext }: { activeIndex: number; checking: boolean; onBack: () => void; onNext?: () => void }) {
+  return <footer className="training-flow-footer">{activeIndex > 0 && <button onClick={onBack}><ArrowLeft size={14} />返回上一步</button>}<span>返回后，后续步骤需要按顺序重新校验。</span>{onNext && <button className="next" disabled={checking} onClick={onNext}>{checking ? <LoaderCircle className="spin" /> : <>重新校验并继续<ArrowRight size={14} /></>}</button>}</footer>;
 }
 
 /** 创建带用途说明的数据集。 */
@@ -91,7 +159,7 @@ function DatasetCreator({ token, onCreated, onError }: { token: string; onCreate
   return <div className="dataset-create"><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="新训练项目名称" maxLength={191} onKeyDown={(event) => { if (event.key === "Enter") void submit(); }} /><button disabled={busy || !title.trim()} onClick={() => void submit()}>{busy ? <LoaderCircle className="spin" /> : "创建"}</button></div>;
 }
 
-/** 上传、归档数据集并展示逐图 Caption 编辑器。 */
+/** 图片准备页只负责上传、预览和移除，标签编辑固定放在后续独立核对页面。 */
 function DatasetEditor({ token, dataset, onChanged, onDeleted, onError }: { token: string; dataset: TrainingDatasetView; onChanged: () => Promise<void>; onDeleted: () => Promise<void>; onError: (message: string) => void }) {
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState("");
@@ -120,33 +188,12 @@ function DatasetEditor({ token, dataset, onChanged, onDeleted, onError }: { toke
     catch (error) { onError(errorMessage(error)); }
   };
   return <section className="card dataset-editor training-stage-card">
-    <StageHeading index={1} title="准备训练图片" description={`上传 ${minimumTrainingImages}–200 张同一角色、画风或概念的清晰图片；重复图片会被 SHA-256 拒绝。`} done={dataset.assets.length >= minimumTrainingImages} />
+    <header className="training-page-heading"><div><span>STEP 01</span><h2>准备训练图片</h2><p>上传 {minimumTrainingImages}–200 张同一角色、画风或概念的清晰图片；重复图片会被 SHA-256 拒绝。</p></div><strong>{dataset.assets.length}/200</strong></header>
     <div className="dataset-toolbar"><span>{dataset.assets.length}/200 张</span><label className="dataset-upload"><ImagePlus size={15} />{progress || "添加图片"}<input type="file" accept="image/*,.avif,.heic,.heif,.webp" multiple disabled={busy || locked} onChange={(event) => void upload(Array.from(event.target.files || []).slice(0, 200 - dataset.assets.length))} /></label><button className="dataset-archive" disabled={busy || dataset.trainingJobCount > 0} onClick={() => void archive()}><Trash2 size={14} />归档</button></div>
     {dataset.trainingJobCount > 0 && <div className="dataset-lock">该数据集已经用于训练，内容已锁定以保证任务可审计。</div>}
     {captionActive && <div className="dataset-lock">自动打标正在读取当前图片快照，完成前暂不允许增删或编辑。</div>}
-    <div className="dataset-assets">{dataset.assets.map((asset) => <DatasetAssetCard key={asset.id} token={token} datasetId={dataset.id} asset={asset} locked={locked} onChanged={onChanged} onRemove={() => void remove(asset.id)} onError={onError} />)}{dataset.assets.length === 0 && <label className="dataset-drop"><ImagePlus /><strong>拖入角色、画风或概念图片</strong><small>常见格式会统一方向、色彩空间并保存为高质量 WebP</small><input type="file" accept="image/*,.avif,.heic,.heif,.webp" multiple disabled={busy} onChange={(event) => void upload(Array.from(event.target.files || []).slice(0, 200))} /></label>}</div>
+    <div className="dataset-assets">{dataset.assets.map((asset) => <article className="dataset-asset-preview" key={asset.id}><TrainingPrivateImage token={token} datasetId={dataset.id} assetId={asset.id} /><span>{asset.width && asset.height ? `${asset.width} × ${asset.height}` : "训练图片"}</span><button disabled={locked} onClick={() => void remove(asset.id)} aria-label="移除训练图片"><Trash2 size={14} /></button></article>)}{dataset.assets.length === 0 && <label className="dataset-drop"><ImagePlus /><strong>拖入角色、画风或概念图片</strong><small>常见格式会统一方向、色彩空间并保存为高质量 WebP</small><input type="file" accept="image/*,.avif,.heic,.heif,.webp" multiple disabled={busy} onChange={(event) => void upload(Array.from(event.target.files || []).slice(0, 200))} /></label>}</div>
   </section>;
-}
-
-/** 单张训练图片与人工 Caption 编辑器。 */
-function DatasetAssetCard({ token, datasetId, asset, locked, onChanged, onRemove, onError }: { token: string; datasetId: string; asset: TrainingDatasetView["assets"][number]; locked: boolean; onChanged: () => Promise<void>; onRemove: () => void; onError: (message: string) => void }) {
-  const [source, setSource] = useState("");
-  const [caption, setCaption] = useState(asset.caption || "");
-  const [saving, setSaving] = useState(false);
-  const [imageError, setImageError] = useState(false);
-  useEffect(() => {
-    let url = ""; setImageError(false);
-    void fetch(`${apiBase}/v1/training/datasets/${datasetId}/assets/${asset.id}/content`, { headers: { authorization: `Bearer ${token}` } }).then(async (response) => { if (!response.ok) throw new Error("图片读取失败"); url = URL.createObjectURL(await response.blob()); setSource(url); }).catch((error) => { setImageError(true); onError(errorMessage(error)); });
-    return () => { if (url) URL.revokeObjectURL(url); };
-  }, [asset.id, datasetId, onError, token]);
-  useEffect(() => { setCaption(asset.caption || ""); }, [asset.caption]);
-  const save = async () => {
-    setSaving(true);
-    try { await trainingJson(`/v1/training/datasets/${datasetId}/assets/${asset.id}`, token, { method: "PATCH", body: JSON.stringify({ caption: caption.trim() || null }) }); await onChanged(); }
-    catch (error) { onError(errorMessage(error)); }
-    finally { setSaving(false); }
-  };
-  return <article className={`dataset-asset${asset.caption?.trim() ? " caption-ready" : ""}`}><div>{source ? <img src={source} alt="训练图片" /> : imageError ? <span className="asset-load-error">读取失败</span> : <LoaderCircle className="spin" />}<button disabled={locked} onClick={onRemove} aria-label="移除"><Trash2 size={14} /></button></div><textarea rows={4} value={caption} disabled={locked} onChange={(event) => setCaption(event.target.value)} placeholder="自动打标结果会显示在这里；请按图片逐项核对" /><button disabled={locked || saving || caption === (asset.caption || "")} onClick={() => void save()}>{saving ? "保存中" : "保存 Caption"}</button></article>;
 }
 
 /** 持久化自动打标、进度、人工检查和确认操作。 */
@@ -155,25 +202,17 @@ function CaptionStage({ token, dataset, onChanged, onError }: { token: string; d
   const [busy, setBusy] = useState(false);
   const stage = dataset.captionStage;
   const active = ["queued", "running"].includes(stage?.status || "");
-  const allCaptioned = dataset.assets.length >= minimumTrainingImages && dataset.assets.every((asset) => Boolean(asset.caption?.trim()));
   const start = async () => {
     setBusy(true);
     try { await trainingJson(`/v1/training/datasets/${dataset.id}/caption-jobs`, token, { method: "POST", body: JSON.stringify({ mode }) }); await onChanged(); }
     catch (error) { onError(errorMessage(error)); }
     finally { setBusy(false); }
   };
-  const confirm = async () => {
-    if (!stage || !window.confirm("确认已经逐图检查全部 Caption，并使用当前图片快照进入训练参数阶段？")) return;
-    setBusy(true);
-    try { await trainingJson(`/v1/training/datasets/${dataset.id}/caption-jobs/${stage.id}/confirm`, token, { method: "POST", body: "{}" }); await onChanged(); }
-    catch (error) { onError(errorMessage(error)); }
-    finally { setBusy(false); }
-  };
   return <section className="card training-stage-card caption-stage">
-    <StageHeading index={2} title="自动打标并人工确认" description="AI 会逐图生成英文 Caption。完成后请对照图片修改错误内容，再由你明确确认。" done={stage?.status === "confirmed"} />
+    <header className="training-page-heading"><div><span>STEP 02</span><h2>自动打标</h2><p>AI 按当前图片快照逐图生成英文 Anima 标签；本页只负责生成，下一页单独核对和确认。</p></div><strong>{stage ? `${Math.round(stage.progress)}%` : "待开始"}</strong></header>
     <div className="caption-controls"><label><span>打标重点</span><select value={mode} disabled={active || busy} onChange={(event) => setMode(event.target.value as typeof mode)}><option value="character">角色 LoRA：外观、服装、姿势</option><option value="style">画风 LoRA：媒介、线条、色彩、光影</option><option value="concept">概念 LoRA：主体、场景、画风平衡</option></select></label><button className="caption-run" disabled={busy || active || dataset.assets.length < minimumTrainingImages || dataset.trainingJobCount > 0} onClick={() => void start()}>{busy ? <LoaderCircle className="spin" /> : <Sparkles size={15} />}{stage ? "重新自动打标" : "开始自动打标"}</button></div>
     {stage ? <div className={`caption-status is-${stage.status}`}><div><Tags size={18} /><span><strong>{captionStageLabel(stage.status)}</strong><small>{stage.completedAssets}/{stage.totalAssets} 张 · {Math.round(stage.progress)}%</small></span></div><div className="training-progress"><i style={{ width: `${stage.progress}%` }} /></div>{stage.errorMessage && <p>{stage.errorMessage}</p>}</div> : <div className="caption-hint">上传至少 {minimumTrainingImages} 张图片后开始；任务会持久化，关闭或刷新页面不会丢失进度。</div>}
-    {["awaiting_confirmation", "confirmed"].includes(stage?.status || "") && <div className="caption-review"><div><strong>{stage?.status === "confirmed" ? "Caption 已确认" : "请先检查上方每张图片的 Caption"}</strong><span>{allCaptioned ? "全部图片已有 Caption" : "仍有图片缺少 Caption"}</span></div><button disabled={busy || !allCaptioned || stage?.status === "confirmed"} onClick={() => void confirm()}><Check size={15} />{stage?.status === "confirmed" ? "已确认" : "确认 Caption"}</button></div>}
+    {["awaiting_confirmation", "confirmed"].includes(stage?.status || "") && <div className="caption-review"><div><strong>当前图片快照已完成打标</strong><span>进入下一页后逐图核对中英标签；任何修改都需要重新确认。</span></div><Check size={18} /></div>}
   </section>;
 }
 
@@ -182,7 +221,7 @@ function TrainingCreator({ token, dataset, models, onCreated }: { token: string;
   const animaModels = useMemo(() => models.filter((model) => model.family === "anima"), [models]);
   const [modelId, setModelId] = useState("");
   const [title, setTitle] = useState("");
-  const [triggers, setTriggers] = useState("");
+  const [triggers, setTriggers] = useState(() => dataset.triggerWords.join(", "));
   const [parameters, setParameters] = useState<TrainingParameters>(() => defaultTrainingParameters(dataset.assets.length));
   const [quote, setQuote] = useState<TrainingPriceQuoteView | null>(null);
   const [quoteLoading, setQuoteLoading] = useState(false);
@@ -213,8 +252,8 @@ function TrainingCreator({ token, dataset, models, onCreated }: { token: string;
     finally { setBusy(false); }
   };
   return <section className={`card training-stage-card training-create${confirmed ? "" : " is-locked"}`}>
-    <StageHeading index={3} title="设置参数、核对价格并训练" description="每次改动都会由服务端按当前图片数量和真实训练工作量重新试算，提交时再次复算并按相同单位预留余额。" done={dataset.trainingJobCount > 0} />
-    {!confirmed && <div className="training-locked"><Circle size={16} />完成并确认 Caption 后开放全部参数。</div>}
+    <header className="training-page-heading"><div><span>STEP 04</span><h2>训练设置</h2><p>配置参数并核对动态价格；提交时服务端再次复算并按相同单位预留余额。</p></div><strong>{quote ? `¥${quote.estimatedPrice}` : "试算中"}</strong></header>
+    {!confirmed && <div className="training-locked"><Circle size={16} />服务端确认状态已变化，请返回标签核对页重新确认。</div>}
     <fieldset disabled={!confirmed || busy}>
       <div className="field-grid"><label className="field"><span>LoRA 标题</span><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="例如：角色名 · 夏日服装" /></label><label className="field"><span>基础模型</span><select value={modelId} onChange={(event) => setModelId(event.target.value)}>{animaModels.map((model) => <option key={model.modelVersionId} value={model.modelVersionId}>{model.displayName}</option>)}</select></label></div>
       <label className="field"><span>触发词 <small>逗号分隔，训练图片 Caption 中不会自动加入</small></span><input value={triggers} onChange={(event) => setTriggers(event.target.value)} placeholder="例如：my_character" /></label>
@@ -233,9 +272,6 @@ function TrainingCreator({ token, dataset, models, onCreated }: { token: string;
 function ParameterNumber({ label, value, min, max, onChange }: { label: string; value: number; min: number; max: number; onChange: (value: number) => void }) { return <label>{label}<input type="number" min={min} max={max} value={value} onChange={(event) => onChange(Number(event.target.value))} /></label>; }
 /** 统一渲染有限枚举数字参数。 */
 function ParameterSelect({ label, value, values, onChange }: { label: string; value: number; values: number[]; onChange: (value: number) => void }) { return <label>{label}<select value={value} onChange={(event) => onChange(Number(event.target.value))}>{values.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>; }
-/** 训练阶段标题保持统一编号、说明和完成态。 */
-function StageHeading({ index, title, description, done }: { index: number; title: string; description: string; done: boolean }) { return <div className="stage-heading"><span className={done ? "done" : ""}>{done ? <Check size={15} /> : index}</span><div><h2>{title}</h2><p>{description}</p></div></div>; }
-
 /** 持久化训练任务状态列表。 */
 function TrainingJobs({ token, jobs, onChanged, onDetail, onError }: { token: string; jobs: TrainingJobView[]; onChanged: () => Promise<void>; onDetail: (job: TrainingJobView) => void; onError: (message: string) => void }) {
   const cancel = async (job: TrainingJobView) => { if (!window.confirm("取消训练并释放预留余额？")) return; try { await trainingJson(`/v1/training/jobs/${job.id}/cancel`, token, { method: "POST", body: "{}" }); await onChanged(); } catch (error) { onError(errorMessage(error)); } };
@@ -258,12 +294,56 @@ function defaultTrainingParameters(assetCount: number): TrainingParameters {
   const repeats = Math.max(1, Math.round(160 / safeAssetCount / epochs));
   return { rank: 16, alpha: 16, epochs, repeats, resolution: 768, learningRate: 0.0001, lrScheduler: "constant", warmupRatio: 0, gradientAccumulationSteps: 1, captionDropoutRate: 0, shuffleCaption: false, keepTokens: 1, seed: Math.floor(Math.random() * 2147483647), maxAttempts: 2, samplePrompt: "" };
 }
-function trainingGuideSteps(dataset: TrainingDatasetView): Array<{ label: string; detail: string; state: "done" | "current" | "pending" }> { const uploaded = dataset.assets.length >= minimumTrainingImages; const captioned = ["awaiting_confirmation", "confirmed"].includes(dataset.captionStage?.status || ""); const confirmed = dataset.captionStage?.status === "confirmed"; return [{ label: "上传图片", detail: uploaded ? `${dataset.assets.length} 张已就绪` : `还需 ${Math.max(0, minimumTrainingImages - dataset.assets.length)} 张`, state: uploaded ? "done" : "current" }, { label: "自动打标", detail: captionStageLabel(dataset.captionStage?.status || "not_started"), state: captioned ? "done" : uploaded ? "current" : "pending" }, { label: "人工确认", detail: confirmed ? "已确认当前快照" : "逐图核对 Caption", state: confirmed ? "done" : captioned ? "current" : "pending" }, { label: "参数与价格", detail: dataset.trainingJobCount > 0 ? "已有训练任务" : "服务端动态试算", state: dataset.trainingJobCount > 0 ? "done" : confirmed ? "current" : "pending" }]; }
 function captionStageLabel(status: string): string { return { not_started: "尚未开始", queued: "等待自动打标", running: "正在逐图打标", awaiting_confirmation: "等待人工确认", confirmed: "Caption 已确认", failed: "自动打标失败，可重试", stale: "图片已变化，需要重做" }[status] || status; }
 function captionStageShortLabel(stage: TrainingCaptionStageView | null): string { return stage ? captionStageLabel(stage.status) : "未打标"; }
 function TrainingJsonBlock({ title, value }: { title: string; value: Record<string, unknown> }) { return <details className="json-block"><summary>{title}</summary><pre>{JSON.stringify(value, null, 2)}</pre></details>; }
-async function trainingJson<T>(path: string, token: string, init: RequestInit = {}): Promise<T> { const response = await fetch(`${apiBase}${path}`, { ...init, headers: { "content-type": "application/json", authorization: `Bearer ${token}`, ...(init.headers || {}) }, cache: "no-store" }); const payload = await response.json() as { ok?: boolean; data?: T; message?: string }; if (!response.ok || payload.ok !== true || payload.data === undefined) throw new Error(payload.message || `HTTP ${response.status}`); return payload.data; }
-async function trainingBinary<T>(path: string, token: string, body: Blob, method: "POST"): Promise<T> { const response = await fetch(`${apiBase}${path}`, { method, headers: { authorization: `Bearer ${token}`, "content-type": body.type || "application/octet-stream" }, body }); const payload = await response.json() as { ok?: boolean; data?: T; message?: string }; if (!response.ok || payload.ok !== true || payload.data === undefined) throw new Error(payload.message || `HTTP ${response.status}`); return payload.data; }
+
+/** 初次进入按服务端状态恢复到最远可执行页，并校验地址栏请求没有越过前置条件。 */
+function initialTrainingStepIndex(dataset: TrainingDatasetView): number {
+  const requested = trainingSteps.findIndex((step) => step.id === new URLSearchParams(window.location.search).get("trainingStep"));
+  const highest = highestReachableStepIndex(dataset);
+  return requested >= 0 ? Math.min(requested, highest) : highest;
+}
+
+/** 依据持久化图片快照、打标确认和任务数量计算当前最远可进入步骤。 */
+function highestReachableStepIndex(dataset: TrainingDatasetView): number {
+  if (dataset.assets.length < minimumTrainingImages) return 0;
+  if (!["awaiting_confirmation", "confirmed"].includes(dataset.captionStage?.status || "")) return 1;
+  if (dataset.captionStage?.status !== "confirmed") return 2;
+  return dataset.trainingJobCount > 0 ? 4 : 3;
+}
+
+/** 判断指定步骤是否仍满足服务端前置状态；状态回退时页面会同步退回。 */
+function isTrainingStepReachable(dataset: TrainingDatasetView, step: TrainingStepId): boolean {
+  return trainingSteps.findIndex((item) => item.id === step) <= highestReachableStepIndex(dataset);
+}
+
+/** 步骤完成态只用于展示，真正前进仍会再次请求服务端进行校验。 */
+function trainingStepCompleted(dataset: TrainingDatasetView, step: TrainingStepId): boolean {
+  if (step === "images") return dataset.assets.length >= minimumTrainingImages;
+  if (step === "caption") return ["awaiting_confirmation", "confirmed"].includes(dataset.captionStage?.status || "");
+  if (step === "review") return dataset.captionStage?.status === "confirmed";
+  return dataset.trainingJobCount > 0;
+}
+
+/** 返回当前步骤阻断原因；空值表示允许按顺序进入下一页。 */
+function trainingStepIssue(dataset: TrainingDatasetView, step: TrainingStepId): string | null {
+  const anyCaptionActive = [dataset.captionStage, ...dataset.assets.map((asset) => asset.captionStage)].some((stage) => ["queued", "running"].includes(stage?.status || ""));
+  const allCaptioned = dataset.assets.length >= minimumTrainingImages && dataset.assets.every((asset) => Boolean(asset.caption?.trim()));
+  if (step === "images" && dataset.assets.length < minimumTrainingImages) return `至少上传 ${minimumTrainingImages} 张图片后才能进入自动打标`;
+  if (step === "caption" && anyCaptionActive) return "自动打标仍在处理，请完成后再进入标签核对";
+  if (step === "caption" && (!["awaiting_confirmation", "confirmed"].includes(dataset.captionStage?.status || "") || !allCaptioned)) return "请先完成当前图片快照的自动打标，并确保每张图片都有标签";
+  if (step === "review" && (dataset.captionStage?.status !== "confirmed" || !allCaptioned)) return "请逐图保存标签并确认当前图片快照后再进入训练设置";
+  return null;
+}
+
+/** 将当前训练步骤写入地址栏，刷新页面后仍从已校验的服务端状态恢复。 */
+function writeTrainingStep(step: TrainingStepId): void {
+  const url = new URL(window.location.href);
+  url.searchParams.set("trainingStep", step);
+  window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+}
+
 function isTrainingFinal(status: TrainingJobView["status"]): boolean { return ["succeeded", "failed", "cancelled"].includes(status); }
 function trainingStatusLabel(status: TrainingJobView["status"]): string { return { queued: "排队中", reserving: "排队中", ready: "排队中", running: "训练中", evaluating: "保存结果", succeeded: "已完成", failed: "失败", cancelled: "已取消" }[status]; }
 function errorMessage(error: unknown): string { return error instanceof Error ? error.message : "操作失败"; }
