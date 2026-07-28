@@ -158,13 +158,13 @@ function CaptioningWorkspace({ token, dataset, translations, onTranslations, onC
     } catch (error) { onMessage(errorMessage(error)); }
     finally { setDownloading(false); }
   };
-  /** 持久化数据集触发词，并让后端原子更新每张图片的实际 Caption。 */
+  /** 独立持久化数据集触发词，不改写自动打标或用户确认的图片 Caption。 */
   const saveTriggerWords = async () => {
     setSavingTriggerWords(true);
     try {
       await localTrainingJson(`/v1/training/datasets/${dataset.id}/trigger-words`, token, { method: 'PATCH', body: JSON.stringify({ triggerWords: splitTags(triggerWordsText) }) });
       await onChanged();
-      onMessage('已更新触发词，并同步写入每张图片的英文标签');
+      onMessage('已更新训练触发词，现有图片标签保持不变');
     } catch (error) { onMessage(errorMessage(error)); }
     finally { setSavingTriggerWords(false); }
   };

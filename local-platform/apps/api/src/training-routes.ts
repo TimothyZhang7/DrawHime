@@ -5,7 +5,6 @@ import {
   trainingDatasetAssetUpdateRequestSchema,
   trainingDatasetArchiveMimeType,
   trainingDatasetTriggerWordsUpdateRequestSchema,
-  mergeCaptionWithTriggerWords,
   normalizeTrainingTags,
   readTrainingTags,
   summarizeTrainingTriggerWords,
@@ -94,8 +93,8 @@ export function registerTrainingRoutes(router: ServiceRouter, findSession: (toke
       try {
         await database.$transaction(async (tx) => {
           await tx.jobArtifact.create({ data: { id: artifactId, kind: "DATASET_ASSET", objectKey, fileName: `${artifactId}.webp`, mimeType: "image/webp", sha256, byteSize: BigInt(rendered.data.length), width: rendered.info.width, height: rendered.info.height, metadata: { sourceContentType: request.headers["content-type"] || null } } });
-          const triggerWords = readTrainingTags(dataset.triggerWords);
-          await tx.datasetAsset.create({ data: { datasetId: dataset.id, artifactId, caption: mergeCaptionWithTriggerWords(normalizeCaptionHeader(request.headers["x-dataset-caption"]), [], triggerWords), appliedTriggerWords: triggerWords, metadata: { normalized: true } } });
+          // 新图片只保存用户明确提交的 Caption；触发词与图片标签分离持久化，避免后台隐式改写。
+          await tx.datasetAsset.create({ data: { datasetId: dataset.id, artifactId, caption: normalizeCaptionHeader(request.headers["x-dataset-caption"]), appliedTriggerWords: [], metadata: { normalized: true } } });
           // 图片快照变化后旧打标确认必须失效，正式训练只能使用重新打标并确认的新快照。
           await tx.trainingCaptionJob.updateMany({ where: { datasetId: dataset.id, scope: "DATASET", status: { in: ["AWAITING_CONFIRMATION", "CONFIRMED"] } }, data: { status: "STALE", errorMessage: "数据集图片已变化，请重新自动打标并确认" } });
         });
@@ -111,10 +110,10 @@ export function registerTrainingRoutes(router: ServiceRouter, findSession: (toke
       ensureCaptionMutationAllowed(dataset.captionJobs[0]);
       const input = trainingDatasetAssetUpdateRequestSchema.parse(await readJsonBody<unknown>(request));
       const changed = await database.$transaction(async (tx) => {
-        const asset = await tx.datasetAsset.findFirst({ where: { id: params.assetId, datasetId: params.id }, select: { id: true, appliedTriggerWords: true } });
+        const asset = await tx.datasetAsset.findFirst({ where: { id: params.assetId, datasetId: params.id }, select: { id: true } });
         if (asset) {
-          const triggerWords = readTrainingTags(dataset.triggerWords);
-          await tx.datasetAsset.update({ where: { id: asset.id }, data: { caption: mergeCaptionWithTriggerWords(input.caption, asset.appliedTriggerWords, triggerWords), appliedTriggerWords: triggerWords } });
+          // 用户显式保存的 Caption 原样成为权威值，不再混入数据集触发词或后台推导标签。
+          await tx.datasetAsset.update({ where: { id: asset.id }, data: { caption: input.caption, appliedTriggerWords: [] } });
           await tx.trainingCaptionJob.updateMany({ where: { datasetId: params.id, scope: "DATASET", status: "CONFIRMED" }, data: { status: "AWAITING_CONFIRMATION", confirmedAt: null, errorMessage: "Caption 已修改，请重新确认" } });
           await tx.trainingCaptionJob.updateMany({ where: { datasetId: params.id, scope: "ASSET", assetId: params.assetId, status: "CONFIRMED" }, data: { status: "STALE", confirmedAt: null, errorMessage: "Caption 已人工修改" } });
         }
@@ -132,18 +131,8 @@ export function registerTrainingRoutes(router: ServiceRouter, findSession: (toke
       const dataset = await findOwnedMutableDataset(params.id, session.externalIdentity.id);
       ensureCaptionMutationAllowed(dataset.captionJobs[0]);
       const triggerWords = normalizeTrainingTags(input.triggerWords);
-      const assets = await database.datasetAsset.findMany({ where: { datasetId: dataset.id }, select: { id: true, caption: true, appliedTriggerWords: true } });
-      const previousTriggerWords = readTrainingTags(dataset.triggerWords);
-      const changes = assets.map((asset) => ({ id: asset.id, caption: mergeCaptionWithTriggerWords(asset.caption, asset.appliedTriggerWords, triggerWords) }));
-      const changed = JSON.stringify(previousTriggerWords) !== JSON.stringify(triggerWords) || changes.some((item, index) => item.caption !== assets[index]?.caption);
-      await database.$transaction(async (tx) => {
-        await tx.trainingDataset.update({ where: { id: dataset.id }, data: { triggerWords } });
-        await Promise.all(changes.map((item) => tx.datasetAsset.update({ where: { id: item.id }, data: { caption: item.caption, appliedTriggerWords: triggerWords } })));
-        if (changed && assets.length > 0) {
-          await tx.trainingCaptionJob.updateMany({ where: { datasetId: dataset.id, scope: "DATASET", status: "CONFIRMED" }, data: { status: "AWAITING_CONFIRMATION", confirmedAt: null, errorMessage: "触发词已更新，请重新确认" } });
-          await tx.trainingCaptionJob.updateMany({ where: { datasetId: dataset.id, scope: "ASSET", status: "CONFIRMED" }, data: { status: "STALE", confirmedAt: null, errorMessage: "触发词已更新" } });
-        }
-      });
+      // 触发词独立保存，更新时不触碰任何已自动打标、人工编辑或确认的图片 Caption。
+      await database.trainingDataset.update({ where: { id: dataset.id }, data: { triggerWords } });
       sendSuccess(response, await getDatasetView(dataset.id));
     } catch (error) { sendTrainingError(response, error); }
   });

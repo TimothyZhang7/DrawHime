@@ -2,7 +2,6 @@
  * 本文件实现训练数据集自动打标消费者，逐图调用真实多模态模型并持久化可人工确认的英文 Caption。
  */
 import { Prisma } from "@prisma/client";
-import { canonicalizeTrainingCaptionTag, mergeCaptionWithTriggerWords, readTrainingTags } from "@drawhime/contracts";
 import { database } from "@drawhime/database";
 import { getObjectBuffer } from "@drawhime/service-runtime";
 import sharp from "sharp";
@@ -50,12 +49,10 @@ async function processCaptionJob(job: ClaimedCaptionJob): Promise<void> {
       const asset = assets[index]!;
       const object = await getObjectBuffer(asset.artifact.objectKey);
       const prepared = await sharp(object.body, { failOn: "error", limitInputPixels: 100_000_000 }).rotate().resize({ width: 1280, height: 1280, fit: "inside", withoutEnlargement: true }).jpeg({ quality: 90, chromaSubsampling: "4:4:4" }).toBuffer();
-      const generatedCaption = await captionImage(prepared, mode, job.dataset.title, job.dataset.description);
-      const triggerWords = readTrainingTags(job.dataset.triggerWords);
-      const caption = mergeCaptionWithTriggerWords(generatedCaption, [], triggerWords);
+      const caption = await captionImage(prepared, mode, job.dataset.title, job.dataset.description);
       const completedAssets = index + 1;
       const writes: Prisma.PrismaPromise<unknown>[] = [
-        database.datasetAsset.update({ where: { id: asset.id }, data: { caption, appliedTriggerWords: triggerWords, metadata: { ...readObject(asset.metadata), autoCaptionJobId: job.id, autoCaptionMode: mode, autoCaptionedAt: new Date().toISOString() } as Prisma.InputJsonObject } }),
+        database.datasetAsset.update({ where: { id: asset.id }, data: { caption, appliedTriggerWords: [], metadata: { ...readObject(asset.metadata), autoCaptionJobId: job.id, autoCaptionMode: mode, autoCaptionedAt: new Date().toISOString() } as Prisma.InputJsonObject } }),
         database.trainingCaptionJob.update({ where: { id: job.id }, data: { completedAssets, progress: Math.round(completedAssets / assets.length * 100) } }),
       ];
       // 单图重新打标会改变 Caption，既有全量确认需要回到人工待确认，但无需重跑其他图片。
@@ -108,6 +105,9 @@ function buildCaptionSystemPrompt(mode: CaptionMode): string {
     "你是 Anima LoRA 数据集打标器。只输出严格 JSON：{\"caption\":\"english tags\"}。",
     focus,
     "Caption 必须是一行英文小写逗号标签，按主体到细节排序，准确、完整、去重，不写解释、质量套话、文件名、水印推断或训练触发词。",
+    "从源头使用稳定的 Danbooru/Anima 标签词汇，不创造句子式标签；同一概念只选一个最准确标签，不同时输出父标签、子标签和同义词。",
+    "固定命名：使用 sitting 而非 seated；使用 front view 而非 facing viewer/front-facing；使用 heart-shaped ahoge 而非 heart ahoge；使用 thighhighs 而非 thigh-high stockings/thigh-high socks。",
+    "保留真实差异：具体发色、服装、动作和配饰按画面准确描述；例如输出 long aqua blue hair 时不要再重复 blue hair、aqua hair、long hair。",
     "只描述图中可见事实；不进行内容审查、不改写画面、不补充画面没有的服装、身体、关系、年龄或身份。",
   ].join("\n");
 }
@@ -128,8 +128,8 @@ function readCaption(text: string): string {
 
 /** 确定性清洗 Caption，阻止空值、中文说明和多段正文进入训练数据。 */
 function normalizeCaption(value: string): string {
-  // 自动打标仅统一严格等义名称，颜色、服装和动作等真实差异保留给 LoRA 学习。
-  const tags = [...new Set(value.toLowerCase().replace(/[\r\n;；]+/g, ",").split(/[,，]+/).map((item) => canonicalizeTrainingCaptionTag(item.trim().replace(/\s+/g, " "))).filter(Boolean))];
+  // 这里只执行格式校验与完全重复项去重，语义词汇由自动打标提示在生成源头约束。
+  const tags = [...new Set(value.toLowerCase().replace(/[\r\n;；]+/g, ",").split(/[,，]+/).map((item) => item.trim().replace(/\s+/g, " ")).filter(Boolean))];
   const caption = tags.join(", ").slice(0, 10000);
   if (!caption || /[\u3400-\u9fff]/.test(caption)) throw new Error("自动打标没有返回有效英文 Caption");
   return caption;

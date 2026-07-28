@@ -65,7 +65,8 @@ async function executeTrainingAttempt(jobId: string, attemptId: string, attemptN
       textEncoderFile: "qwen_3_06b_base.safetensors",
       vaeFile: "qwen_image_vae.safetensors",
       outputName: `drawhime_${job.id.replace(/-/g, "_")}_v1`,
-      dataset: job.dataset.assets.map((asset) => ({ url: `${publicBase}/internal/training/assets/${asset.artifactId}/content`, caption: asset.caption?.trim() || triggerWords.join(", "), sha256: asset.artifact.sha256 })),
+      // Runtime 请求按任务参数补充触发词，数据库中的用户确认 Caption 保持原值不变。
+      dataset: job.dataset.assets.map((asset) => ({ url: `${publicBase}/internal/training/assets/${asset.artifactId}/content`, caption: composeRuntimeCaption(asset.caption, triggerWords), sha256: asset.artifact.sha256 })),
       parameters: {
         rank: parameters.rank,
         alpha: parameters.alpha,
@@ -280,6 +281,13 @@ async function downloadRuntimeOutput(id: string, runtime: TrainingRuntimeJobView
 }
 function validateSafetensors(buffer: Buffer): void { if (buffer.length < 16) throw new Error("训练产物不是有效 safetensors"); const headerSize = Number(buffer.readBigUInt64LE(0)); if (!Number.isSafeInteger(headerSize) || headerSize < 2 || headerSize + 8 >= buffer.length || headerSize > 16 * 1024 * 1024) throw new Error("训练产物 safetensors 文件头不正确"); JSON.parse(buffer.subarray(8, 8 + headerSize).toString("utf8")); }
 function readParameters(value: unknown) { const item = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; return { rank: Number(item.rank), alpha: Number(item.alpha), epochs: Number(item.epochs), repeats: Number(item.repeats), learningRate: Number(item.learningRate), resolution: Number(item.resolution), lrScheduler: String(item.lrScheduler || "constant") as "constant" | "cosine" | "cosine_with_restarts", warmupRatio: Number(item.warmupRatio || 0), gradientAccumulationSteps: Number(item.gradientAccumulationSteps || 1), captionDropoutRate: Number(item.captionDropoutRate || 0), shuffleCaption: item.shuffleCaption === true, keepTokens: Number(item.keepTokens || 0), seed: Number(item.seed), maxAttempts: Number(item.maxAttempts || 2), samplePrompt: String(item.samplePrompt || ""), triggerWords: Array.isArray(item.triggerWords) ? item.triggerWords.filter((entry): entry is string => typeof entry === "string") : [], productCode: String(item.productCode || ""), pricingVersion: Number(item.pricingVersion || 0) }; }
+/** 为 Runtime 临时补充缺失触发词，不覆盖、不排序也不清洗数据库中的用户确认 Caption。 */
+function composeRuntimeCaption(caption: string | null, triggerWords: string[]): string {
+  const confirmed = caption?.trim() || "";
+  const existing = new Set(confirmed.toLowerCase().split(/[,，\n;；]+/).map((tag) => tag.trim()).filter(Boolean));
+  const missing = triggerWords.map((tag) => tag.trim()).filter((tag) => tag && !existing.has(tag.toLowerCase()));
+  return [...missing, confirmed].filter(Boolean).join(", ");
+}
 function normalizeSlug(value: string): string { return value.normalize("NFKC").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 80) || "trained-lora"; }
 function requiredEnvironment(name: string): string { const value = process.env[name]?.trim(); if (!value) throw new Error(`${name} 未配置`); return value; }
 function isTemporaryRuntimeError(error: unknown): boolean { return error instanceof TrainingRuntimeRequestError && error.temporary; }
