@@ -31,9 +31,9 @@
 | `GET /v1/models` | web/admin | api | 当前可用本地模型、工作流、模型独立的采样器/调度器/步数/CFG/质量前缀、采样最长边、画幅补偿像素预算、最终输出最大尺寸和主站价格版本；完整微调底模不得套用 Anima Base 的 Turbo 参数。全部 LoRA 组合使用同一模型级采样质量参数，不通过降低步数或像素预算伪造耗时一致 |
 | `POST /v1/training/tag-translations` | web/main-web | api | 登录用户批量解析英文 LoRA 训练标签；优先读取持久化翻译集，缺失项由真实 AI 翻译后入库，返回简体中文、来源和每个标签稳定唯一色，不改写训练 Caption |
 | `POST /v1/training/datasets/:id/assets/:assetId/caption-jobs` | main-web/web | api/training-worker | 为单张训练图片创建持久化自动打标任务；只替换该图 Caption，完成后使既有全量确认回到待确认，不重跑其他图片 |
-| `GET /v1/model-library[/:id]` | web/admin | api | 浏览当前底模仓库和详情；返回格式、采样配置、来源、使用说明、示例图片以及引用该底模的公开任务 |
+| `GET /v1/model-library[/:id]` | web/admin | api | 浏览当前底模仓库和详情；返回格式、采样配置、带站点名称的多个来源链接、示例图片以及引用该底模的公开任务 |
 | `POST /v1/admin/model-library` | admin | api | 管理员按 Anima 格式登记已经安装到私有 GPU 的 safetensors 底模，同时创建模型、Runtime、不可变工作流和主站价格版本 |
-| `PATCH /v1/admin/model-library/:id` | admin | api | 管理员编辑底模仓库外显名称、描述、来源、使用说明和公开状态，不改写历史任务 |
+| `PATCH /v1/admin/model-library/:id` | admin | api | 管理员编辑底模仓库外显名称、描述、多个来源链接、使用说明和公开状态，不改写历史任务 |
 | `POST/DELETE /v1/admin/model-library/:id/examples[/:exampleId]` | admin | api | 管理员上传或删除底模封面与示例图；第一张示例作为仓库封面，图片统一转为高质量 WebP |
 | `GET /v1/model-library/examples/:id/content` | web/admin | api | 登录用户读取可访问底模的仓库示例图，不暴露对象存储键 |
 | `POST /v1/inference/jobs` | web | api | `InferenceJobCreateRequest` 创建持久化任务并完成主站资金预留后入队；同一独立身份默认每 180 秒只接受一个新任务，幂等重放不重复占用冷却，命中限制返回 HTTP 429 `inference_submission_cooldown`；正面提示词与可空的用户负面提示词独立保存，Worker 分别映射到 Runtime 的 positive/negative conditioning；`loraVersionIds` 可跨角色、画风、概念、服装、姿势等类型多选，最多 4 个且不可重复；`loraStrengths` 与 `loraSelections` 固化每个版本的 0–1.5 强度及触发词快照，Worker 以显式强度优先并把实际 LoRA 链、采样尺寸和最终提示词写入任务审计 |

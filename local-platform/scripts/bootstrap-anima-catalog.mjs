@@ -25,7 +25,7 @@ const modelCatalog = [
     description: "Anima Base v1.0 原生底模，仅加载用户主动选择的 LoRA。",
     runtimeSlug: "comfyui-anima-production-v1",
     productCode: "local.anima-base-v1.image",
-    sourceUrl: "https://huggingface.co/circlestone-labs/Anima/",
+    sourceUrls: ["https://huggingface.co/circlestone-labs/Anima/"],
     sourceVersionId: null,
     sha256: null,
     byteSize: 4182218328,
@@ -38,7 +38,7 @@ const modelCatalog = [
     description: "Anime/bulldozer Anima 完整微调底模，偏高完成度动漫插画。",
     runtimeSlug: "comfyui-anime-bulldozer-anima-v1",
     productCode: "local.anime-bulldozer-anima.image",
-    sourceUrl: "https://civitai.com/models/264323/animebulldozer?modelVersionId=3047288",
+    sourceUrls: ["https://civitai.com/models/264323/animebulldozer?modelVersionId=3047288"],
     sourceVersionId: 3047288,
     sha256: "8E279F111ED7E7EA214EA61850E002F700CCE55A8CD027675796773089B3C739",
     byteSize: 4182218504,
@@ -51,7 +51,7 @@ const modelCatalog = [
     description: "MiaoMiao RealSkin Anima 1.1 完整微调底模，面向写实皮肤与摄影质感。",
     runtimeSlug: "comfyui-miaomiao-realskin-anima11",
     productCode: "local.miaomiao-realskin-anima11.image",
-    sourceUrl: "https://civitai.com/models/2026594/miaomiao-realskin?modelVersionId=3071702",
+    sourceUrls: ["https://civitai.com/models/2026594/miaomiao-realskin?modelVersionId=3071702"],
     sourceVersionId: 3071702,
     sha256: "D33247D48A9C15A872AEF963940FC87362F925E3E087365810AD747042FCC454",
     byteSize: 4182218328,
@@ -64,7 +64,7 @@ const modelCatalog = [
     description: "MiaoMiao 3D Harem Anima LH3D 1.0 完整微调底模，面向精细三维动漫质感。",
     runtimeSlug: "comfyui-miaomiao-3d-harem-anima-lh3d10",
     productCode: "local.miaomiao-3d-harem-anima-lh3d10.image",
-    sourceUrl: "https://civitai.com/models/431957/miaomiao-3d-harem?modelVersionId=3074791",
+    sourceUrls: ["https://civitai.com/models/431957/miaomiao-3d-harem?modelVersionId=3074791"],
     sourceVersionId: 3074791,
     sha256: "0707CBE8DEED6C858A6BA8DFBCFE2006E3A4FD44C099AAFD048400FDEC1866DD",
     byteSize: 4182218328,
@@ -77,7 +77,7 @@ const modelCatalog = [
     description: "WAI Anima v1.0 完整微调底模，面向高质量二次元角色插画。",
     runtimeSlug: "comfyui-wai-anima-v10-base10",
     productCode: "local.wai-anima-v10.image",
-    sourceUrl: "https://civitai.com/models/2544636/wai-anima?modelVersionId=2983680",
+    sourceUrls: ["https://civitai.com/models/2544636/wai-anima?modelVersionId=2983680"],
     sourceVersionId: 2983680,
     sha256: "9D5A1E1393C2978D6A979FAB38FB0DEE00BC2A94E354196C9F3CF2F6F56D5FBF",
     byteSize: 4182233976,
@@ -95,7 +95,7 @@ try {
   });
 
   for (const catalog of modelCatalog) {
-    const defaults = { ...sharedDefaults, ...catalog.parameters, productCode: catalog.productCode, sourceUrl: catalog.sourceUrl, sourceVersionId: catalog.sourceVersionId, modelSha256: catalog.sha256, modelByteSize: catalog.byteSize };
+    const defaults = { ...sharedDefaults, ...catalog.parameters, productCode: catalog.productCode, sourceUrls: catalog.sourceUrls, sourceUrl: null, sourceVersionId: catalog.sourceVersionId, modelSha256: catalog.sha256, modelByteSize: catalog.byteSize };
     const model = await database.modelVersion.findUnique({ where: { familyId_version: { familyId: family.id, version: catalog.fileName } } }) ?? await database.modelVersion.create({
       data: { familyId: family.id, version: catalog.fileName, displayName: catalog.displayName, description: catalog.description, status: "ACTIVE", runtimeFormat: "anima", defaultParameters: defaults },
     });

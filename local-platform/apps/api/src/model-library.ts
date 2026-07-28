@@ -94,7 +94,8 @@ export function registerModelLibraryRoutes(router: ServiceRouter, findSession: F
           description: input.description,
           defaultParameters: {
             ...readObject(model.defaultParameters),
-            sourceUrl: input.sourceUrl,
+            sourceUrls: normalizeInputSourceUrls(input),
+            sourceUrl: null,
             usageGuide: input.usageGuide,
             repositoryVisible: input.visible,
           },
@@ -251,7 +252,8 @@ function buildDefaultParameters(input: ModelLibraryCreateRequest): Prisma.InputJ
     qualityPrefix: input.qualityPrefix,
     defaultNegativePrompt: input.defaultNegativePrompt,
     systemHighresLoraEnabled: false,
-    sourceUrl: input.sourceUrl,
+    sourceUrls: normalizeInputSourceUrls(input),
+    sourceUrl: null,
     modelSha256: input.modelSha256.toUpperCase(),
     modelByteSize: input.modelByteSize,
     usageGuide: input.usageGuide,
@@ -301,6 +303,7 @@ async function getEntryView(id: string, identity: ExternalIdentity): Promise<Mod
 /** 映射仓库视图并读取当前底模的公开图库使用示例。 */
 async function toEntryView(row: ModelWithRepository, admin: boolean): Promise<ModelLibraryEntryView> {
   const defaults = readObject(row.defaultParameters);
+  const sourceLinks = readSourceLinks(defaults);
   const references = await database.inferenceJob.findMany({
     where: {
       modelVersionId: row.id,
@@ -321,7 +324,8 @@ async function toEntryView(row: ModelWithRepository, admin: boolean): Promise<Mo
     familyName: row.family.name,
     modelFileName: row.version,
     runtimeFormat: row.runtimeFormat,
-    sourceUrl: stringValue(defaults.sourceUrl),
+    sourceUrl: sourceLinks[0]?.url || null,
+    sourceLinks,
     usageGuide: stringValue(defaults.usageGuide) || "在本地绘图页面选择该模型后输入英文或经 AI 增强的提示词生成。",
     visible: isVisible(row),
     isAdmin: admin,
@@ -390,6 +394,30 @@ function readObject(value: unknown): Record<string, unknown> {
 /** 读取非空字符串参数。 */
 function stringValue(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+/** 兼容旧单链接字段，并将模型来源转换为可直接展示的站点标签。 */
+function readSourceLinks(defaults: Record<string, unknown>): Array<{ label: string; url: string }> {
+  const candidates = Array.isArray(defaults.sourceUrls) ? defaults.sourceUrls : [defaults.sourceUrl];
+  const seen = new Set<string>();
+  return candidates.flatMap((candidate) => {
+    if (typeof candidate !== "string") return [];
+    try {
+      const url = new URL(candidate.trim());
+      if (!/^https?:$/.test(url.protocol) || seen.has(url.href)) return [];
+      seen.add(url.href);
+      const host = url.hostname.toLowerCase().replace(/^www\./, "");
+      const label = host === "civitai.com" ? "C站" : host === "huggingface.co" ? "Hugging Face" : host === "github.com" ? "GitHub" : host;
+      return [{ label, url: url.href }];
+    } catch {
+      return [];
+    }
+  }).slice(0, 8);
+}
+
+/** 新旧网页并行部署期间兼容旧单链接请求，并优先采用新的多链接字段。 */
+function normalizeInputSourceUrls(input: { sourceUrls: string[]; sourceUrl?: string | null }): string[] {
+  return input.sourceUrls.length ? input.sourceUrls : input.sourceUrl ? [input.sourceUrl] : [];
 }
 
 /** 读取有限数值参数。 */

@@ -409,7 +409,8 @@ export const modelLibraryCreateRequestSchema = z.object({
   modelFileName: z.string().trim().regex(/^[a-zA-Z0-9._-]+\.safetensors$/),
   modelSha256: z.string().regex(/^[a-f0-9]{64}$/i),
   modelByteSize: z.number().int().positive(),
-  sourceUrl: z.string().url().max(1000).nullable(),
+  sourceUrls: z.array(z.string().url().max(1000)).max(8).default([]),
+  sourceUrl: z.string().url().max(1000).nullable().optional(),
   usageGuide: z.string().trim().min(1).max(20000),
   steps: z.number().int().min(1).max(50),
   cfg: z.number().min(0.1).max(20),
@@ -428,14 +429,15 @@ export const modelLibraryCreateRequestSchema = z.object({
 export const modelLibraryUpdateRequestSchema = z.object({
   displayName: z.string().trim().min(1).max(191),
   description: z.string().trim().min(1).max(10000),
-  sourceUrl: z.string().url().max(1000).nullable(),
+  sourceUrls: z.array(z.string().url().max(1000)).max(8).default([]),
+  sourceUrl: z.string().url().max(1000).nullable().optional(),
   usageGuide: z.string().trim().min(1).max(20000),
   visible: z.boolean(),
 });
 
 /** 用户可浏览的底模仓库条目。 */
 export const modelLibraryEntryViewSchema = z.object({
-  id: z.string(), displayName: z.string(), description: z.string(), family: z.string(), familyName: z.string(), modelFileName: z.string(), runtimeFormat: z.string(), sourceUrl: z.string().nullable(), usageGuide: z.string(), visible: z.boolean(), isAdmin: z.boolean(), priceCny: z.string(),
+  id: z.string(), displayName: z.string(), description: z.string(), family: z.string(), familyName: z.string(), modelFileName: z.string(), runtimeFormat: z.string(), sourceUrl: z.string().nullable(), sourceLinks: z.array(z.object({ label: z.string(), url: z.string().url() })).max(8), usageGuide: z.string(), visible: z.boolean(), isAdmin: z.boolean(), priceCny: z.string(),
   parameters: z.object({ steps: z.number(), cfg: z.number(), sampler: z.string(), scheduler: z.string(), samplingMaxEdge: z.number(), maxEdge: z.number() }),
   examples: z.array(z.object({ id: z.string(), width: z.number().int().nullable(), height: z.number().int().nullable(), prompt: z.string().nullable(), contentUrl: z.string() })),
   referenceTasks: z.array(z.object({ id: z.string(), prompt: z.string(), imageUrl: z.string(), galleryItemId: z.string(), createdAt: z.string().datetime() })).max(12),
