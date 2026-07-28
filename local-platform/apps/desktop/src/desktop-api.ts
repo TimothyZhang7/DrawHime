@@ -1,0 +1,14 @@
+/** 本文件封装 WebView 到 Tauri 本地核心的受类型约束命令。 */
+import type { DesktopBootstrapView, DesktopEnvironmentReport, DesktopGalleryPrivacy, DesktopGallerySyncItem, DesktopSettings, DesktopSettingsUpdate } from "@drawhime/contracts";
+import { invoke } from "@tauri-apps/api/core";
+
+/** 加载本机设置、环境报告和图库待同步数量。 */
+export function loadDesktopBootstrap(): Promise<DesktopBootstrapView> { return invoke("desktop_bootstrap"); }
+/** 主动重新检测本机环境。 */
+export function inspectDesktopEnvironment(): Promise<DesktopEnvironmentReport> { return invoke("desktop_inspect_environment"); }
+/** 校验并保存桌面端设置。 */
+export function saveDesktopSettings(settings: DesktopSettingsUpdate): Promise<DesktopSettings> { return invoke("desktop_save_settings", { settings }); }
+/** 读取本机持久化图库同步队列。 */
+export function listDesktopGallerySyncQueue(): Promise<DesktopGallerySyncItem[]> { return invoke("desktop_list_gallery_sync_queue"); }
+/** 把已校验的本地结果加入幂等图库同步队列。 */
+export function enqueueDesktopGalleryPublication(input: { localTaskId: string; artifactPath: string; privacy: DesktopGalleryPrivacy }): Promise<DesktopGallerySyncItem> { return invoke("desktop_enqueue_gallery_publication", { input }); }

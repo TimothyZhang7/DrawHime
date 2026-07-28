@@ -17,4 +17,9 @@ private/
 *.pth
 *.tar.gz
 *.zip
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/gen/
+apps/desktop/src-tauri/icons/*
+!apps/desktop/src-tauri/icons/icon-source.svg
+!apps/desktop/src-tauri/icons/icon.ico
 .DS_Store

@@ -630,6 +630,63 @@ export const trainingTagTranslationViewSchema = z.object({
   })).max(200),
 });
 
+/** 桌面端作品上传到网页图库时可选择的隐私权限。 */
+export const desktopGalleryPrivacySchema = z.enum(["public", "private"]);
+
+/** 桌面端本机环境的统一可用状态。 */
+export const desktopEnvironmentStatusSchema = z.enum(["ready", "installable", "blocked", "degraded"]);
+
+/** 桌面端启动、复检和任务提交前使用的本机环境报告。 */
+export const desktopEnvironmentReportSchema = z.object({
+  status: desktopEnvironmentStatusSchema,
+  checkedAt: z.string().datetime(),
+  os: z.object({ name: z.string(), version: z.string(), arch: z.string() }),
+  cpu: z.object({ name: z.string(), logicalCores: z.number().int().positive() }),
+  memory: z.object({ totalBytes: z.number().int().nonnegative(), availableBytes: z.number().int().nonnegative(), virtualTotalBytes: z.number().int().nonnegative() }),
+  gpus: z.array(z.object({ index: z.number().int().nonnegative(), uuid: z.string(), name: z.string(), vendor: z.string(), memoryTotalBytes: z.number().int().nonnegative(), memoryFreeBytes: z.number().int().nonnegative(), driverVersion: z.string(), computeCapability: z.string().nullable(), temperatureCelsius: z.number().nullable(), utilizationPercent: z.number().nullable() })),
+  disks: z.array(z.object({ name: z.string(), fileSystem: z.string(), totalBytes: z.number().int().nonnegative(), availableBytes: z.number().int().nonnegative() })),
+  runtime: z.object({ installed: z.boolean(), status: z.enum(["not_installed", "installed_unverified", "ready", "broken"]), rootPath: z.string() }),
+  capabilities: z.object({ inference: z.boolean(), training: z.boolean(), captioning: z.boolean(), modelManagement: z.literal(true) }),
+  issues: z.array(z.object({ code: z.string(), severity: z.enum(["info", "warning", "critical"]), title: z.string(), message: z.string(), action: z.string() })),
+});
+
+/** 桌面端保存在本机 SQLite 中的用户设置。 */
+export const desktopSettingsSchema = z.object({
+  defaultPrivacy: desktopGalleryPrivacySchema,
+  modelRoot: z.string().min(1),
+  outputRoot: z.string().min(1),
+  runtimeRoot: z.string().min(1),
+  uploadConcurrency: z.number().int().min(1).max(4),
+  wifiOnly: z.boolean(),
+  bandwidthLimitKib: z.number().int().positive().nullable(),
+});
+
+/** 桌面端设置更新请求与持久化视图使用同一受控字段集合。 */
+export const desktopSettingsUpdateSchema = desktopSettingsSchema;
+
+/** 桌面端本地图库同步队列条目。 */
+export const desktopGallerySyncItemSchema = z.object({
+  id: z.string().uuid(),
+  localTaskId: z.string().min(1),
+  artifactPath: z.string().min(1),
+  artifactSha256: z.string().regex(/^[a-f0-9]{64}$/),
+  privacy: desktopGalleryPrivacySchema,
+  status: z.enum(["queued", "waiting_network", "waiting_auth", "uploading", "committing", "synced", "privacy_pending", "paused", "failed_retryable", "failed_final", "remote_deleted"]),
+  uploadedBytes: z.number().int().nonnegative(),
+  retryCount: z.number().int().nonnegative(),
+  galleryItemId: z.string().nullable(),
+  lastError: z.string().nullable(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+
+/** 桌面端首次加载时一次返回环境、设置和待同步数量。 */
+export const desktopBootstrapViewSchema = z.object({
+  environment: desktopEnvironmentReportSchema,
+  settings: desktopSettingsSchema,
+  pendingGallerySyncCount: z.number().int().nonnegative(),
+});
+
 /** 训练任务视图。 */
 export const trainingJobViewSchema = z.object({
   id: z.string().min(1),
@@ -786,6 +843,12 @@ export type TrainingCaptionJobCreateRequest = z.infer<typeof trainingCaptionJobC
 export type TrainingCaptionStageView = z.infer<typeof trainingCaptionStageViewSchema>;
 export type TrainingRuntimeSubmitRequest = z.infer<typeof trainingRuntimeSubmitRequestSchema>;
 export type TrainingRuntimeJobView = z.infer<typeof trainingRuntimeJobViewSchema>;
+export type DesktopGalleryPrivacy = z.infer<typeof desktopGalleryPrivacySchema>;
+export type DesktopEnvironmentReport = z.infer<typeof desktopEnvironmentReportSchema>;
+export type DesktopSettings = z.infer<typeof desktopSettingsSchema>;
+export type DesktopSettingsUpdate = z.infer<typeof desktopSettingsUpdateSchema>;
+export type DesktopGallerySyncItem = z.infer<typeof desktopGallerySyncItemSchema>;
+export type DesktopBootstrapView = z.infer<typeof desktopBootstrapViewSchema>;
 export type AdminModelUpdateRequest = z.infer<typeof adminModelUpdateRequestSchema>;
 export type AdminRuntimeConfigUpdateRequest = z.infer<typeof adminRuntimeConfigUpdateRequestSchema>;
 export type AdminGpuHostUpdateRequest = z.infer<typeof adminGpuHostUpdateRequestSchema>;

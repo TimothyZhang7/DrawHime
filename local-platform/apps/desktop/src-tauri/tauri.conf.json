@@ -1,0 +1,23 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "DrawHime Desktop",
+  "version": "0.1.0",
+  "identifier": "ink.xanime.drawhime.desktop",
+  "build": {
+    "beforeDevCommand": "pnpm dev",
+    "devUrl": "http://127.0.0.1:7200",
+    "beforeBuildCommand": "pnpm build:web",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [{ "title": "DrawHime Desktop", "width": 1380, "height": 860, "minWidth": 980, "minHeight": 680, "center": true, "resizable": true }],
+    "security": { "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost blob: data:; style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost" }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "shortDescription": "使用本机 GPU 进行生成、打标和 LoRA 训练",
+    "longDescription": "DrawHime Desktop 本地模型客户端，不在安装包中分发生成模型或 LoRA。",
+    "windows": { "nsis": { "installMode": "currentUser" } }
+  }
+}

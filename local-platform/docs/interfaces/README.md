@@ -25,6 +25,11 @@
 | `GET /health` | 运维 | 所有服务 | `ServiceHealthView` |
 | `GET /ready` | 运维/调度 | 所有服务 | `ServiceReadinessView` |
 | `GET /v1/system/overview` | web/admin | api | `PlatformOverviewView` |
+| `desktop_bootstrap` | desktop webview | desktop core | 返回 SQLite 持久设置、真实本机环境报告和待同步图库数量；对应 `DesktopBootstrapView` |
+| `desktop_inspect_environment` | desktop webview | desktop core | 重新检测 Windows、CPU、内存、磁盘、NVIDIA GPU、驱动和本地 Runtime，并持久化脱敏快照 |
+| `desktop_save_settings` | desktop webview | desktop core | 校验并保存模型、输出、Runtime 目录以及默认图库隐私和上传策略；对应 `DesktopSettingsUpdate` |
+| `desktop_enqueue_gallery_publication` | desktop runtime/UI | desktop core | 校验本地结果文件、计算 SHA-256，并以本地任务和文件哈希幂等写入图库同步队列 |
+| `desktop_list_gallery_sync_queue` | desktop webview | desktop core | 读取当前设备本地图库同步队列；对应 `DesktopGallerySyncItem[]` |
 | `POST /v1/auth/session/exchange` | web/admin | api | 主站 Bearer JWT 换取 `LocalPlatformSessionView` |
 | `GET /v1/auth/me` | web/admin | api | `LocalPlatformSessionView` |
 | `DELETE /v1/auth/session` | web/admin | api | 撤销当前独立平台会话 |

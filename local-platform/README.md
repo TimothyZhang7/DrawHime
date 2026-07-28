@@ -23,6 +23,7 @@ DrawHime 是面向本地生成模型的独立推理、LoRA 管理与训练平台
 | `inference-worker` | 7111 | 提示增强、推理、计费和图库发布 |
 | `training-worker` | 7112 | 打标、训练、退款和可用 LoRA 产物闭环 |
 | `artifact-service` | 7113 | 产物控制面 |
+| `desktop` | 本机进程 | Tauri 离线客户端、本机环境检测、SQLite 设置与图库同步队列 |
 
 更完整的职责边界见 [`docs/architecture.md`](docs/architecture.md)，跨程序契约见 [`docs/interfaces/README.md`](docs/interfaces/README.md)，生产执行顺序与命令约束见 [`docs/operations.md`](docs/operations.md)。
 
@@ -49,6 +50,13 @@ pnpm run db:validate
 pnpm run type-check
 pnpm run test
 pnpm run build
+```
+
+桌面端首次开发需要 Rust stable、Windows C++ Build Tools 和 WebView2；安装包不包含底模、LoRA 或训练模型：
+
+```powershell
+pnpm --filter @drawhime/desktop run build:web
+pnpm --filter @drawhime/desktop run tauri:dev
 ```
 
 ## 模型
