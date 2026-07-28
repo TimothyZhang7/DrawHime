@@ -614,6 +614,8 @@ model TrainingDataset {
 model TrainingCaptionJob {
   id              String   @id @default(uuid()) @db.VarChar(36)
   datasetId       String   @db.VarChar(36)
+  scope           String   @default("DATASET") @db.VarChar(16)
+  assetId         String?  @db.VarChar(36)
   mode            String   @db.VarChar(16)
   status          String   @default("QUEUED") @db.VarChar(32)
   progress        Decimal  @default(0) @db.Decimal(5, 2)
@@ -628,8 +630,10 @@ model TrainingCaptionJob {
   updatedAt       DateTime @updatedAt
 
   dataset TrainingDataset @relation(fields: [datasetId], references: [id], onDelete: Restrict)
+  asset   DatasetAsset?   @relation(fields: [assetId], references: [id], onDelete: SetNull)
 
   @@index([datasetId, createdAt])
+  @@index([assetId, createdAt])
   @@index([status, createdAt])
 }
 
@@ -657,6 +661,7 @@ model DatasetAsset {
 
   dataset  TrainingDataset @relation(fields: [datasetId], references: [id])
   artifact JobArtifact     @relation(fields: [artifactId], references: [id])
+  captionJobs TrainingCaptionJob[]
 
   @@unique([datasetId, artifactId])
 }

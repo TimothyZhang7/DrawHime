@@ -539,6 +539,8 @@ export const trainingCaptionJobCreateRequestSchema = z.object({ mode: z.enum(["c
 /** 数据集最近一次自动打标与确认阶段。 */
 export const trainingCaptionStageViewSchema = z.object({
   id: z.string().uuid(),
+  scope: z.enum(["dataset", "asset"]),
+  assetId: z.string().nullable(),
   mode: z.enum(["character", "style", "concept"]),
   status: z.enum(["queued", "running", "awaiting_confirmation", "confirmed", "failed", "stale"]),
   progress: z.number().min(0).max(100),
@@ -566,6 +568,7 @@ export const trainingDatasetViewSchema = z.object({
     byteSize: z.number().int().positive(),
     sha256: z.string().regex(/^[a-f0-9]{64}$/),
     contentUrl: z.string(),
+    captionStage: trainingCaptionStageViewSchema.nullable(),
     createdAt: z.string().datetime(),
   })),
   trainingJobCount: z.number().int().nonnegative(),

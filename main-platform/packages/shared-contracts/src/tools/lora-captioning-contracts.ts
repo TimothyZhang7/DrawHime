@@ -18,6 +18,10 @@ export interface LocalCaptioningSessionView {
 /** 数据集自动打标与人工确认阶段。 */
 export interface LocalCaptioningStageView {
   id: string;
+  /** 数据集全量任务或单图任务。 */
+  scope: 'dataset' | 'asset';
+  /** 单图任务对应的训练图片 ID。 */
+  assetId: string | null;
   mode: 'character' | 'style' | 'concept';
   status: 'queued' | 'running' | 'awaiting_confirmation' | 'confirmed' | 'failed' | 'stale';
   progress: number;
@@ -39,6 +43,8 @@ export interface LocalCaptioningAssetView {
   byteSize: number;
   sha256: string;
   contentUrl: string;
+  /** 该图片最近一次独立自动打标阶段。 */
+  captionStage: LocalCaptioningStageView | null;
   createdAt: string;
 }
 

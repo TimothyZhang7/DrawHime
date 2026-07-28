@@ -15,7 +15,7 @@
 | auth | `auth/*` | 用户、会话、认证上下文 |
 | users | `users/user-avatar-contracts.ts`, `users/user-appearance-contracts.ts`, `users/user-profile-contracts.ts`, `users/user-public-profile-contracts.ts`, `users/user-privacy-contracts.ts` | Web 用户资料读取和用户名修改、Web 用户本地头像上传/删除响应、全站背景图与用户显示偏好，Web 用户公开主页，Web/Bot 两端默认图片隐私偏好查询和更新 |
 | tools | `tools/tools-contracts.ts` | 用户端工具入口、启用状态、工具默认参数配置和图片反推结果 |
-| LoRA 打标工具 | `tools/lora-captioning-contracts.ts` | 主站工具页通过同源 `/local-model-api` 身份交换访问独立平台训练集、图片、自动打标、标签保存、确认和翻译结果；训练集数据仍由独立平台权威管理 |
+| LoRA 打标工具 | `tools/lora-captioning-contracts.ts` | 主站工具页通过同源 `/local-model-api` 身份交换访问独立平台训练集、图片、全量或单图自动打标、标签保存、确认和翻译结果；训练集数据仍由独立平台权威管理 |
 | lora | `lora/lora-contracts.ts` | LoRA 仓库列表、用户上传草稿、示例图、模型选项、发布和下载状态 |
 | bot | `bot/bot-command-contracts.ts` | Bot 命令触发词、卡片类型和图片/文字返回格式配置 |
 | drawing | `drawing/drawing-contracts.ts`, `drawing/drawing-model-contracts.ts`, `drawing/site-model-contracts.ts` | 绘图提交、接收、任务响应、模型列表、模型能力和站点模型参考图能力 |

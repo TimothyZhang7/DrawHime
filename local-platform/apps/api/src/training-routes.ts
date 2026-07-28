@@ -85,7 +85,7 @@ export function registerTrainingRoutes(router: ServiceRouter, findSession: (toke
           await tx.jobArtifact.create({ data: { id: artifactId, kind: "DATASET_ASSET", objectKey, fileName: `${artifactId}.webp`, mimeType: "image/webp", sha256, byteSize: BigInt(rendered.data.length), width: rendered.info.width, height: rendered.info.height, metadata: { sourceContentType: request.headers["content-type"] || null } } });
           await tx.datasetAsset.create({ data: { datasetId: dataset.id, artifactId, caption: normalizeCaptionHeader(request.headers["x-dataset-caption"]), metadata: { normalized: true } } });
           // 图片快照变化后旧打标确认必须失效，正式训练只能使用重新打标并确认的新快照。
-          await tx.trainingCaptionJob.updateMany({ where: { datasetId: dataset.id, status: { in: ["AWAITING_CONFIRMATION", "CONFIRMED"] } }, data: { status: "STALE", errorMessage: "数据集图片已变化，请重新自动打标并确认" } });
+          await tx.trainingCaptionJob.updateMany({ where: { datasetId: dataset.id, scope: "DATASET", status: { in: ["AWAITING_CONFIRMATION", "CONFIRMED"] } }, data: { status: "STALE", errorMessage: "数据集图片已变化，请重新自动打标并确认" } });
         });
       } catch (error) { await deleteObject(objectKey).catch(() => undefined); throw error; }
       sendSuccess(response, await getDatasetView(dataset.id), 201);
@@ -100,7 +100,10 @@ export function registerTrainingRoutes(router: ServiceRouter, findSession: (toke
       const input = trainingDatasetAssetUpdateRequestSchema.parse(await readJsonBody<unknown>(request));
       const changed = await database.$transaction(async (tx) => {
         const result = await tx.datasetAsset.updateMany({ where: { id: params.assetId, datasetId: params.id }, data: { caption: input.caption } });
-        if (result.count === 1) await tx.trainingCaptionJob.updateMany({ where: { datasetId: params.id, status: "CONFIRMED" }, data: { status: "AWAITING_CONFIRMATION", confirmedAt: null, errorMessage: "Caption 已修改，请重新确认" } });
+        if (result.count === 1) {
+          await tx.trainingCaptionJob.updateMany({ where: { datasetId: params.id, scope: "DATASET", status: "CONFIRMED" }, data: { status: "AWAITING_CONFIRMATION", confirmedAt: null, errorMessage: "Caption 已修改，请重新确认" } });
+          await tx.trainingCaptionJob.updateMany({ where: { datasetId: params.id, scope: "ASSET", assetId: params.assetId, status: "CONFIRMED" }, data: { status: "STALE", confirmedAt: null, errorMessage: "Caption 已人工修改" } });
+        }
         return result;
       });
       if (changed.count !== 1) throw new TrainingRouteError(404, "dataset_asset_not_found", "数据集图片不存在");
@@ -118,7 +121,7 @@ export function registerTrainingRoutes(router: ServiceRouter, findSession: (toke
       await database.$transaction([
         database.datasetAsset.delete({ where: { id: asset.id } }),
         database.jobArtifact.delete({ where: { id: asset.artifactId } }),
-        database.trainingCaptionJob.updateMany({ where: { datasetId: params.id, status: { in: ["AWAITING_CONFIRMATION", "CONFIRMED"] } }, data: { status: "STALE", errorMessage: "数据集图片已变化，请重新自动打标并确认" } }),
+        database.trainingCaptionJob.updateMany({ where: { datasetId: params.id, scope: "DATASET", status: { in: ["AWAITING_CONFIRMATION", "CONFIRMED"] } }, data: { status: "STALE", errorMessage: "数据集图片已变化，请重新自动打标并确认" } }),
       ]);
       await deleteObject(asset.artifact.objectKey).catch(() => undefined);
       sendSuccess(response, await getDatasetView(params.id));
@@ -144,6 +147,20 @@ export function registerTrainingRoutes(router: ServiceRouter, findSession: (toke
     response.writeHead(200, { "content-type": asset.artifact.mimeType, "content-length": String(object.body.length), "cache-control": "private, max-age=300" }); response.end(object.body);
   });
 
+  router.post("/v1/training/datasets/:id/assets/:assetId/caption-jobs", async ({ request, response, params }) => {
+    const session = await requireSession(request, response, findSession); if (!session) return;
+    try {
+      const input = trainingCaptionJobCreateRequestSchema.parse(await readJsonBody<unknown>(request));
+      const dataset = await findOwnedMutableDataset(params.id, session.externalIdentity.id);
+      ensureCaptionMutationAllowed(dataset.captionJobs[0]);
+      const asset = await database.datasetAsset.findFirst({ where: { id: params.assetId, datasetId: dataset.id }, select: { id: true } });
+      if (!asset) throw new TrainingRouteError(404, "dataset_asset_not_found", "数据集图片不存在");
+      // 单图任务独立持久化，不替换数据集全量打标任务；完成后只使既有确认回到待确认。
+      const job = await database.trainingCaptionJob.create({ data: { datasetId: dataset.id, scope: "ASSET", assetId: asset.id, mode: input.mode, status: "QUEUED", assetSnapshot: [asset.id], totalAssets: 1 } });
+      sendSuccess(response, toCaptionStageView(job), 201);
+    } catch (error) { sendTrainingError(response, error); }
+  });
+
   router.post("/v1/training/datasets/:id/caption-jobs", async ({ request, response, params }) => {
     const session = await requireSession(request, response, findSession); if (!session) return;
     try {
@@ -154,8 +171,8 @@ export function registerTrainingRoutes(router: ServiceRouter, findSession: (toke
       if (dataset._count.assets < 1) throw new TrainingRouteError(400, "dataset_assets_insufficient", "自动打标至少需要 1 张训练图片");
       const assets = await database.datasetAsset.findMany({ where: { datasetId: dataset.id }, orderBy: { createdAt: "asc" }, select: { id: true } });
       const job = await database.$transaction(async (tx) => {
-        await tx.trainingCaptionJob.updateMany({ where: { datasetId: dataset.id, status: { in: ["AWAITING_CONFIRMATION", "CONFIRMED"] } }, data: { status: "STALE", errorMessage: "已创建新的自动打标任务" } });
-        return tx.trainingCaptionJob.create({ data: { datasetId: dataset.id, mode: input.mode, status: "QUEUED", assetSnapshot: assets.map((asset) => asset.id), totalAssets: assets.length } });
+        await tx.trainingCaptionJob.updateMany({ where: { datasetId: dataset.id, scope: "DATASET", status: { in: ["AWAITING_CONFIRMATION", "CONFIRMED"] } }, data: { status: "STALE", errorMessage: "已创建新的自动打标任务" } });
+        return tx.trainingCaptionJob.create({ data: { datasetId: dataset.id, scope: "DATASET", mode: input.mode, status: "QUEUED", assetSnapshot: assets.map((asset) => asset.id), totalAssets: assets.length } });
       });
       sendSuccess(response, toCaptionStageView(job), 201);
     } catch (error) { sendTrainingError(response, error); }
@@ -165,7 +182,7 @@ export function registerTrainingRoutes(router: ServiceRouter, findSession: (toke
     const session = await requireSession(request, response, findSession); if (!session) return;
     try {
       await findOwnedMutableDataset(params.id, session.externalIdentity.id);
-      const job = await database.trainingCaptionJob.findFirst({ where: { id: params.jobId, datasetId: params.id } });
+      const job = await database.trainingCaptionJob.findFirst({ where: { id: params.jobId, datasetId: params.id, scope: "DATASET" } });
       if (!job || !["AWAITING_CONFIRMATION", "CONFIRMED"].includes(job.status)) throw new TrainingRouteError(409, "caption_job_not_confirmable", "自动打标尚未完成或已经失效");
       const assets = await database.datasetAsset.findMany({ where: { datasetId: params.id }, orderBy: { createdAt: "asc" }, select: { id: true, caption: true } });
       if (!sameAssetSnapshot(job.assetSnapshot, assets.map((asset) => asset.id))) throw new TrainingRouteError(409, "caption_snapshot_stale", "数据集图片已经变化，请重新自动打标");
@@ -281,13 +298,13 @@ async function ensureTrainingReservation(jobId: string, subject: string, product
   }
 }
 
-const datasetInclude = { owner: true, assets: { include: { artifact: true }, orderBy: { createdAt: "asc" as const } }, captionJobs: { orderBy: { createdAt: "desc" as const }, take: 1 }, _count: { select: { trainingJobs: true } } };
+const datasetInclude = { owner: true, assets: { include: { artifact: true, captionJobs: { where: { scope: "ASSET" }, orderBy: { createdAt: "desc" as const }, take: 1 } }, orderBy: { createdAt: "asc" as const } }, captionJobs: { where: { scope: "DATASET" }, orderBy: { createdAt: "desc" as const }, take: 1 }, _count: { select: { trainingJobs: true } } };
 type DatasetRow = Awaited<ReturnType<typeof getDatasetRow>>;
 async function getDatasetRow(id: string) { return database.trainingDataset.findUniqueOrThrow({ where: { id }, include: datasetInclude }); }
 async function getDatasetView(id: string): Promise<TrainingDatasetView> { return toDatasetView(await getDatasetRow(id)); }
 
 /** 把数据集数据库记录转换成不暴露对象键的视图。 */
-function toDatasetView(row: DatasetRow): TrainingDatasetView { return { id: row.id, title: row.title, description: row.description, status: row.status.toLowerCase() as TrainingDatasetView["status"], ownerDisplayName: row.owner.displayName, assets: row.assets.map((asset) => ({ id: asset.id, artifactId: asset.artifactId, caption: asset.caption, width: asset.artifact.width, height: asset.artifact.height, byteSize: Number(asset.artifact.byteSize), sha256: asset.artifact.sha256, contentUrl: `/local-model-api/v1/training/datasets/${row.id}/assets/${asset.id}/content`, createdAt: asset.createdAt.toISOString() })), trainingJobCount: row._count.trainingJobs, captionStage: row.captionJobs[0] ? toCaptionStageView(row.captionJobs[0]) : null, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() }; }
+function toDatasetView(row: DatasetRow): TrainingDatasetView { return { id: row.id, title: row.title, description: row.description, status: row.status.toLowerCase() as TrainingDatasetView["status"], ownerDisplayName: row.owner.displayName, assets: row.assets.map((asset) => ({ id: asset.id, artifactId: asset.artifactId, caption: asset.caption, width: asset.artifact.width, height: asset.artifact.height, byteSize: Number(asset.artifact.byteSize), sha256: asset.artifact.sha256, contentUrl: `/local-model-api/v1/training/datasets/${row.id}/assets/${asset.id}/content`, captionStage: asset.captionJobs[0] ? toCaptionStageView(asset.captionJobs[0]) : null, createdAt: asset.createdAt.toISOString() })), trainingJobCount: row._count.trainingJobs, captionStage: row.captionJobs[0] ? toCaptionStageView(row.captionJobs[0]) : null, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() }; }
 
 /** 读取包含尝试、模型、数据集和计费镜像的训练任务视图。 */
 export async function getTrainingJobView(id: string): Promise<TrainingJobView> {
@@ -303,7 +320,7 @@ function trainingBaseUnitPrice(value: unknown): number { const price = Number(re
 async function findTrainingModel(id: string) { const model = await database.modelVersion.findFirst({ where: { id, status: "ACTIVE", runtimeFormat: "anima" } }); if (!model) throw new TrainingRouteError(400, "training_model_invalid", "所选基础模型不支持 Anima LoRA 训练"); return model; }
 function ensureCaptionMutationAllowed(job: { status: string } | undefined): void { if (job && ["QUEUED", "RUNNING"].includes(job.status)) throw new TrainingRouteError(409, "caption_job_active", "自动打标正在进行，请等待完成后再修改数据集"); }
 function sameAssetSnapshot(value: unknown, assetIds: string[]): boolean { return Array.isArray(value) && value.length === assetIds.length && value.every((item, index) => item === assetIds[index]); }
-function toCaptionStageView(row: { id: string; mode: string; status: string; progress: Prisma.Decimal; totalAssets: number; completedAssets: number; errorMessage: string | null; confirmedAt: Date | null; createdAt: Date; updatedAt: Date }): TrainingCaptionStageView { return { id: row.id, mode: row.mode.toLowerCase() as TrainingCaptionStageView["mode"], status: row.status.toLowerCase() as TrainingCaptionStageView["status"], progress: Number(row.progress), totalAssets: row.totalAssets, completedAssets: row.completedAssets, errorMessage: row.errorMessage, confirmedAt: row.confirmedAt?.toISOString() ?? null, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() }; }
+function toCaptionStageView(row: { id: string; scope: string; assetId: string | null; mode: string; status: string; progress: Prisma.Decimal; totalAssets: number; completedAssets: number; errorMessage: string | null; confirmedAt: Date | null; createdAt: Date; updatedAt: Date }): TrainingCaptionStageView { return { id: row.id, scope: row.scope.toLowerCase() as TrainingCaptionStageView["scope"], assetId: row.assetId, mode: row.mode.toLowerCase() as TrainingCaptionStageView["mode"], status: row.status.toLowerCase() as TrainingCaptionStageView["status"], progress: Number(row.progress), totalAssets: row.totalAssets, completedAssets: row.completedAssets, errorMessage: row.errorMessage, confirmedAt: row.confirmedAt?.toISOString() ?? null, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() }; }
 async function readRequestBuffer(request: IncomingMessage, maximumBytes: number): Promise<Buffer> { const declared = Number(request.headers["content-length"] || 0); if (!Number.isSafeInteger(declared) || declared <= 0 || declared > maximumBytes) throw new TrainingRouteError(413, "dataset_image_size_invalid", "训练图片大小必须在 1B 到 25MB 之间"); const chunks: Buffer[] = []; let total = 0; for await (const chunk of request) { const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk); total += buffer.length; if (total > maximumBytes || total > declared) throw new TrainingRouteError(413, "dataset_image_size_invalid", "训练图片超过大小限制"); chunks.push(buffer); } if (total !== declared) throw new TrainingRouteError(400, "dataset_image_incomplete", "训练图片上传不完整"); return Buffer.concat(chunks); }
 function normalizeCaptionHeader(value: string | string[] | undefined): string | null { const raw = Array.isArray(value) ? value[0] : value; if (!raw) return null; try { return decodeURIComponent(raw).trim().slice(0, 10000) || null; } catch { return String(raw).trim().slice(0, 10000) || null; } }
 function readRoles(value: unknown): string[] { return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []; }

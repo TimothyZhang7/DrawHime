@@ -38,8 +38,9 @@ type ClaimedCaptionJob = NonNullable<Awaited<ReturnType<typeof claimCaptionJob>>
 async function processCaptionJob(job: ClaimedCaptionJob): Promise<void> {
   try {
     const snapshot = readAssetSnapshot(job.assetSnapshot);
-    const assets = job.dataset.assets;
-    if (job.dataset.status !== "ACTIVE" || !sameSnapshot(snapshot, assets.map((asset) => asset.id))) {
+    const scope = normalizeScope(job.scope);
+    const assets = scope === "asset" ? job.dataset.assets.filter((asset) => asset.id === job.assetId) : job.dataset.assets;
+    if (job.dataset.status !== "ACTIVE" || assets.length !== snapshot.length || !sameSnapshot(snapshot, assets.map((asset) => asset.id))) {
       await database.trainingCaptionJob.update({ where: { id: job.id }, data: { status: "STALE", progress: 100, errorMessage: "数据集图片快照已变化，请重新自动打标", completedAt: new Date() } });
       return;
     }
@@ -50,12 +51,16 @@ async function processCaptionJob(job: ClaimedCaptionJob): Promise<void> {
       const prepared = await sharp(object.body, { failOn: "error", limitInputPixels: 100_000_000 }).rotate().resize({ width: 1280, height: 1280, fit: "inside", withoutEnlargement: true }).jpeg({ quality: 90, chromaSubsampling: "4:4:4" }).toBuffer();
       const caption = await captionImage(prepared, mode, job.dataset.title, job.dataset.description);
       const completedAssets = index + 1;
-      await database.$transaction([
+      const writes: Prisma.PrismaPromise<unknown>[] = [
         database.datasetAsset.update({ where: { id: asset.id }, data: { caption, metadata: { ...readObject(asset.metadata), autoCaptionJobId: job.id, autoCaptionMode: mode, autoCaptionedAt: new Date().toISOString() } as Prisma.InputJsonObject } }),
         database.trainingCaptionJob.update({ where: { id: job.id }, data: { completedAssets, progress: Math.round(completedAssets / assets.length * 100) } }),
-      ]);
+      ];
+      // 单图重新打标会改变 Caption，既有全量确认需要回到人工待确认，但无需重跑其他图片。
+      if (scope === "asset") writes.push(database.trainingCaptionJob.updateMany({ where: { datasetId: job.datasetId, scope: "DATASET", status: "CONFIRMED" }, data: { status: "AWAITING_CONFIRMATION", confirmedAt: null, errorMessage: "单图 Caption 已重新生成，请重新确认" } }));
+      await database.$transaction(writes);
     }
-    await database.trainingCaptionJob.update({ where: { id: job.id }, data: { status: "AWAITING_CONFIRMATION", progress: 100, completedAssets: assets.length, errorMessage: null, completedAt: new Date() } });
+    const completedAt = new Date();
+    await database.trainingCaptionJob.update({ where: { id: job.id }, data: { status: scope === "asset" ? "CONFIRMED" : "AWAITING_CONFIRMATION", progress: 100, completedAssets: assets.length, errorMessage: null, completedAt, confirmedAt: scope === "asset" ? completedAt : null } });
   } catch (error) {
     await database.trainingCaptionJob.update({ where: { id: job.id }, data: { status: "FAILED", progress: 100, errorMessage: errorMessage(error), completedAt: new Date() } });
   }
@@ -129,6 +134,8 @@ function normalizeCaption(value: string): string {
 function readAssetSnapshot(value: unknown): string[] { if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) throw new Error("自动打标图片快照损坏"); return value; }
 function sameSnapshot(left: string[], right: string[]): boolean { return left.length === right.length && left.every((item, index) => item === right[index]); }
 function normalizeMode(value: string): CaptionMode { if (value === "character" || value === "style" || value === "concept") return value; throw new Error("自动打标模式不正确"); }
+/** 校验数据集全量与单图打标范围，拒绝损坏任务进入图片处理链路。 */
+function normalizeScope(value: string): "dataset" | "asset" { if (value === "DATASET") return "dataset"; if (value === "ASSET") return "asset"; throw new Error("自动打标范围不正确"); }
 function readObject(value: unknown): Record<string, unknown> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
 function requiredEnvironment(name: string): string { const value = process.env[name]?.trim(); if (!value) throw new Error(`${name} 未配置`); return value; }
 function captionTimeoutSeconds(): number { const parsed = Number(process.env.PROMPT_ASSIST_TIMEOUT_SEC || 90); return Number.isSafeInteger(parsed) ? Math.min(240, Math.max(30, parsed)) : 90; }
