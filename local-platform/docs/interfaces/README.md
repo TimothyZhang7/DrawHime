@@ -48,6 +48,7 @@
 | `GET /v1/loras` | web/admin | api | 已发布且已迁移到独立对象存储的 LoRA 列表 |
 | `GET /v1/lora-library` | web/admin | api | 返回公开已发布 LoRA 和当前用户自己的私有/草稿 LoRA；`mine=1` 仅返回本人条目，私有条目不向其他用户外显 |
 | `GET /v1/lora-library/:id` | web/admin | api | 按 LoRA 条目 ID 或任务固化的 LoRA 版本 ID 读取唯一详情；公开已发布条目可由其他用户查看，私有或草稿仅作者和管理员可读；详情附带最近引用该 LoRA 且已发布到主站图库的公开任务卡片，不外显私密或未发布任务 |
+| `GET /v1/lora-library/:id/download` | web/admin | api | 登录用户流式下载可访问 LoRA 的最新有效 safetensors 文件；公开已发布条目允许下载，私有或草稿仅作者和管理员可下载，不暴露对象存储键 |
 | `POST /v1/lora-library` | web | api | 创建当前用户 LoRA 草稿并固化公开/私有选择；自定义主模型系列会持久化为全局筛选项 |
 | `PATCH /v1/lora-library/:id` | web | api | 作者修改标题、描述、类型、主模型系列、触发词和公开/私有范围；不覆盖已发布模型版本 |
 | `POST/GET/PUT /v1/lora-library/:id/uploads[/:uploadId]` | web | api | 创建、查询并按服务端偏移续传 LoRA 文件；单片最多 4MB，偏移和临时文件持久化，刷新或网络中断后可继续 |

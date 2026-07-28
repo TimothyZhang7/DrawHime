@@ -3,6 +3,8 @@
  */
 import { DeleteObjectCommand, GetObjectCommand, HeadBucketCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { createReadStream } from "node:fs";
+import type { Writable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import type {
   DependencyStatus,
   ServiceHealthView,
@@ -95,6 +97,18 @@ export async function getObjectBuffer(objectKey: string): Promise<{ body: Buffer
       body: Buffer.from(await result.Body.transformToByteArray()),
       contentType: result.ContentType || "application/octet-stream",
     };
+  } finally {
+    client.destroy();
+  }
+}
+
+/** 把独立对象存储中的大对象直接写入目标流，避免完整文件进入 Node 堆内存。 */
+export async function streamObjectToWritable(objectKey: string, destination: Writable): Promise<void> {
+  const { client, bucket } = createObjectStorageClient();
+  try {
+    const result = await client.send(new GetObjectCommand({ Bucket: bucket, Key: objectKey }));
+    if (!result.Body) throw new Error("对象存储返回空内容");
+    await pipeline(result.Body as NodeJS.ReadableStream, destination);
   } finally {
     client.destroy();
   }

@@ -2,7 +2,7 @@
  * 本文件实现图库式 LoRA 仓库、弹窗创建、详情子页面、作者编辑与公开/私有外显控制。
  */
 import type { LocalPlatformSessionView, LoraLibraryEntryView, LoraUploadSessionView } from "@drawhime/contracts";
-import { ArrowLeft, CalendarDays, Check, ChevronRight, Copy, ExternalLink, FileUp, Grid2X2, HardDrive, ImageIcon, Images, Layers3, LoaderCircle, Lock, Pencil, Plus, RotateCcw, Search, SlidersHorizontal, Sparkles, Tag, Trash2, Unlock, UploadCloud, UserRound, X } from "lucide-react";
+import { ArrowLeft, CalendarDays, Check, ChevronRight, Copy, Download, ExternalLink, FileUp, Grid2X2, HardDrive, ImageIcon, Images, Layers3, LoaderCircle, Lock, Pencil, Plus, RotateCcw, Search, SlidersHorizontal, Sparkles, Tag, Trash2, Unlock, UploadCloud, UserRound, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
 const apiBase = import.meta.env.VITE_LOCAL_API_BASE || "/local-model-api";
@@ -135,7 +135,7 @@ function LoraCreateDialog({ session, entries, families, onClose, onCompleted }: 
 function LoraDetailPage({ session, entry, loading, message, families, onBack, onChanged, onDeleted, onUseLora }: { session: LocalPlatformSessionView | null; entry: LoraLibraryEntryView | null; loading: boolean; message: string; families: string[]; onBack: () => void; onChanged: (entry: LoraLibraryEntryView, notice: string) => Promise<void>; onDeleted: () => Promise<void>; onUseLora: (versionId: string) => void }) {
   const [title, setTitle] = useState(""); const [description, setDescription] = useState("");
   const [type, setType] = useState<LoraLibraryEntryView["type"]>("style"); const [family, setFamily] = useState("");
-  const [triggerWords, setTriggerWords] = useState(""); const [isPrivate, setPrivate] = useState(false); const [busy, setBusy] = useState(false); const [editOpen, setEditOpen] = useState(false);
+  const [triggerWords, setTriggerWords] = useState(""); const [isPrivate, setPrivate] = useState(false); const [busy, setBusy] = useState(false); const [downloading, setDownloading] = useState(false); const [editOpen, setEditOpen] = useState(false);
   const [feedback, setFeedback] = useState<{ kind: "success" | "error"; text: string } | null>(null);
   useEffect(() => { if (entry) { setTitle(entry.title); setDescription(entry.description); setType(entry.type); setFamily(entry.modelFamilyName); setTriggerWords(entry.triggerWords.join(", ")); setPrivate(entry.privacy === "private"); } }, [entry]);
   useEffect(() => { const close = (event: KeyboardEvent) => { if (event.key === "Escape" && editOpen && !busy) setEditOpen(false); }; window.addEventListener("keydown", close); return () => window.removeEventListener("keydown", close); }, [busy, editOpen]);
@@ -151,6 +151,26 @@ function LoraDetailPage({ session, entry, loading, message, families, onBack, on
   const addExamples = (files: File[]) => run(async () => { await uploadExamples(entry.id, files.slice(0, Math.max(0, 8 - entry.examples.length)), token, () => undefined); return loraJson(`/v1/lora-library/${entry.id}`, token); }, "示例图已添加");
   const removeExample = (id: string) => run(() => loraJson(`/v1/lora-library/${entry.id}/examples/${id}`, token, { method: "DELETE" }), "示例图已删除");
   const publish = () => run(() => loraJson(`/v1/lora-library/${entry.id}/publish`, token, { method: "POST", body: "{}" }), "LoRA 已发布");
+  /** 使用本地会话鉴权读取真实模型文件，并交给浏览器保存为原始 safetensors 文件名。 */
+  const downloadLora = async () => {
+    if (!entry.version || downloading) return;
+    setDownloading(true); setFeedback(null);
+    try {
+      const response = await fetch(`${apiBase}/v1/lora-library/${entry.id}/download`, { headers: { authorization: `Bearer ${token}` }, cache: "no-store" });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null) as { message?: string } | null;
+        throw new Error(payload?.message || `下载失败：HTTP ${response.status}`);
+      }
+      const objectUrl = URL.createObjectURL(await response.blob());
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = entry.version.fileName.split(/[\\/]/).pop() || `${entry.title}.safetensors`;
+      document.body.appendChild(anchor); anchor.click(); anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+      setFeedback({ kind: "success", text: "LoRA 模型文件已开始下载" });
+    } catch (error) { setFeedback({ kind: "error", text: errorMessage(error) }); }
+    finally { setDownloading(false); }
+  };
   /** 删除草稿会清理无引用文件；已发布或训练产物 LoRA 会安全下架并保留历史记录。 */
   const deleteLora = async () => {
     const published = entry.status === "published";
@@ -163,7 +183,7 @@ function LoraDetailPage({ session, entry, loading, message, families, onBack, on
     catch (error) { setFeedback({ kind: "error", text: errorMessage(error) }); setBusy(false); }
   };
   return <div className="lora-detail-page">
-    <header className="card lora-detail-toolbar"><button className="lora-detail-back" onClick={onBack}><ArrowLeft size={16} />返回仓库</button><div><span>{typeLabel(entry.type)} · {entry.modelFamilyName}</span><strong>{entry.title}</strong></div><nav className="lora-detail-actions">{entry.isOwner && <button className="lora-edit-button" onClick={() => { setFeedback(null); setEditOpen(true); }}><Pencil size={14} />编辑</button>}{entry.version && entry.status === "published" ? <button className="lora-use-button" onClick={() => onUseLora(entry.version!.id)}><Sparkles size={15} />用于绘图</button> : <span className="lora-detail-unavailable">{entry.status === "draft" ? "等待发布" : "暂不可用"}</span>}</nav></header>
+    <header className="card lora-detail-toolbar"><button className="lora-detail-back" onClick={onBack}><ArrowLeft size={16} />返回仓库</button><div><span>{typeLabel(entry.type)} · {entry.modelFamilyName}</span><strong>{entry.title}</strong></div><nav className="lora-detail-actions">{entry.isOwner && <button className="lora-edit-button" onClick={() => { setFeedback(null); setEditOpen(true); }}><Pencil size={14} />编辑</button>}{entry.version && <button className="lora-download-button" disabled={downloading} onClick={() => void downloadLora()}>{downloading ? <LoaderCircle className="spin" size={14} /> : <Download size={14} />}{downloading ? "下载中" : "下载"}</button>}{entry.version && entry.status === "published" ? <button className="lora-use-button" onClick={() => onUseLora(entry.version!.id)}><Sparkles size={15} />用于绘图</button> : <span className="lora-detail-unavailable">{entry.status === "draft" ? "等待发布" : "暂不可用"}</span>}</nav></header>
     {feedback && <div className={`notice compact lora-detail-feedback ${feedback.kind === "error" ? "error" : "success"}`}><span>{feedback.text}</span><button onClick={() => setFeedback(null)} aria-label="关闭提示"><X size={13} /></button></div>}
     <section className="lora-detail-hero card" style={coverStyle}>
       <div className="lora-detail-cover">{coverExample ? <LoraExampleImage example={coverExample} token={token} alt={entry.title} eager /> : <LoraDefaultCover />}</div>

@@ -11,7 +11,7 @@ import type { IncomingMessage } from "node:http";
 import type { ExternalIdentity, Prisma } from "@prisma/client";
 import { loraLibraryCreateRequestSchema, loraLibraryUpdateRequestSchema, loraUploadSessionCreateRequestSchema, type LoraLibraryEntryView, type LoraUploadSessionView } from "@drawhime/contracts";
 import { database } from "@drawhime/database";
-import { deleteObject, getObjectBuffer, putObjectBuffer, putObjectFile, readJsonBody, sendError, sendSuccess, type ServiceRouter } from "@drawhime/service-runtime";
+import { deleteObject, getObjectBuffer, putObjectBuffer, putObjectFile, readJsonBody, sendError, sendSuccess, streamObjectToWritable, type ServiceRouter } from "@drawhime/service-runtime";
 import sharp from "sharp";
 
 const maximumLoraBytes = 512 * 1024 * 1024;
@@ -40,6 +40,28 @@ export function registerLoraLibraryRoutes(router: ServiceRouter, findSession: Fi
     try {
       sendSuccess(response, await getAccessibleEntryView(params.id, session.externalIdentity));
     } catch (error) { sendLibraryError(response, error); }
+  });
+
+  router.get("/v1/lora-library/:id/download", async ({ request, response, params }) => {
+    const session = await findSession(readBearerToken(request));
+    if (!session) return sendError(response, 401, "local_session_invalid", "本地模型平台登录状态已失效");
+    try {
+      const entry = await findDownloadableEntry(params.id, session.externalIdentity);
+      const version = entry.versions[0];
+      if (!version) throw new LoraLibraryError(404, "lora_file_not_found", "LoRA 模型文件不存在");
+      response.writeHead(200, {
+        "content-type": "application/octet-stream",
+        "content-length": String(version.byteSize),
+        "content-disposition": loraDownloadContentDisposition(version.fileName, entry.id),
+        "cache-control": "private, no-store",
+        "x-content-type-options": "nosniff",
+      });
+      // 模型文件最大可达 512MB，直接从对象存储流向客户端，避免 API 进程复制整份文件。
+      await streamObjectToWritable(version.objectKey, response);
+    } catch (error) {
+      if (!response.headersSent) return sendLibraryError(response, error);
+      if (!response.destroyed) response.destroy(error instanceof Error ? error : new Error("LoRA 模型文件下载失败"));
+    }
   });
 
   router.post("/v1/lora-library", async ({ request, response }) => {
@@ -393,6 +415,21 @@ async function getAccessibleEntryView(id: string, identity: ExternalIdentity): P
   return toEntryView(entry, identity.id, await listReferenceTasks(entry.id));
 }
 
+/** 读取可下载的 LoRA 及其最新有效版本，权限与详情页外显规则保持一致。 */
+async function findDownloadableEntry(id: string, identity: ExternalIdentity) {
+  if (!/^[0-9a-f-]{36}$/i.test(id)) throw new LoraLibraryError(400, "lora_id_invalid", "LoRA 条目 ID 不正确");
+  const entry = await database.loraEntry.findUnique({
+    where: { id },
+    include: { versions: { where: { status: "ACTIVE" }, orderBy: { createdAt: "desc" }, take: 1 } },
+  });
+  const admin = readRoles(identity.roles).includes("admin");
+  // 私有 LoRA、草稿及下架资产只允许作者或管理员读取，其他身份统一返回不存在。
+  if (!entry || entry.deletedAt || (!admin && entry.ownerIdentityId !== identity.id && (entry.status !== "ACTIVE" || entry.isPrivate))) {
+    throw new LoraLibraryError(404, "lora_not_found", "LoRA 不存在或未公开");
+  }
+  return entry;
+}
+
 /** 查询最近引用当前 LoRA 的公开图库任务，严格排除私密、未发布和已删除记录。 */
 async function listReferenceTasks(loraEntryId: string): Promise<LoraLibraryEntryView["referenceTasks"]> {
   const versions = await database.loraVersion.findMany({ where: { loraEntryId }, select: { id: true } });
@@ -619,6 +656,14 @@ function decodeFileName(value: string | string[] | undefined): string {
   } catch {
     return "model.safetensors";
   }
+}
+
+/** 生成兼容中文文件名的下载响应头，并清除控制字符与异常扩展名。 */
+function loraDownloadContentDisposition(fileName: string, entryId: string): string {
+  const baseName = fileName.split(/[\\/]/).pop()?.replace(/[\u0000-\u001f\u007f";]+/g, "-").trim() || `lora-${entryId.slice(0, 8)}`;
+  const safeName = baseName.toLowerCase().endsWith(".safetensors") ? baseName : `${baseName}.safetensors`;
+  const encoded = encodeURIComponent(safeName).replace(/['()*]/g, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
+  return `attachment; filename="lora-${entryId.slice(0, 8)}.safetensors"; filename*=UTF-8''${encoded}`;
 }
 
 /** 从本地会话请求读取 Bearer token。 */
