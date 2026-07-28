@@ -45,21 +45,20 @@
 | `POST /v1/inference/jobs/:id/cancel` | web | api | `InferenceJobCancelRequest`，只取消尚未运行任务并释放资金预留 |
 | `DELETE /v1/inference/jobs/:id` | web | api | 删除已结束推理记录；已发布作品先同步删除主站正式图库，余额、计费和产物审计不删除 |
 | `GET /v1/artifacts/:id/content` | web/admin | api | 经会话鉴权读取所属任务的对象存储产物 |
-| `GET /v1/loras` | web/admin | api | 已发布且已迁移到独立对象存储的 LoRA 列表 |
-| `GET /v1/lora-library` | web/admin | api | 返回公开已发布 LoRA 和当前用户自己的私有/草稿 LoRA；`mine=1` 仅返回本人条目，私有条目不向其他用户外显 |
-| `GET /v1/lora-library/:id` | web/admin | api | 按 LoRA 条目 ID 或任务固化的 LoRA 版本 ID 读取唯一详情；公开已发布条目可由其他用户查看，私有或草稿仅作者和管理员可读；详情附带最近引用该 LoRA 且已发布到主站图库的公开任务卡片，不外显私密或未发布任务 |
-| `GET /v1/lora-library/:id/download` | web/admin | api | 登录用户流式下载可访问 LoRA 的最新有效 safetensors 文件；公开已发布条目允许下载，私有或草稿仅作者和管理员可下载，不暴露对象存储键 |
-| `POST /v1/lora-library` | web | api | 创建当前用户 LoRA 草稿并固化公开/私有选择；自定义主模型系列会持久化为全局筛选项 |
-| `PATCH /v1/lora-library/:id` | web | api | 作者修改标题、描述、类型、主模型系列、触发词和公开/私有范围；不覆盖已发布模型版本 |
+| `GET /v1/loras` | web/admin | api | 已上传有效模型文件且当前身份可访问的 LoRA 列表 |
+| `GET /v1/lora-library` | web/admin | api | 返回公开 LoRA 和当前用户自己的私有 LoRA；`mine=1` 仅返回本人条目，私有条目不向其他用户外显；仓库不再区分草稿与发布状态 |
+| `GET /v1/lora-library/:id` | web/admin | api | 按 LoRA 条目 ID 或任务固化的 LoRA 版本 ID 读取唯一详情；公开条目可由其他用户查看，私有条目仅作者和管理员可读；详情附带最近引用该 LoRA 且已发布到主站图库的公开任务卡片，不外显私密任务 |
+| `GET /v1/lora-library/:id/download` | web/admin | api | 登录用户流式下载可访问 LoRA 的最新有效 safetensors 文件；公开条目允许下载，私有条目仅作者和管理员可下载，不暴露对象存储键 |
+| `POST /v1/lora-library` | web | api | 创建默认可用的当前用户 LoRA 并固化公开/私有选择；自定义主模型系列会持久化为全局筛选项 |
+| `PATCH /v1/lora-library/:id` | web | api | 作者修改标题、描述、类型、主模型系列、触发词和公开/私有范围；不覆盖有效模型版本 |
 | `POST/GET/PUT /v1/lora-library/:id/uploads[/:uploadId]` | web | api | 创建、查询并按服务端偏移续传 LoRA 文件；单片最多 4MB，偏移和临时文件持久化，刷新或网络中断后可继续 |
 | `POST /v1/lora-library/:id/uploads/:uploadId/complete` | web | api | 校验完整 safetensors 文件、字节数和 SHA-256 后流式写入独立对象存储并创建版本 |
 | `PUT /v1/lora-library/:id/file` | 受控客户端 | api | 小文件直传兼容入口，仍执行相同 safetensors、大小和 SHA-256 校验 |
-| `POST /v1/lora-library/:id/examples` | web | api | 作者为草稿或已发布 LoRA 上传最多 8 张示例图，服务端统一转为高质量 WebP 后写入独立对象存储 |
-| `POST /v1/lora-library/:id/publish` | web | api | 仅在有效模型文件和至少一张示例图存在时发布，发布后进入生成页可选列表 |
-| `DELETE /v1/lora-library/:id` | web | api | 删除当前作者 LoRA：无历史引用草稿物理清理模型、示例和临时文件；已发布或训练产物 LoRA 软删除并立即从仓库、生成选择和示例访问中下架，历史任务、计费和产物保持可追溯 |
-| `DELETE /v1/lora-library/:id/examples/:exampleId` | web | api | 作者删除示例图；已发布 LoRA 强制保留至少一张示例图 |
+| `POST /v1/lora-library/:id/examples` | web | api | 作者为 LoRA 上传最多 8 张示例图，服务端统一转为高质量 WebP 后写入独立对象存储 |
+| `DELETE /v1/lora-library/:id` | web | api | 删除当前作者 LoRA 后立即从仓库、生成选择和示例访问中下架；历史任务、训练产物、计费和产物保持可追溯 |
+| `DELETE /v1/lora-library/:id/examples/:exampleId` | web | api | 作者可删除任意示例图；没有示例图时仓库使用默认封面 |
 | `DELETE /v1/lora-library/:id/uploads/:uploadId` | web | api | 取消当前用户的未完成上传会话并清理受控临时文件 |
-| `GET /v1/lora-library/examples/:id/content` | web/admin | api | 登录用户读取公开已发布示例图；私有或草稿示例图仅作者和管理员可读，并使用私有缓存策略 |
+| `GET /v1/lora-library/examples/:id/content` | web/admin | api | 登录用户读取公开 LoRA 示例图；私有示例图仅作者和管理员可读，并使用私有缓存策略 |
 | `POST/GET /v1/training/datasets` | web/admin | api | 创建和读取当前身份训练数据集；管理员可使用 `scope=all` 查看全局资产 |
 | `POST /v1/training/datasets/:id/assets` | web | api | 上传训练图片，服务端统一方向、色彩空间与 WebP 编码后写入独立对象存储并记录 SHA-256 |
 | `PATCH/DELETE /v1/training/datasets/:id/assets/:assetId` | web | api | 编辑单图 Caption 或删除未被训练任务引用的数据集图片和对象 |
@@ -144,5 +143,5 @@ GPU Agent 每 10 秒把 ComfyUI `system_stats` 的真实设备和显存写入独
 ## 生产闭环状态
 
 - SSO、身份会话撤销、主站钱包预留/提交/释放、正式图库发布、GPU 心跳与租约、推理恢复、LoRA 仓库和训练 Runtime 均已落地并完成生产验证。
-- `POST /v1/training/jobs`、`GET /v1/training/jobs/:id` 与 `POST /v1/training/jobs/:id/cancel` 使用独立服务 token 调用 GPU training-runtime；数据集逐图校验 SHA-256，输出经受保护端点下载并登记 LoRA 草稿。
+- `POST /v1/training/jobs`、`GET /v1/training/jobs/:id` 与 `POST /v1/training/jobs/:id/cancel` 使用独立服务 token 调用 GPU training-runtime；数据集逐图校验 SHA-256，输出经受保护端点下载并直接登记为可用 LoRA。
 - 未登记的写接口不注册路由，调用方不会得到伪成功响应。

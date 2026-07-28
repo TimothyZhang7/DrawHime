@@ -1,5 +1,5 @@
 /**
- * 本文件实现真实 Anima LoRA 训练消费者，负责 GPU Runtime、产物校验、LoRA 草稿与主站计费终态。
+ * 本文件实现真实 Anima LoRA 训练消费者，负责 GPU Runtime、产物校验、可用 LoRA 与主站计费终态。
  */
 import { Prisma } from "@prisma/client";
 import { trainingRuntimeJobViewSchema, trainingRuntimeSubmitRequestSchema, type TrainingRuntimeJobView, type TrainingRuntimeSubmitRequest } from "@drawhime/contracts";
@@ -105,7 +105,8 @@ async function executeTrainingAttempt(jobId: string, attemptId: string, attemptN
     validateSafetensors(output.buffer);
     const objectKey = `trained-loras/${job.externalIdentityId}/${job.id}/v1.safetensors`;
     await putObjectBuffer(objectKey, output.buffer, "application/octet-stream");
-    const entry = await database.loraEntry.upsert({ where: { slug: `trained-${job.id}` }, update: {}, create: { ownerIdentityId: job.externalIdentityId, modelFamilyId: job.baseModelVersion.familyId, slug: `trained-${job.id}`, title: job.title, description: `由数据集“${job.dataset.title}”训练生成的 Anima LoRA，发布前请补充示例图。`, type: "OTHER", triggerWords, status: "DISABLED" } });
+    // 训练产物直接进入统一可用状态，作者可随后补充示例图和调整隐私，不再经过发布步骤。
+    const entry = await database.loraEntry.upsert({ where: { slug: `trained-${job.id}` }, update: { status: "ACTIVE" }, create: { ownerIdentityId: job.externalIdentityId, modelFamilyId: job.baseModelVersion.familyId, slug: `trained-${job.id}`, title: job.title, description: `由数据集“${job.dataset.title}”训练生成的 Anima LoRA，可在仓库继续补充示例图和说明。`, type: "OTHER", triggerWords, status: "ACTIVE" } });
     const version = await database.loraVersion.upsert({ where: { loraEntryId_version: { loraEntryId: entry.id, version: "1.0.0" } }, update: {}, create: { loraEntryId: entry.id, version: "1.0.0", objectKey, fileName: `${normalizeSlug(job.title)}.safetensors`, sha256: output.sha256, byteSize: BigInt(output.buffer.length), metadata: { trainingJobId: job.id, runtimeJobId: attemptId, parameters } } });
     await database.$transaction([
       database.trainingAttempt.update({ where: { id: attemptId }, data: { status: "SUCCEEDED", metrics: runtime.metrics as Prisma.InputJsonObject, completedAt: new Date() } }),

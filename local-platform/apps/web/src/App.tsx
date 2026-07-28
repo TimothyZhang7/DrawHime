@@ -181,7 +181,7 @@ export function App() {
     ? [...signedInNavigation, { href: "/leaderboard", label: "排行榜", Icon: Trophy }, { href: "/tools", label: "工具", Icon: Wrench }, { href: "/profile", label: "个人中心", Icon: User }, { href: "/status", label: "服务状态", Icon: Activity }]
     : [{ href: "/leaderboard", label: "排行榜", Icon: Trophy }, { href: "/status", label: "服务状态", Icon: Activity }];
 
-  /** 同步仓库详情和生成页可选 LoRA，训练完成或发布后无需刷新浏览器。 */
+  /** 同步仓库详情和生成页可选 LoRA，训练完成或仓库更新后无需刷新浏览器。 */
   const refreshLoraViews = useCallback(async () => {
     if (!session) return;
     const [libraryPayload, loraPayload] = await Promise.all([

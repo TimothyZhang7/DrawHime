@@ -1,5 +1,5 @@
 /**
- * 本文件实现独立 LoRA 仓库的用户草稿、真实文件上传、示例图与发布接口。
+ * 本文件实现独立 LoRA 仓库的条目管理、真实文件上传、示例图与隐私控制接口。
  */
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
@@ -87,7 +87,8 @@ export function registerLoraLibraryRoutes(router: ServiceRouter, findSession: Fi
             type: input.type.toUpperCase() as Prisma.LoraEntryCreateInput["type"],
             triggerWords: input.triggerWords,
             isPrivate: input.isPrivate,
-            status: "DISABLED",
+            // 新条目创建后直接进入统一可用状态，是否对外展示只由隐私设置决定。
+            status: "ACTIVE",
           },
         });
       });
@@ -111,7 +112,7 @@ export function registerLoraLibraryRoutes(router: ServiceRouter, findSession: Fi
           update: { name: familyName, status: "ACTIVE" },
           create: { slug: familySlug, name: familyName, description: `用户登记的 ${familyName} LoRA 主模型系列`, status: "ACTIVE" },
         });
-        // 已发布 LoRA 只修改元数据、归类和外显范围，不覆盖模型版本或破坏历史任务引用。
+        // 元数据、归类和外显范围可独立修改，不覆盖模型版本或破坏历史任务引用。
         await tx.loraEntry.update({ where: { id: entry.id }, data: { title: input.title, description: input.description, type: input.type.toUpperCase() as Prisma.LoraEntryUpdateInput["type"], triggerWords: input.triggerWords, isPrivate: input.isPrivate, modelFamilyId: family.id } });
       });
       sendSuccess(response, await getEntryView(entry.id, session.externalIdentity.id));
@@ -123,7 +124,7 @@ export function registerLoraLibraryRoutes(router: ServiceRouter, findSession: Fi
     if (!session) return sendError(response, 401, "local_session_invalid", "本地模型平台登录状态已失效");
     let temporaryFileName = "";
     try {
-      const entry = await findOwnedDraft(params.id, session.externalIdentity.id);
+      const entry = await findOwnedEntry(params.id, session.externalIdentity.id);
       const input = loraUploadSessionCreateRequestSchema.parse(await readJsonBody<unknown>(request));
       if (!input.fileName.toLowerCase().endsWith(".safetensors")) throw new LoraLibraryError(400, "lora_file_type_invalid", "LoRA 模型文件必须使用 .safetensors 格式");
       await mkdir(uploadDirectory, { recursive: true });
@@ -213,7 +214,7 @@ export function registerLoraLibraryRoutes(router: ServiceRouter, findSession: Fi
     if (!session) return sendError(response, 401, "local_session_invalid", "本地模型平台登录状态已失效");
     let temporaryPath = "";
     try {
-      const entry = await findOwnedDraft(params.id, session.externalIdentity.id);
+      const entry = await findOwnedEntry(params.id, session.externalIdentity.id);
       const originalFileName = decodeFileName(request.headers["x-file-name"]);
       if (!originalFileName.toLowerCase().endsWith(".safetensors")) throw new LoraLibraryError(400, "lora_file_type_invalid", "LoRA 模型文件必须使用 .safetensors 格式");
       const streamed = await streamRequestToFile(request, maximumLoraBytes);
@@ -289,24 +290,6 @@ export function registerLoraLibraryRoutes(router: ServiceRouter, findSession: Fi
     }
   });
 
-  router.post("/v1/lora-library/:id/publish", async ({ request, response, params }) => {
-    const session = await findSession(readBearerToken(request));
-    if (!session) return sendError(response, 401, "local_session_invalid", "本地模型平台登录状态已失效");
-    try {
-      const entry = await findOwnedDraft(params.id, session.externalIdentity.id);
-      const [versionCount, exampleCount] = await Promise.all([
-        database.loraVersion.count({ where: { loraEntryId: entry.id, status: "ACTIVE" } }),
-        database.loraExample.count({ where: { loraEntryId: entry.id } }),
-      ]);
-      if (versionCount !== 1) throw new LoraLibraryError(400, "lora_file_required", "发布前必须上传一个有效 LoRA 模型文件");
-      if (exampleCount < 1) throw new LoraLibraryError(400, "lora_example_required", "发布前必须上传至少一张示例图");
-      await database.loraEntry.update({ where: { id: entry.id }, data: { status: "ACTIVE" } });
-      sendSuccess(response, await getEntryView(entry.id, session.externalIdentity.id));
-    } catch (error) {
-      sendLibraryError(response, error);
-    }
-  });
-
   router.delete("/v1/lora-library/:id/examples/:exampleId", async ({ request, response, params }) => {
     const session = await findSession(readBearerToken(request));
     if (!session) return sendError(response, 401, "local_session_invalid", "本地模型平台登录状态已失效");
@@ -314,8 +297,6 @@ export function registerLoraLibraryRoutes(router: ServiceRouter, findSession: Fi
       const entry = await findOwnedEntry(params.id, session.externalIdentity.id);
       const example = await database.loraExample.findFirst({ where: { id: params.exampleId, loraEntryId: entry.id }, include: { artifact: true } });
       if (!example) throw new LoraLibraryError(404, "lora_example_not_found", "LoRA 示例图不存在");
-      const count = await database.loraExample.count({ where: { loraEntryId: entry.id } });
-      if (entry.status === "ACTIVE" && count <= 1) throw new LoraLibraryError(409, "lora_example_required", "已发布 LoRA 必须保留至少一张示例图");
       await database.$transaction([database.loraExample.delete({ where: { id: example.id } }), database.jobArtifact.delete({ where: { id: example.artifactId } })]);
       await deleteObject(example.artifact.objectKey).catch(() => undefined);
       sendSuccess(response, await getEntryView(entry.id, session.externalIdentity.id));
@@ -331,7 +312,7 @@ export function registerLoraLibraryRoutes(router: ServiceRouter, findSession: Fi
         where: { id: entry.id },
         include: { versions: true, examples: { include: { artifact: true } }, uploadSessions: true },
       });
-      // 训练输出有外键引用，已发布条目也可能被历史任务使用；这些情况只能安全下架，禁止删除真实产物。
+      // 统一可用条目和训练输出都可能被历史任务引用，删除时只安全下架，禁止删除真实产物。
       const hasTrainingOutput = assets.versions.length > 0 && await database.trainingJob.count({ where: { outputLoraVersionId: { in: assets.versions.map((item) => item.id) } } }) > 0;
       if (entry.status === "ACTIVE" || hasTrainingOutput) {
         await database.$transaction([
@@ -370,7 +351,7 @@ export function registerLoraLibraryRoutes(router: ServiceRouter, findSession: Fi
   });
 }
 
-/** 查询公开仓库或当前用户自己的草稿。 */
+/** 查询公开仓库或当前用户自己的私有条目。 */
 async function listEntries(identity: ExternalIdentity, mine: boolean, family?: string): Promise<LoraLibraryEntryView[]> {
   const admin = readRoles(identity.roles).includes("admin");
   const visibility = mine
@@ -423,7 +404,7 @@ async function findDownloadableEntry(id: string, identity: ExternalIdentity) {
     include: { versions: { where: { status: "ACTIVE" }, orderBy: { createdAt: "desc" }, take: 1 } },
   });
   const admin = readRoles(identity.roles).includes("admin");
-  // 私有 LoRA、草稿及下架资产只允许作者或管理员读取，其他身份统一返回不存在。
+  // 私有或下架资产只允许作者或管理员读取，其他身份统一返回不存在。
   if (!entry || entry.deletedAt || (!admin && entry.ownerIdentityId !== identity.id && (entry.status !== "ACTIVE" || entry.isPrivate))) {
     throw new LoraLibraryError(404, "lora_not_found", "LoRA 不存在或未公开");
   }
@@ -499,7 +480,6 @@ function toEntryView(entry: EntryWithRelations, viewerIdentityId: string, refere
     ownerDisplayName: entry.owner.displayName,
     privacy: entry.isPrivate ? "private" : "public",
     isOwner: entry.ownerIdentityId === viewerIdentityId,
-    status: entry.status === "ACTIVE" ? "published" : "draft",
     version: version ? { id: version.id, fileName: version.fileName, sha256: version.sha256, byteSize: Number(version.byteSize) } : null,
     examples: entry.examples.map((example) => ({ id: example.id, width: example.artifact.width, height: example.artifact.height, contentUrl: `/local-model-api/v1/lora-library/examples/${example.id}/content` })),
     referenceTasks,
@@ -508,18 +488,11 @@ function toEntryView(entry: EntryWithRelations, viewerIdentityId: string, refere
   };
 }
 
-/** 查找当前作者的 LoRA，允许详情页编辑已发布条目的元数据和隐私。 */
+/** 查找当前作者尚未删除的 LoRA，允许持续更新文件、示例和元数据。 */
 async function findOwnedEntry(id: string, ownerIdentityId: string) {
   if (!/^[0-9a-f-]{36}$/i.test(id)) throw new LoraLibraryError(400, "lora_id_invalid", "LoRA 条目 ID 不正确");
   const entry = await database.loraEntry.findFirst({ where: { id, ownerIdentityId, deletedAt: null } });
   if (!entry) throw new LoraLibraryError(404, "lora_not_found", "LoRA 不存在");
-  return entry;
-}
-
-/** 查找当前用户尚未发布的草稿，发布后内容保持不可变。 */
-async function findOwnedDraft(id: string, ownerIdentityId: string) {
-  const entry = await findOwnedEntry(id, ownerIdentityId);
-  if (entry.status === "ACTIVE") throw new LoraLibraryError(409, "lora_already_published", "已发布 LoRA 不允许覆盖文件或示例图");
   return entry;
 }
 
@@ -564,11 +537,11 @@ async function validateSafetensors(path: string, byteSize: number): Promise<void
   }
 }
 
-/** 查找当前作者的上传会话，禁止跨草稿或跨用户续传。 */
+/** 查找当前作者的上传会话，禁止跨条目、跨用户或已删除条目续传。 */
 async function findOwnedUpload(entryId: string, uploadId: string, ownerIdentityId: string) {
   if (!/^[0-9a-f-]{36}$/i.test(uploadId)) throw new LoraLibraryError(400, "lora_upload_id_invalid", "LoRA 上传会话 ID 不正确");
   const upload = await database.loraUploadSession.findFirst({
-    where: { id: uploadId, loraEntryId: entryId, loraEntry: { ownerIdentityId, status: "DISABLED" } },
+    where: { id: uploadId, loraEntryId: entryId, loraEntry: { ownerIdentityId, status: "ACTIVE", deletedAt: null } },
     include: { loraEntry: true },
   });
   if (!upload) throw new LoraLibraryError(404, "lora_upload_not_found", "LoRA 上传会话不存在");

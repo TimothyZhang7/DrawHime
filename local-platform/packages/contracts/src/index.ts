@@ -330,7 +330,7 @@ export const localBotInferenceJobViewSchema = z.object({
   subTasks: z.array(z.object({ kind: z.string(), status: z.string(), attemptNo: z.number().int().optional(), siteName: z.string().optional(), model: z.string().optional(), error: z.string().optional(), latencyMs: z.number().int().nonnegative().optional() })),
 });
 
-/** 用户生成时可选择的已发布 LoRA。 */
+/** 用户生成时可选择且已经上传有效模型文件的 LoRA。 */
 export const inferenceLoraViewSchema = z.object({
   loraVersionId: z.string(),
   title: z.string(),
@@ -351,7 +351,7 @@ export const galleryLoraMetadataViewSchema = z.object({
   type: z.enum(["style", "character", "concept", "clothing", "pose", "other"]),
 });
 
-/** LoRA 仓库草稿创建请求。 */
+/** LoRA 仓库条目创建请求。 */
 export const loraLibraryCreateRequestSchema = z.object({
   title: z.string().trim().min(1).max(191),
   description: z.string().trim().min(1).max(10000),
@@ -383,7 +383,6 @@ export const loraLibraryEntryViewSchema = z.object({
   ownerDisplayName: z.string(),
   privacy: z.enum(["public", "private"]),
   isOwner: z.boolean(),
-  status: z.enum(["draft", "published"]),
   version: z.object({ id: z.string(), fileName: z.string(), sha256: z.string(), byteSize: z.number().int().positive() }).nullable(),
   examples: z.array(z.object({ id: z.string(), width: z.number().int().nullable(), height: z.number().int().nullable(), contentUrl: z.string() })),
   /** 最近引用该 LoRA 且已经公开发布到主站图库的任务。 */

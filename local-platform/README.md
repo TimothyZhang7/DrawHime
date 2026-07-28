@@ -6,7 +6,7 @@ DrawHime 是面向本地生成模型的独立推理、LoRA 管理与训练平台
 
 - 持久化生成任务、阶段、Runtime 尝试、计费镜像和产物审计。
 - ComfyUI 推理调度、真实 GPU 心跳、模型独立采样预设和高质量 WebP 输出。
-- LoRA 分片上传、隐私控制、版本发布、多 LoRA 叠加与示例图库。
+- LoRA 分片上传、隐私控制、模型版本、多 LoRA 叠加与示例图库。
 - 分阶段训练流程：数据集上传、自动打标、人工确认、训练、产物校验和发布。
 - 独立 MariaDB、Redis 与 S3 兼容对象存储，不复制外部系统密码或钱包数据。
 - 外部身份交换、资金预留/提交/释放和正式图库发布均使用受保护的集成接口。
@@ -21,7 +21,7 @@ DrawHime 是面向本地生成模型的独立推理、LoRA 管理与训练平台
 | `scheduler` | 7103 | 任务租约和 GPU 调度 |
 | `gpu-agent` | 7110 | ComfyUI 与 GPU 状态采集 |
 | `inference-worker` | 7111 | 提示增强、推理、计费和图库发布 |
-| `training-worker` | 7112 | 打标、训练、退款和 LoRA 草稿闭环 |
+| `training-worker` | 7112 | 打标、训练、退款和可用 LoRA 产物闭环 |
 | `artifact-service` | 7113 | 产物控制面 |
 
 更完整的职责边界见 [`docs/architecture.md`](docs/architecture.md)，跨程序契约见 [`docs/interfaces/README.md`](docs/interfaces/README.md)，生产执行顺序与命令约束见 [`docs/operations.md`](docs/operations.md)。

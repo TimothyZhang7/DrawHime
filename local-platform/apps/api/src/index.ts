@@ -338,7 +338,7 @@ startService({
           { id: "sso", label: "主站单点登录", status: "available", message: "主站身份交换与独立短期会话已启用" },
           { id: "inference", label: "本地推理", status: "available", message: "任务持久化、主站预留、Redis 队列、ComfyUI 与对象存储已接入" },
           { id: "prompt-enhancement", label: "AI 提示增强", status: "available", message: "Anima 独立转写作为任务内一次性持久化阶段运行" },
-          { id: "lora-training", label: "LoRA 训练", status: "available", message: "数据集、训练 Runtime、计费退款、产物校验与 LoRA 草稿已接入" },
+          { id: "lora-training", label: "LoRA 训练", status: "available", message: "数据集、训练 Runtime、计费退款、产物校验与可用 LoRA 已接入" },
         ],
       };
       sendSuccess(response, overview);
@@ -577,7 +577,7 @@ function readTriggerWords(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim()).slice(0, 32) : [];
 }
 
-/** 查询已发布且文件版本可用的 LoRA。 */
+/** 查询当前身份可访问且文件版本有效的 LoRA。 */
 async function listInferenceLoras(viewerIdentityId: string, family?: string): Promise<InferenceLoraView[]> {
   const rows = await database.loraEntry.findMany({
     where: { deletedAt: null, status: "ACTIVE", OR: [{ isPrivate: false }, { ownerIdentityId: viewerIdentityId }], modelFamily: family ? { slug: family, status: "ACTIVE" } : { status: "ACTIVE" }, versions: { some: { status: "ACTIVE" } } },
