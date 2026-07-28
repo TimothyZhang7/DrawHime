@@ -750,6 +750,80 @@ export const desktopResourceInstallViewSchema = z.object({
   error: z.string().nullable(),
 });
 
+/** 桌面端受控 ComfyUI 子进程的实时生命周期状态。 */
+export const desktopRuntimeStatusViewSchema = z.object({
+  status: z.enum(["stopped", "starting", "ready", "stopping", "failed"]),
+  pid: z.number().int().positive().nullable(),
+  port: z.number().int().min(1024).max(65535).nullable(),
+  startedAt: z.string().datetime().nullable(),
+  checkedAt: z.string().datetime(),
+  logPath: z.string().nullable(),
+  error: z.string().nullable(),
+});
+
+/** 桌面端导入并持久登记的本地底模。 */
+export const desktopLocalModelViewSchema = z.object({
+  id: z.string().uuid(),
+  displayName: z.string().min(1),
+  family: z.string().min(1),
+  workflowKind: z.enum(["checkpoint", "anima"]),
+  modelFileName: z.string().min(1),
+  modelSha256: z.string().regex(/^[a-f0-9]{64}$/),
+  byteSize: z.number().int().positive(),
+  textEncoderFileName: z.string().nullable(),
+  vaeFileName: z.string().nullable(),
+  available: z.boolean(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+
+/** 桌面端从用户已有文件导入底模的请求。 */
+export const desktopLocalModelImportInputSchema = z.object({
+  displayName: z.string().trim().min(1).max(191),
+  family: z.string().trim().min(1).max(100),
+  workflowKind: desktopLocalModelViewSchema.shape.workflowKind,
+  modelSourcePath: z.string().min(1),
+  textEncoderSourcePath: z.string().min(1).nullable(),
+  vaeSourcePath: z.string().min(1).nullable(),
+});
+
+/** 桌面端本地生成任务创建参数。 */
+export const desktopLocalJobCreateInputSchema = z.object({
+  modelId: z.string().uuid(),
+  prompt: z.string().trim().min(1).max(100000),
+  negativePrompt: z.string().max(100000).nullable(),
+  width: z.number().int().min(64).max(2048),
+  height: z.number().int().min(64).max(2048),
+  steps: z.number().int().min(1).max(50),
+  cfg: z.number().min(0.1).max(20),
+  samplerName: z.enum(["euler", "euler_ancestral"]),
+  schedulerName: z.enum(["normal", "simple"]),
+  seed: z.number().int().min(0).max(2147483647).nullable(),
+  privacy: desktopGalleryPrivacySchema,
+});
+
+/** 桌面端本地生成任务和产物的持久视图。 */
+export const desktopLocalJobViewSchema = z.object({
+  id: z.string().uuid(),
+  status: z.enum(["queued", "running", "succeeded", "failed", "cancelled"]),
+  progress: z.number().min(0).max(100),
+  prompt: z.string(),
+  negativePrompt: z.string().nullable(),
+  modelId: z.string().uuid(),
+  modelDisplayName: z.string(),
+  modelSha256: z.string().regex(/^[a-f0-9]{64}$/),
+  parameters: z.object({ width: z.number().int(), height: z.number().int(), steps: z.number().int(), cfg: z.number(), samplerName: z.string(), schedulerName: z.string(), seed: z.number().int() }),
+  privacy: desktopGalleryPrivacySchema,
+  runtimePromptId: z.string().nullable(),
+  error: z.string().nullable(),
+  attempts: z.array(z.object({ id: z.string().uuid(), attemptNumber: z.number().int().positive(), status: z.enum(["running", "succeeded", "failed", "cancelled", "interrupted"]), runtimePromptId: z.string().nullable(), error: z.string().nullable(), startedAt: z.string().datetime(), completedAt: z.string().datetime().nullable() })),
+  artifact: z.object({ path: z.string(), sha256: z.string().regex(/^[a-f0-9]{64}$/), byteSize: z.number().int().positive(), mimeType: z.string(), width: z.number().int().positive(), height: z.number().int().positive() }).nullable(),
+  createdAt: z.string().datetime(),
+  startedAt: z.string().datetime().nullable(),
+  completedAt: z.string().datetime().nullable(),
+  updatedAt: z.string().datetime(),
+});
+
 /** 桌面端本地图库同步队列条目。 */
 export const desktopGallerySyncItemSchema = z.object({
   id: z.string().uuid(),
@@ -770,6 +844,7 @@ export const desktopGallerySyncItemSchema = z.object({
 export const desktopBootstrapViewSchema = z.object({
   environment: desktopEnvironmentReportSchema,
   settings: desktopSettingsSchema,
+  runtime: desktopRuntimeStatusViewSchema,
   pendingGallerySyncCount: z.number().int().nonnegative(),
 });
 
@@ -940,6 +1015,11 @@ export type DesktopResourceManifestEnvelope = z.infer<typeof desktopResourceMani
 export type DesktopResourceCatalogView = z.infer<typeof desktopResourceCatalogViewSchema>;
 export type DesktopResourceDownloadView = z.infer<typeof desktopResourceDownloadViewSchema>;
 export type DesktopResourceInstallView = z.infer<typeof desktopResourceInstallViewSchema>;
+export type DesktopRuntimeStatusView = z.infer<typeof desktopRuntimeStatusViewSchema>;
+export type DesktopLocalModelView = z.infer<typeof desktopLocalModelViewSchema>;
+export type DesktopLocalModelImportInput = z.infer<typeof desktopLocalModelImportInputSchema>;
+export type DesktopLocalJobCreateInput = z.infer<typeof desktopLocalJobCreateInputSchema>;
+export type DesktopLocalJobView = z.infer<typeof desktopLocalJobViewSchema>;
 export type DesktopGallerySyncItem = z.infer<typeof desktopGallerySyncItemSchema>;
 export type DesktopBootstrapView = z.infer<typeof desktopBootstrapViewSchema>;
 export type AdminModelUpdateRequest = z.infer<typeof adminModelUpdateRequestSchema>;

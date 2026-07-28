@@ -1,15 +1,20 @@
 /**
- * 本文件实现桌面端首个可运行工作区：真实环境检测、持续 GPU 阻断提示、本地设置和图库同步队列查看。
+ * 本文件实现桌面生成、任务、模型、Runtime、资源、环境、图库同步和本地设置的响应式工作区。
  */
-import type { DesktopBootstrapView, DesktopEnvironmentReport, DesktopGallerySyncItem, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopSettings } from "@drawhime/contracts";
-import { AlertTriangle, CheckCircle2, Cpu, Database, Download, FolderCog, Gauge, HardDrive, Image, LoaderCircle, MemoryStick, Monitor, Moon, PackageCheck, PackageOpen, RefreshCw, Settings2, ShieldCheck, Sun, UploadCloud } from "lucide-react";
+import type { DesktopBootstrapView, DesktopEnvironmentReport, DesktopGallerySyncItem, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView, DesktopSettings } from "@drawhime/contracts";
+import { Activity, AlertTriangle, CheckCircle2, Cpu, Database, Download, FlaskConical, FolderCog, Gauge, HardDrive, Image, Images, LoaderCircle, MemoryStick, Monitor, Moon, PackageCheck, PackageOpen, Play, Power, RefreshCw, Settings2, ShieldCheck, Sun, UploadCloud, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { convertFileSrc } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { downloadDesktopResource, inspectDesktopEnvironment, installDesktopResource, listDesktopGallerySyncQueue, listenDesktopResourceInstallProgress, listenDesktopResourceProgress, loadDesktopBootstrap, loadDesktopResourceCatalog, saveDesktopSettings } from "./desktop-api";
+import { cancelDesktopLocalJob, createDesktopLocalJob, downloadDesktopResource, importDesktopLocalModel, inspectDesktopEnvironment, installDesktopResource, listDesktopGallerySyncQueue, listDesktopLocalJobs, listDesktopLocalModels, listenDesktopLocalJobUpdates, listenDesktopResourceInstallProgress, listenDesktopResourceProgress, loadDesktopBootstrap, loadDesktopResourceCatalog, loadDesktopRuntimeStatus, saveDesktopSettings, selfTestDesktopRuntime, startDesktopRuntime, stopDesktopRuntime } from "./desktop-api";
 
-type DesktopPage = "overview" | "environment" | "resources" | "sync" | "settings";
+type DesktopPage = "generate" | "jobs" | "models" | "overview" | "environment" | "resources" | "sync" | "settings";
 
 const navigation = [
+  { id: "generate" as const, label: "本地生成", Icon: Images },
+  { id: "jobs" as const, label: "任务记录", Icon: Image },
+  { id: "models" as const, label: "本地模型", Icon: Database },
   { id: "overview" as const, label: "本机概览", Icon: Gauge },
   { id: "environment" as const, label: "环境检测", Icon: Cpu },
   { id: "resources" as const, label: "资源安装", Icon: PackageOpen },
@@ -19,25 +24,33 @@ const navigation = [
 
 /** 桌面应用根组件始终保留环境异常横幅，并周期复检 GPU 是否仍可用。 */
 export function App() {
-  const [page, setPage] = useState<DesktopPage>("overview");
+  const [page, setPage] = useState<DesktopPage>("generate");
   const [bootstrap, setBootstrap] = useState<DesktopBootstrapView | null>(null);
   const [queue, setQueue] = useState<DesktopGallerySyncItem[]>([]);
   const [resourceCatalog, setResourceCatalog] = useState<DesktopResourceCatalogView | null>(null);
   const [resourceProgress, setResourceProgress] = useState<Record<string, DesktopResourceDownloadView>>({});
   const [installProgress, setInstallProgress] = useState<Record<string, DesktopResourceInstallView>>({});
+  const [models, setModels] = useState<DesktopLocalModelView[]>([]);
+  const [jobs, setJobs] = useState<DesktopLocalJobView[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [checking, setChecking] = useState(false);
   const [themeSaving, setThemeSaving] = useState(false);
+  const [runtimeBusy, setRuntimeBusy] = useState(false);
   const [message, setMessage] = useState("");
   const environmentCheckRunning = useRef(false);
   const lastEnvironmentCheckAt = useRef(0);
   const bootstrapReady = bootstrap !== null;
 
-  useEffect(() => { void loadDesktopBootstrap().then(async (state) => { lastEnvironmentCheckAt.current = Date.now(); setBootstrap(state); const [nextQueue, catalog] = await Promise.all([listDesktopGallerySyncQueue(), loadDesktopResourceCatalog()]); setQueue(nextQueue); setResourceCatalog(catalog); }).catch((error) => setMessage(errorMessage(error))).finally(() => setLoading(false)); }, []);
+  useEffect(() => { void loadDesktopBootstrap().then(async (state) => { lastEnvironmentCheckAt.current = Date.now(); setBootstrap(state); const [nextQueue, catalog, nextModels, nextJobs] = await Promise.all([listDesktopGallerySyncQueue(), loadDesktopResourceCatalog(), listDesktopLocalModels(), listDesktopLocalJobs()]); setQueue(nextQueue); setResourceCatalog(catalog); setModels(nextModels); setJobs(nextJobs); }).catch((error) => setMessage(errorMessage(error))).finally(() => setLoading(false)); }, []);
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     void listenDesktopResourceProgress((progress) => setResourceProgress((current) => ({ ...current, [progress.resourceId]: progress }))).then((dispose) => { unlisten = dispose; }).catch((error) => setMessage(errorMessage(error)));
+    return () => unlisten?.();
+  }, []);
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    void listenDesktopLocalJobUpdates((job) => setJobs((current) => [job, ...current.filter((item) => item.id !== job.id)].sort((left, right) => right.createdAt.localeCompare(left.createdAt)))).then((dispose) => { unlisten = dispose; }).catch((error) => setMessage(errorMessage(error)));
     return () => unlisten?.();
   }, []);
   useEffect(() => {
@@ -51,6 +64,11 @@ export function App() {
     const onVisibility = () => { if (document.visibilityState === "visible" && Date.now() - lastEnvironmentCheckAt.current >= 30_000) void recheck(true); };
     document.addEventListener("visibilitychange", onVisibility);
     return () => { window.clearInterval(timer); document.removeEventListener("visibilitychange", onVisibility); };
+  }, [bootstrapReady]);
+  useEffect(() => {
+    if (!bootstrapReady) return;
+    const timer = window.setInterval(() => void loadDesktopRuntimeStatus().then((runtime) => setBootstrap((current) => current ? { ...current, runtime } : current)).catch(() => undefined), 5_000);
+    return () => window.clearInterval(timer);
   }, [bootstrapReady]);
 
   useEffect(() => {
@@ -115,28 +133,108 @@ export function App() {
     catch (error) { const message = errorMessage(error); setInstallProgress((current) => ({ ...current, [resourceId]: { resourceId, status: "failed", progress: current[resourceId]?.progress || 0, installPath: null, rollbackPath: null, error: message } })); setMessage(message); }
   };
 
+  /** Runtime 控制始终等待本地核心返回真实状态，自检成功后同步刷新环境能力门禁。 */
+  const controlRuntime = async (action: "start" | "stop" | "selfTest") => {
+    if (runtimeBusy) return;
+    setRuntimeBusy(true);
+    try {
+      const runtime = action === "start" ? await startDesktopRuntime() : action === "stop" ? await stopDesktopRuntime() : await selfTestDesktopRuntime();
+      setBootstrap((current) => current ? { ...current, runtime } : current);
+      if (action === "selfTest") await recheck(true);
+      setMessage(action === "start" ? "本地 Runtime 已启动" : action === "stop" ? "本地 Runtime 已停止" : "Runtime GPU 与核心节点自检通过");
+    } catch (error) { setMessage(errorMessage(error)); }
+    finally { setRuntimeBusy(false); }
+  };
+
+  /** 模型导入和任务创建只更新对应集合，页面切换不会清空用户尚未提交的表单。 */
+  const modelImported = (model: DesktopLocalModelView) => {
+    setModels((current) => [model, ...current.filter((item) => item.id !== model.id)]);
+    setMessage(`模型“${model.displayName}”已完成校验并导入`);
+    void recheck(true);
+  };
+  const jobCreated = (job: DesktopLocalJobView) => {
+    setJobs((current) => [job, ...current.filter((item) => item.id !== job.id)]);
+    setMessage("本地任务已进入持久队列");
+  };
+  const cancelJob = async (id: string) => {
+    try { const job = await cancelDesktopLocalJob(id); setJobs((current) => current.map((item) => item.id === id ? job : item)); setMessage("已提交取消请求"); }
+    catch (error) { setMessage(errorMessage(error)); }
+  };
+
   if (loading || !bootstrap) return <div className="desktop-loading"><LoaderCircle className="spin" /><strong>正在建立本地工作区</strong><span>{message || "读取硬件、磁盘与本地数据库"}</span></div>;
   const critical = bootstrap.environment.issues.find((issue) => issue.severity === "critical") || bootstrap.environment.issues[0];
   return <div className="desktop-shell">
-    <aside className="desktop-sidebar"><header><div className="desktop-mark">D</div><div><strong>DrawHime</strong><span>DESKTOP</span></div></header><nav>{navigation.map(({ id, label, Icon }) => <button key={id} className={page === id ? "active" : ""} onClick={() => setPage(id)}><Icon size={17} />{label}{id === "environment" && bootstrap.environment.status !== "ready" && <i />}</button>)}</nav><footer><span>本地核心</span><strong>{bootstrap.environment.status === "ready" ? "运行正常" : "需要处理"}</strong></footer></aside>
+    <aside className="desktop-sidebar"><header><div className="desktop-mark">D</div><div><strong>DrawHime</strong><span>DESKTOP</span></div></header><nav>{navigation.map(({ id, label, Icon }) => <button key={id} className={page === id ? "active" : ""} onClick={() => setPage(id)}><Icon size={17} />{label}{((id === "environment" && bootstrap.environment.status !== "ready") || (id === "jobs" && jobs.some((job) => ["queued", "running"].includes(job.status)))) && <i />}</button>)}</nav><footer><span>本地核心</span><strong>{bootstrap.runtime.status === "ready" ? "Runtime 运行中" : "Runtime 已停止"}</strong></footer></aside>
     <main className="desktop-main">
       <header className="desktop-topbar"><div className="desktop-title"><span>本地模型工作站</span><strong>{pageTitle(page)}</strong></div><div className="topbar-actions"><div className="theme-switch" aria-label="界面主题">{(["system", "dark", "light"] as const).map((mode) => { const Icon = mode === "system" ? Monitor : mode === "dark" ? Moon : Sun; return <button key={mode} className={bootstrap.settings.themeMode === mode ? "active" : ""} aria-label={themeModeLabel(mode)} title={themeModeLabel(mode)} disabled={themeSaving} onClick={() => void changeTheme(mode)}><Icon /></button>; })}</div><button className="recheck-button" onClick={() => void recheck()} disabled={checking}>{checking ? <LoaderCircle className="spin" /> : <RefreshCw />}<span>重新检测</span></button></div></header>
       {bootstrap.environment.status !== "ready" && critical && <section className={`environment-banner is-${critical.severity}`}><AlertTriangle /><div><strong>{critical.title}</strong><span>{critical.message}</span></div><button onClick={() => setPage("environment")}>查看环境详情</button></section>}
       {message && <div className="desktop-notice">{message}<button onClick={() => setMessage("")}>×</button></div>}
-      {page === "overview" && <OverviewPage state={bootstrap} />}
-      {page === "environment" && <EnvironmentPage report={bootstrap.environment} />}
-      {page === "resources" && <ResourcesPage catalog={resourceCatalog} progress={resourceProgress} installProgress={installProgress} loading={catalogLoading} onReload={() => void reloadResourceCatalog()} onDownload={(resourceId) => void downloadResource(resourceId)} onInstall={(resourceId) => void installResource(resourceId)} />}
-      {page === "sync" && <SyncPage items={queue} />}
-      {page === "settings" && <SettingsPage value={bootstrap.settings} onSaved={(settings) => { setBootstrap((current) => current ? { ...current, settings } : current); setMessage("本地设置已保存"); void reloadResourceCatalog(); }} onError={setMessage} />}
+      <div hidden={page !== "generate"}><GeneratePage models={models} defaultPrivacy={bootstrap.settings.defaultPrivacy} onCreated={jobCreated} onError={setMessage} /></div>
+      <div hidden={page !== "jobs"}><JobsPage jobs={jobs} onCancel={(id) => void cancelJob(id)} /></div>
+      <div hidden={page !== "models"}><ModelsPage models={models} onImported={modelImported} onError={setMessage} /></div>
+      <div hidden={page !== "overview"}><OverviewPage state={bootstrap} runtimeBusy={runtimeBusy} onRuntimeAction={(action) => void controlRuntime(action)} /></div>
+      <div hidden={page !== "environment"}><EnvironmentPage report={bootstrap.environment} /></div>
+      <div hidden={page !== "resources"}><ResourcesPage catalog={resourceCatalog} progress={resourceProgress} installProgress={installProgress} loading={catalogLoading} onReload={() => void reloadResourceCatalog()} onDownload={(resourceId) => void downloadResource(resourceId)} onInstall={(resourceId) => void installResource(resourceId)} /></div>
+      <div hidden={page !== "sync"}><SyncPage items={queue} /></div>
+      <div hidden={page !== "settings"}><SettingsPage value={bootstrap.settings} onSaved={(settings) => { setBootstrap((current) => current ? { ...current, settings } : current); setMessage("本地设置已保存"); void reloadResourceCatalog(); }} onError={setMessage} /></div>
     </main>
   </div>;
 }
 
+/** 本地生成页在页面切换时保持表单实例，提交后立即返回任务而不等待 Runtime。 */
+function GeneratePage({ models, defaultPrivacy, onCreated, onError }: { models: DesktopLocalModelView[]; defaultPrivacy: DesktopSettings["defaultPrivacy"]; onCreated: (job: DesktopLocalJobView) => void; onError: (message: string) => void }) {
+  const [form, setForm] = useState<DesktopLocalJobCreateInput>({ modelId: "", prompt: "", negativePrompt: null, width: 1024, height: 1024, steps: 20, cfg: 5, samplerName: "euler", schedulerName: "normal", seed: null, privacy: defaultPrivacy });
+  const [busy, setBusy] = useState(false);
+  const availableModels = models.filter((model) => model.available);
+  useEffect(() => { if (!availableModels.some((model) => model.id === form.modelId)) setForm((current) => ({ ...current, modelId: availableModels[0]?.id || "" })); }, [models]);
+  const submit = async () => {
+    if (!form.modelId || !form.prompt.trim() || busy) return;
+    setBusy(true);
+    try { onCreated(await createDesktopLocalJob({ ...form, prompt: form.prompt.trim(), negativePrompt: form.negativePrompt?.trim() || null })); }
+    catch (error) { onError(errorMessage(error)); }
+    finally { setBusy(false); }
+  };
+  const chooseSize = (value: string) => { const [width, height] = value.split("x").map(Number); setForm({ ...form, width, height }); };
+  return <div className="desktop-page generate-layout"><section className="section-card generation-form"><header><div><span>LOCAL GENERATION</span><h2>本地生成</h2></div><small>任务提交后由 SQLite 队列后台执行</small></header>{availableModels.length === 0 ? <div className="resource-unconfigured"><Database /><div><strong>尚无可用底模</strong><span>先在“本地模型”导入 safetensors，或在“资源安装”下载网站发布模型。</span></div></div> : <><div className="generation-grid"><label><span>底模</span><select value={form.modelId} onChange={(event) => setForm({ ...form, modelId: event.target.value })}>{availableModels.map((model) => <option key={model.id} value={model.id}>{model.displayName} · {model.family}</option>)}</select></label><label><span>输出尺寸</span><select value={`${form.width}x${form.height}`} onChange={(event) => chooseSize(event.target.value)}><option value="1024x1024">1:1 · 1024 × 1024</option><option value="1024x1536">2:3 · 1024 × 1536</option><option value="1536x1024">3:2 · 1536 × 1024</option><option value="864x1536">9:16 · 864 × 1536</option><option value="1536x864">16:9 · 1536 × 864</option></select></label><label><span>采样步数</span><input type="number" min={1} max={50} value={form.steps} onChange={(event) => setForm({ ...form, steps: Number(event.target.value) })} /></label><label><span>CFG</span><input type="number" min={0.1} max={20} step={0.1} value={form.cfg} onChange={(event) => setForm({ ...form, cfg: Number(event.target.value) })} /></label><label><span>采样器</span><select value={form.samplerName} onChange={(event) => setForm({ ...form, samplerName: event.target.value as DesktopLocalJobCreateInput["samplerName"] })}><option value="euler">Euler</option><option value="euler_ancestral">Euler Ancestral</option></select></label><label><span>调度器</span><select value={form.schedulerName} onChange={(event) => setForm({ ...form, schedulerName: event.target.value as DesktopLocalJobCreateInput["schedulerName"] })}><option value="normal">Normal</option><option value="simple">Simple</option></select></label><label><span>种子</span><input type="number" min={0} max={2147483647} placeholder="留空随机" value={form.seed ?? ""} onChange={(event) => setForm({ ...form, seed: event.target.value ? Number(event.target.value) : null })} /></label><label><span>图库权限</span><select value={form.privacy} onChange={(event) => setForm({ ...form, privacy: event.target.value as DesktopLocalJobCreateInput["privacy"] })}><option value="private">私有</option><option value="public">公开</option></select></label></div><label className="prompt-field"><span>提示词</span><textarea value={form.prompt} onChange={(event) => setForm({ ...form, prompt: event.target.value })} placeholder="描述希望生成的画面" /></label><label className="prompt-field negative"><span>负面提示词</span><textarea value={form.negativePrompt || ""} onChange={(event) => setForm({ ...form, negativePrompt: event.target.value || null })} placeholder="可选；与正面提示词独立进入 negative conditioning" /></label><footer><button disabled={busy || !form.modelId || !form.prompt.trim()} onClick={() => void submit()}>{busy ? <LoaderCircle className="spin" /> : <Play />}{busy ? "正在创建任务" : "提交本地任务"}</button></footer></>}</section></div>;
+}
+
+/** 任务页从 SQLite 视图渲染，成功产物使用 Tauri 受控 asset URL 延迟加载。 */
+function JobsPage({ jobs, onCancel }: { jobs: DesktopLocalJobView[]; onCancel: (id: string) => void }) {
+  return <div className="desktop-page"><section className="section-card"><header><div><span>LOCAL JOBS</span><h2>任务记录</h2></div><small>{jobs.length} 项</small></header>{jobs.length ? <div className="local-job-grid">{jobs.map((job) => <article key={job.id}><div className="local-job-preview">{job.artifact ? <img loading="lazy" src={convertFileSrc(job.artifact.path)} alt={job.prompt.slice(0, 80)} /> : <div><Image /><span>{localJobStatusLabel(job.status)}</span><b>{job.progress}%</b></div>}</div><div className="local-job-copy"><strong>{job.prompt}</strong><span>{job.modelDisplayName} · {job.parameters.width}×{job.parameters.height} · Seed {job.parameters.seed}</span>{job.error && <small>{job.error}</small>}</div>{["queued", "running"].includes(job.status) && <button title="取消任务" onClick={() => onCancel(job.id)}><X /></button>}</article>)}</div> : <div className="empty-block">尚未提交本地生成任务</div>}</section></div>;
+}
+
+/** 模型页通过原生文件选择器导入，不要求用户把绝对路径手工复制到程序外部。 */
+function ModelsPage({ models, onImported, onError }: { models: DesktopLocalModelView[]; onImported: (model: DesktopLocalModelView) => void; onError: (message: string) => void }) {
+  const [form, setForm] = useState<DesktopLocalModelImportInput>({ displayName: "", family: "anima", workflowKind: "anima", modelSourcePath: "", textEncoderSourcePath: null, vaeSourcePath: null });
+  const [busy, setBusy] = useState(false);
+  const chooseFile = async (field: "modelSourcePath" | "textEncoderSourcePath" | "vaeSourcePath") => {
+    try { const selected = await open({ multiple: false, directory: false, filters: [{ name: "safetensors 模型", extensions: ["safetensors"] }] }); if (typeof selected === "string") setForm((current) => ({ ...current, [field]: selected })); }
+    catch (error) { onError(errorMessage(error)); }
+  };
+  const submit = async () => {
+    setBusy(true);
+    try { const model = await importDesktopLocalModel(form); onImported(model); setForm((current) => ({ ...current, displayName: "", modelSourcePath: "", textEncoderSourcePath: null, vaeSourcePath: null })); }
+    catch (error) { onError(errorMessage(error)); }
+    finally { setBusy(false); }
+  };
+  const ready = form.displayName.trim() && form.family.trim() && form.modelSourcePath && (form.workflowKind === "checkpoint" || (form.textEncoderSourcePath && form.vaeSourcePath));
+  return <div className="desktop-page model-layout"><section className="section-card model-import"><header><div><span>MODEL IMPORT</span><h2>导入本地底模</h2></div><small>仅 safetensors · 自动哈希 · 原子复制</small></header><div className="model-import-grid"><label><span>显示名称</span><input value={form.displayName} onChange={(event) => setForm({ ...form, displayName: event.target.value })} /></label><label><span>模型系列</span><input value={form.family} onChange={(event) => setForm({ ...form, family: event.target.value })} /></label><label><span>工作流格式</span><select value={form.workflowKind} onChange={(event) => { const workflowKind = event.target.value as DesktopLocalModelImportInput["workflowKind"]; setForm({ ...form, workflowKind, textEncoderSourcePath: workflowKind === "anima" ? form.textEncoderSourcePath : null, vaeSourcePath: workflowKind === "anima" ? form.vaeSourcePath : null }); }}><option value="anima">Anima · UNet + CLIP + VAE</option><option value="checkpoint">Checkpoint · 单文件</option></select></label><FilePicker label={form.workflowKind === "anima" ? "UNet 文件" : "Checkpoint 文件"} value={form.modelSourcePath} onPick={() => void chooseFile("modelSourcePath")} />{form.workflowKind === "anima" && <><FilePicker label="文本编码器" value={form.textEncoderSourcePath || ""} onPick={() => void chooseFile("textEncoderSourcePath")} /><FilePicker label="VAE 文件" value={form.vaeSourcePath || ""} onPick={() => void chooseFile("vaeSourcePath")} /></>}</div><footer><button disabled={!ready || busy} onClick={() => void submit()}>{busy ? <LoaderCircle className="spin" /> : <Download />}{busy ? "正在校验并导入" : "导入模型"}</button></footer></section><section className="section-card"><header><div><span>REGISTERED MODELS</span><h2>已登记模型</h2></div><small>{models.length} 个</small></header>{models.length ? <div className="model-list">{models.map((model) => <article key={model.id} className={model.available ? "is-ready" : "is-missing"}><Database /><div><strong>{model.displayName}</strong><span>{model.family} · {model.workflowKind === "anima" ? "Anima" : "Checkpoint"} · {formatResourceBytes(model.byteSize)}</span><small>{model.modelFileName} · {model.modelSha256.slice(0, 12)}</small></div><b>{model.available ? "可用" : "文件已变化"}</b></article>)}</div> : <div className="empty-block">当前设备尚未登记模型</div>}</section></div>;
+}
+
+/** 原生文件选择字段只展示已选路径，不允许网页侧直接读取文件内容。 */
+function FilePicker({ label, value, onPick }: { label: string; value: string; onPick: () => void }) { return <label className="file-picker"><span>{label}</span><div><input readOnly value={value} placeholder="选择 .safetensors 文件" /><button onClick={onPick}>选择</button></div></label>; }
+
 /** 总览页只展示真实检测与本地数据，不模拟未接入的生成结果。 */
-function OverviewPage({ state }: { state: DesktopBootstrapView }) {
+function OverviewPage({ state, runtimeBusy, onRuntimeAction }: { state: DesktopBootstrapView; runtimeBusy: boolean; onRuntimeAction: (action: "start" | "stop" | "selfTest") => void }) {
   const gpu = state.environment.gpus[0];
   const capability = state.environment.capabilities;
-  return <div className="desktop-page"><section className="overview-hero"><div><span>LOCAL COMPUTE</span><h1>{gpu?.name || "等待可用 GPU"}</h1><p>本地计算与网页钱包隔离。环境通过自检后才开放生成和训练，结果将进入持久化图库同步队列。</p></div><StatusSeal status={state.environment.status} /></section><section className="capability-grid"><CapabilityCard label="本地生成" ready={capability.inference} text={capability.inference ? "Runtime 已通过推理自检" : "等待 GPU 与推理环境就绪"} /><CapabilityCard label="LoRA 训练" ready={capability.training} text={capability.training ? "训练 Runtime 可用" : "训练入口保持锁定"} /><CapabilityCard label="自动打标" ready={capability.captioning} text={capability.captioning ? "打标 Runtime 可用" : "仍可手动整理标签"} /><CapabilityCard label="模型管理" ready={capability.modelManagement} text="支持本地目录和文件哈希管理" /></section><section className="metric-grid"><Metric Icon={MemoryStick} label="GPU 显存" value={gpu ? `${formatBytes(gpu.memoryFreeBytes)} / ${formatBytes(gpu.memoryTotalBytes)}` : "未检测到"} /><Metric Icon={Cpu} label="处理器" value={`${state.environment.cpu.name} · ${state.environment.cpu.logicalCores} 线程`} /><Metric Icon={Database} label="系统内存" value={`${formatBytes(state.environment.memory.availableBytes)} 可用`} /><Metric Icon={UploadCloud} label="待同步图库" value={`${state.pendingGallerySyncCount} 项`} /></section></div>;
+  return <div className="desktop-page"><section className="overview-hero"><div><span>LOCAL COMPUTE</span><h1>{gpu?.name || "等待可用 GPU"}</h1><p>本地计算与网页钱包隔离。环境通过自检后才开放生成和训练，结果将进入持久化图库同步队列。</p></div><StatusSeal status={state.environment.status} /></section><RuntimeControlCard runtime={state.runtime} installed={state.environment.runtime.installed} busy={runtimeBusy} onAction={onRuntimeAction} /><section className="capability-grid"><CapabilityCard label="本地生成" ready={capability.inference} text={capability.inference ? "Runtime 与底模均已就绪" : "等待 GPU、Runtime 与底模就绪"} /><CapabilityCard label="LoRA 训练" ready={capability.training} text={capability.training ? "训练 Runtime 可用" : "训练入口保持锁定"} /><CapabilityCard label="自动打标" ready={capability.captioning} text={capability.captioning ? "打标 Runtime 可用" : "仍可手动整理标签"} /><CapabilityCard label="模型管理" ready={capability.modelManagement} text="支持本地目录和文件哈希管理" /></section><section className="metric-grid"><Metric Icon={MemoryStick} label="GPU 显存" value={gpu ? `${formatBytes(gpu.memoryFreeBytes)} / ${formatBytes(gpu.memoryTotalBytes)}` : "未检测到"} /><Metric Icon={Cpu} label="处理器" value={`${state.environment.cpu.name} · ${state.environment.cpu.logicalCores} 线程`} /><Metric Icon={Database} label="系统内存" value={`${formatBytes(state.environment.memory.availableBytes)} 可用`} /><Metric Icon={UploadCloud} label="待同步图库" value={`${state.pendingGallerySyncCount} 项`} /></section></div>;
+}
+
+/** Runtime 控制卡展示真实 PID、回环端口与自检入口，不直接暴露 ComfyUI 页面。 */
+function RuntimeControlCard({ runtime, installed, busy, onAction }: { runtime: DesktopRuntimeStatusView; installed: boolean; busy: boolean; onAction: (action: "start" | "stop" | "selfTest") => void }) {
+  const active = ["starting", "ready", "stopping"].includes(runtime.status);
+  return <section className={`runtime-control is-${runtime.status}`}><div className="runtime-control-icon">{runtime.status === "ready" ? <Activity /> : <Power />}</div><div className="runtime-control-copy"><span>COMFYUI RUNTIME</span><strong>{runtimeProcessLabel(runtime.status)}</strong><small>{runtime.pid ? `PID ${runtime.pid} · 127.0.0.1:${runtime.port}` : runtime.error || (installed ? "已安装，等待启动和自检" : "请先在资源安装页完成 Runtime 安装")}</small></div><div className="runtime-actions"><button disabled={busy || !installed || active} onClick={() => onAction("start")}>{busy ? <LoaderCircle className="spin" /> : <Power />}启动</button><button disabled={busy || !installed || runtime.status !== "ready"} onClick={() => onAction("selfTest")}><FlaskConical />完整自检</button><button disabled={busy || !active} onClick={() => onAction("stop")}><Power />停止</button></div></section>;
 }
 
 /** 环境页展示完整问题和硬件明细，便于用户按具体原因修复。 */
@@ -172,7 +270,7 @@ function CapabilityCard({ label, ready, text }: { label: string; ready: boolean;
 function Metric({ Icon, label, value }: { Icon: typeof Cpu; label: string; value: string }) { return <article><Icon /><span><small>{label}</small><strong>{value}</strong></span></article>; }
 /** 环境状态印章突出当前是否可执行 GPU 任务。 */
 function StatusSeal({ status }: { status: DesktopEnvironmentReport["status"] }) { return <div className={`status-seal is-${status}`}><span>ENV</span><strong>{status === "ready" ? "READY" : status.toUpperCase()}</strong></div>; }
-function pageTitle(page: DesktopPage): string { return { overview: "本机概览", environment: "环境检测", resources: "资源安装", sync: "图库同步", settings: "本地设置" }[page]; }
+function pageTitle(page: DesktopPage): string { return { generate: "本地生成", jobs: "任务记录", models: "本地模型", overview: "本机概览", environment: "环境检测", resources: "资源安装", sync: "图库同步", settings: "本地设置" }[page]; }
 function runtimeLabel(status: DesktopEnvironmentReport["runtime"]["status"]): string { return { not_installed: "未安装", installed_unverified: "等待自检", ready: "运行正常", broken: "需要修复" }[status]; }
 function syncStatusLabel(status: DesktopGallerySyncItem["status"]): string { return { queued: "等待上传", waiting_network: "等待网络", waiting_auth: "等待登录", uploading: "上传中", committing: "正在提交", synced: "已同步", privacy_pending: "权限待同步", paused: "已暂停", failed_retryable: "等待重试", failed_final: "同步失败", remote_deleted: "网页已删除" }[status]; }
 /** 主题选项使用简短中文标签供按钮标题和辅助技术读取。 */
@@ -181,6 +279,8 @@ function resourceKindLabel(kind: string): string { return { runtime: "运行环�
 function sourceKindLabel(kind: string): string { return { official: "官方", mirror: "主站镜像" }[kind] || kind; }
 function downloadStatusLabel(status: DesktopResourceDownloadView["status"]): string { return { queued: "排队中", downloading: "下载中", verifying: "校验中", downloaded: "已完成", failed: "失败" }[status]; }
 function installStatusLabel(status: DesktopResourceInstallView["status"]): string { return { verifying: "校验缓存", installing: "安装中", switching: "切换版本", installed: "已安装", rolled_back: "已回滚", failed: "安装失败" }[status]; }
+function runtimeProcessLabel(status: DesktopRuntimeStatusView["status"]): string { return { stopped: "已停止", starting: "正在启动", ready: "运行中", stopping: "正在停止", failed: "运行异常" }[status]; }
+function localJobStatusLabel(status: DesktopLocalJobView["status"]): string { return { queued: "排队中", running: "生成中", succeeded: "已完成", failed: "失败", cancelled: "已取消" }[status]; }
 function formatResourceBytes(value: number): string { if (value < 1024 ** 2) return `${Math.max(1, Math.round(value / 1024))} KiB`; if (value < 1024 ** 3) return `${(value / 1024 ** 2).toFixed(1)} MiB`; return `${(value / 1024 ** 3).toFixed(2)} GiB`; }
 function formatBytes(value: number): string { if (value <= 0) return "0 GB"; return `${(value / 1024 ** 3).toFixed(value >= 10 * 1024 ** 3 ? 0 : 1)} GB`; }
 function errorMessage(error: unknown): string { return error instanceof Error ? error.message : String(error || "桌面端操作失败"); }

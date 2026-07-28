@@ -599,6 +599,111 @@ select:focus-visible {
   background: var(--panel-muted);
 }
 
+/* Runtime 控制区保持单行高信息密度，窄窗口下自动拆分为安全操作区。 */
+.runtime-control {
+  min-height: 82px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 15px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--muted);
+  border-radius: 6px;
+  background: var(--panel);
+}
+
+.runtime-control.is-ready {
+  border-color: var(--success-border);
+  border-left-color: var(--success);
+}
+
+.runtime-control.is-failed {
+  border-color: var(--danger-border);
+  border-left-color: var(--danger);
+}
+
+.runtime-control-icon {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--panel-raised);
+  color: var(--muted);
+}
+
+.runtime-control.is-ready .runtime-control-icon {
+  border-color: var(--success-border);
+  color: var(--success);
+}
+
+.runtime-control-copy {
+  min-width: 0;
+}
+
+.runtime-control-copy span,
+.runtime-control-copy strong,
+.runtime-control-copy small {
+  display: block;
+}
+
+.runtime-control-copy span {
+  color: var(--accent);
+  font-size: 7px;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+}
+
+.runtime-control-copy strong {
+  margin-top: 3px;
+  font-size: 11px;
+}
+
+.runtime-control-copy small {
+  margin-top: 3px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtime-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.runtime-actions button {
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--panel-raised);
+  color: var(--text);
+  font-size: 8px;
+  font-weight: 760;
+}
+
+.runtime-actions button:hover:not(:disabled) {
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+.runtime-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.runtime-actions svg {
+  width: 13px;
+  height: 13px;
+}
+
 .metric-grid svg {
   width: 16px;
   color: var(--accent);
@@ -871,6 +976,273 @@ select:focus-visible {
   opacity: 0.55;
 }
 
+/* 本地生成、模型导入和任务卡统一使用紧凑控件，保证 720px 窗口仍能完成全部操作。 */
+.generation-grid,
+.model-import-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.model-import-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.generation-grid label,
+.model-import-grid label,
+.prompt-field {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.generation-grid input,
+.generation-grid select,
+.model-import-grid input,
+.model-import-grid select,
+.prompt-field textarea {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--control);
+  color: var(--text);
+  outline: 0;
+}
+
+.generation-grid input,
+.generation-grid select,
+.model-import-grid input,
+.model-import-grid select {
+  height: 36px;
+  padding: 0 9px;
+}
+
+.prompt-field {
+  margin-top: 10px;
+}
+
+.prompt-field textarea {
+  min-height: 126px;
+  resize: vertical;
+  padding: 10px;
+  line-height: 1.6;
+}
+
+.prompt-field.negative textarea {
+  min-height: 76px;
+}
+
+.generation-form > footer,
+.model-import > footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+  padding-top: 11px;
+  border-top: 1px solid var(--border);
+}
+
+.generation-form > footer button,
+.model-import > footer button {
+  height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 14px;
+  border: 1px solid var(--accent-border);
+  border-radius: 5px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.generation-form > footer button:disabled,
+.model-import > footer button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.generation-form > footer svg,
+.model-import > footer svg {
+  width: 14px;
+}
+
+.file-picker > div {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.file-picker > div input {
+  border-radius: 5px 0 0 5px;
+}
+
+.file-picker > div button {
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-left: 0;
+  border-radius: 0 5px 5px 0;
+  background: var(--panel-raised);
+  color: var(--text);
+  font-size: 8px;
+  font-weight: 760;
+}
+
+.model-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.model-list article {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  padding: 11px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--panel-raised);
+}
+
+.model-list article > svg {
+  width: 17px;
+  color: var(--accent);
+}
+
+.model-list article > div {
+  min-width: 0;
+}
+
+.model-list strong,
+.model-list span,
+.model-list small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-list strong {
+  font-size: 9px;
+}
+
+.model-list span,
+.model-list small {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 7px;
+}
+
+.model-list b {
+  color: var(--success);
+  font-size: 8px;
+}
+
+.model-list .is-missing b {
+  color: var(--danger);
+}
+
+.local-job-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.local-job-grid article {
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-raised);
+}
+
+.local-job-preview {
+  aspect-ratio: 1;
+  overflow: hidden;
+  background: var(--panel-muted);
+}
+
+.local-job-preview img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.local-job-preview > div {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.local-job-preview svg {
+  width: 24px;
+}
+
+.local-job-preview b {
+  color: var(--accent);
+  font-size: 11px;
+}
+
+.local-job-copy {
+  min-height: 70px;
+  padding: 9px;
+}
+
+.local-job-copy strong {
+  min-height: 30px;
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 9px;
+  line-height: 1.55;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.local-job-copy span,
+.local-job-copy small {
+  display: block;
+  margin-top: 4px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 7px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.local-job-copy small {
+  color: var(--danger);
+}
+
+.local-job-grid article > button {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--panel);
+  color: var(--text);
+}
+
+.local-job-grid article > button svg {
+  width: 13px;
+}
+
 .resource-unconfigured,
 .resource-channel-status {
   display: flex;
@@ -1086,6 +1458,11 @@ select:focus-visible {
   .desktop-main {
     padding: 0 16px 24px;
   }
+
+  .generation-grid,
+  .local-job-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 900px) {
@@ -1213,6 +1590,22 @@ select:focus-visible {
   .resource-list article > button {
     grid-column: 2;
     width: max-content;
+  }
+
+  .runtime-control {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .runtime-actions {
+    grid-column: 2;
+    flex-wrap: wrap;
+  }
+
+  .generation-grid,
+  .model-import-grid,
+  .model-list,
+  .local-job-grid {
+    grid-template-columns: 1fr;
   }
 }
 

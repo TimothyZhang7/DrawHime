@@ -173,6 +173,10 @@ Runtime 更新不能中断运行中任务；队列空闲后切换。
 - 每次任务固化环境、模型哈希、LoRA ID/哈希/权重、提示词、负面提示词和工作流版本。
 - OOM 不进行无限重试；返回经过计算的安全分辨率、Rank 或 offload 建议。
 
+Local Scheduler 使用桌面 SQLite 作为唯一事实源。提交命令先固化模型哈希、正负提示词、尺寸、采样器、调度器、步数、CFG、种子与隐私并立即返回；后台 Worker 单卡串行领取。每次执行创建独立 attempt，ComfyUI prompt ID 在提交成功时立刻写入。正常退出时运行中任务回到队列并把本次 attempt 标为 `interrupted`，用户取消则删除对应 prompt 并调用中断接口。产物下载后先校验 PNG 和尺寸，再原子写入作品目录、提交任务终态并在同一事务中加入图库 outbox。
+
+首版支持两类真实工作流：单文件 `CheckpointLoaderSimple`，以及 Anima 的独立 `UNETLoader + CLIPLoader + VAELoader`。正面与负面提示词始终进入不同 conditioning。模型导入只接受结构可解析的 safetensors，复制时流式计算 SHA-256，遇到同名不同内容时生成哈希后缀，不覆盖已有文件。
+
 ## 10. 模型与 LoRA 仓库
 
 - 支持网站公开模型、网站公开 LoRA、当前账号私有 LoRA和本地导入文件。
@@ -274,6 +278,6 @@ Runtime 更新不能中断运行中任务；队列空闲后切换。
 
 ## 18. 当前实现状态
 
-当前已完成：Tauri 工程、Windows/NVIDIA 基础检测、Windows 10 1809 构建号门禁、持续环境提示、SQLite 设置及升级、主题跟随/手动切换、依赖来源偏好、环境快照、默认图库隐私、图库 outbox、响应式桌面 UI、签名资源清单契约和 API、离线签名工具、8 MiB Range 断点下载、低速切源、SHA-256 隔离、资源进度事件、安全 ZIP/7z 解压、磁盘预检、同卷原子安装、旧版本保留与回滚、Runtime 安装状态回归测试和 NSIS 构建。首个 NVIDIA Runtime、固定公钥、签名清单和主站 Range 镜像已经发布；清单签名、镜像首分片、完整 7z 安装及 NSIS 安装包均已通过真实验证。
+当前已完成：Tauri 工程、Windows/NVIDIA 基础检测、Windows 10 1809 构建号门禁、持续环境提示、SQLite 设置及升级、主题跟随/手动切换、依赖来源偏好、环境快照、默认图库隐私、图库 outbox、响应式桌面 UI、签名资源清单契约和 API、离线签名工具、8 MiB Range 断点下载、低速切源、SHA-256 隔离、资源进度事件、安全 ZIP/7z 解压、磁盘预检、同卷原子安装、旧版本保留与回滚、Runtime 安装状态回归测试和 NSIS 构建。首个 NVIDIA Runtime、固定公钥、签名清单和主站 Range 镜像已经发布；清单签名、镜像首分片、完整 7z 安装及 NSIS 安装包均已通过真实验证。桌面核心现已支持 ComfyUI 动态回环启动、状态轮询、GPU/节点自检、受控日志、停止回收、safetensors 原子导入、Checkpoint/Anima 工作流、SQLite 本地任务/attempt/产物、串行调度、取消恢复和自动图库 outbox；真实 Runtime 生命周期自检已在正式 2.03GB 便携包上通过。
 
-后续按顺序推进：设备授权 → 签名资源清单与 Runtime 安装器 → 本地模型/LoRA 仓库 → Local Scheduler → 生成/打标/训练 → 图库上传执行器 → 签名更新与完整系统矩阵验证。
+后续按顺序推进：网站底模与组件资源发布 → 多 LoRA 下载/导入/叠加 → 自动打标 → 分阶段 LoRA 训练 → 设备授权与图库上传执行器 → 签名软件更新 → Windows 完整系统矩阵验证。

@@ -1,27 +1,41 @@
 //! 本模块管理桌面端独立 SQLite、目录设置和图库同步队列，不连接网页或独立平台数据库。
 
-use crate::models::{DesktopSettings, GalleryPublicationInput, GallerySyncItem};
+use crate::models::{DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalModelView, DesktopSettings, GalleryPublicationInput, GallerySyncItem};
+use crate::runtime::RuntimeController;
+use crate::scheduler::LocalScheduler;
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};
 use sha2::{Digest, Sha256};
-use std::{fs, io::{BufReader, Read}, path::{Path, PathBuf}, sync::Mutex};
+use std::{fs, io::{BufReader, Read}, path::{Path, PathBuf}, sync::{Arc, Mutex}};
 use uuid::Uuid;
 
 pub struct DesktopState {
     pub database: Mutex<Connection>,
     pub app_data_dir: PathBuf,
+    pub database_path: PathBuf,
+    pub scheduler: Option<LocalScheduler>,
+    pub runtime: Arc<RuntimeController>,
 }
 
 impl DesktopState {
     /** 创建本地数据目录和数据库结构，任何失败都阻止桌面核心伪装为可用。 */
     pub fn initialize(app_data_dir: &Path, picture_dir: &Path) -> Result<Self, String> {
         fs::create_dir_all(app_data_dir).map_err(|error| format!("创建桌面数据目录失败：{error}"))?;
-        let connection = Connection::open(app_data_dir.join("desktop.sqlite3")).map_err(|error| format!("打开桌面数据库失败：{error}"))?;
+        let database_path = app_data_dir.join("desktop.sqlite3");
+        let connection = Connection::open(&database_path).map_err(|error| format!("打开桌面数据库失败：{error}"))?;
         connection.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
             CREATE TABLE IF NOT EXISTS desktop_settings (id INTEGER PRIMARY KEY CHECK(id=1), theme_mode TEXT NOT NULL DEFAULT 'system', dependency_source TEXT NOT NULL DEFAULT 'auto', default_privacy TEXT NOT NULL, model_root TEXT NOT NULL, output_root TEXT NOT NULL, runtime_root TEXT NOT NULL, upload_concurrency INTEGER NOT NULL, wifi_only INTEGER NOT NULL, bandwidth_limit_kib INTEGER, updated_at TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS environment_snapshots (id INTEGER PRIMARY KEY AUTOINCREMENT, report_json TEXT NOT NULL, checked_at TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS gallery_sync_queue (id TEXT PRIMARY KEY, local_task_id TEXT NOT NULL, artifact_path TEXT NOT NULL, artifact_sha256 TEXT NOT NULL, privacy TEXT NOT NULL, status TEXT NOT NULL, uploaded_bytes INTEGER NOT NULL DEFAULT 0, retry_count INTEGER NOT NULL DEFAULT 0, gallery_item_id TEXT, last_error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(local_task_id, artifact_sha256));
-            CREATE INDEX IF NOT EXISTS gallery_sync_status_idx ON gallery_sync_queue(status, created_at);").map_err(|error| format!("初始化桌面数据库失败：{error}"))?;
+            CREATE TABLE IF NOT EXISTS local_models (id TEXT PRIMARY KEY, display_name TEXT NOT NULL, family TEXT NOT NULL, workflow_kind TEXT NOT NULL, model_file_name TEXT NOT NULL, model_relative_path TEXT NOT NULL, model_sha256 TEXT NOT NULL, byte_size INTEGER NOT NULL, model_modified_ms INTEGER NOT NULL, text_encoder_file_name TEXT, text_encoder_relative_path TEXT, text_encoder_sha256 TEXT, vae_file_name TEXT, vae_relative_path TEXT, vae_sha256 TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(model_sha256, workflow_kind));
+            CREATE TABLE IF NOT EXISTS local_jobs (id TEXT PRIMARY KEY, status TEXT NOT NULL, progress INTEGER NOT NULL, prompt TEXT NOT NULL, negative_prompt TEXT, model_id TEXT NOT NULL, model_display_name TEXT NOT NULL, workflow_kind TEXT NOT NULL, model_file_name TEXT NOT NULL, model_relative_path TEXT NOT NULL, model_sha256 TEXT NOT NULL, text_encoder_file_name TEXT, vae_file_name TEXT, width INTEGER NOT NULL, height INTEGER NOT NULL, steps INTEGER NOT NULL, cfg REAL NOT NULL, sampler_name TEXT NOT NULL, scheduler_name TEXT NOT NULL, seed INTEGER NOT NULL, privacy TEXT NOT NULL, runtime_prompt_id TEXT, error TEXT, cancel_requested INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, started_at TEXT, completed_at TEXT, updated_at TEXT NOT NULL, FOREIGN KEY(model_id) REFERENCES local_models(id));
+            CREATE TABLE IF NOT EXISTS local_job_attempts (id TEXT PRIMARY KEY, job_id TEXT NOT NULL, attempt_number INTEGER NOT NULL, status TEXT NOT NULL, runtime_prompt_id TEXT, error TEXT, started_at TEXT NOT NULL, completed_at TEXT, UNIQUE(job_id,attempt_number), FOREIGN KEY(job_id) REFERENCES local_jobs(id));
+            CREATE TABLE IF NOT EXISTS local_artifacts (id TEXT PRIMARY KEY, job_id TEXT NOT NULL UNIQUE, path TEXT NOT NULL, sha256 TEXT NOT NULL, byte_size INTEGER NOT NULL, mime_type TEXT NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY(job_id) REFERENCES local_jobs(id));
+            CREATE INDEX IF NOT EXISTS gallery_sync_status_idx ON gallery_sync_queue(status, created_at);
+            CREATE INDEX IF NOT EXISTS local_jobs_status_idx ON local_jobs(status, created_at);").map_err(|error| format!("初始化桌面数据库失败：{error}"))?;
+        let recovery_time = Utc::now().to_rfc3339();
+        connection.execute("UPDATE local_job_attempts SET status='interrupted',completed_at=?1 WHERE status='running'", [&recovery_time]).map_err(|error| format!("恢复中断的本地任务尝试失败：{error}"))?;
+        connection.execute("UPDATE local_jobs SET status='queued', progress=0, runtime_prompt_id=NULL, started_at=NULL, updated_at=?1 WHERE status='running'", [&recovery_time]).map_err(|error| format!("恢复中断的本地任务失败：{error}"))?;
         ensure_column(&connection, "desktop_settings", "theme_mode", "TEXT NOT NULL DEFAULT 'system'")?;
         ensure_column(&connection, "desktop_settings", "dependency_source", "TEXT NOT NULL DEFAULT 'auto'")?;
         let model_root = app_data_dir.join("models");
@@ -29,7 +43,14 @@ impl DesktopState {
         let output_root = picture_dir.join("DrawHime");
         for directory in [&model_root, &runtime_root, &output_root] { fs::create_dir_all(directory).map_err(|error| format!("创建本地目录失败：{error}"))?; }
         connection.execute("INSERT OR IGNORE INTO desktop_settings (id, theme_mode, dependency_source, default_privacy, model_root, output_root, runtime_root, upload_concurrency, wifi_only, bandwidth_limit_kib, updated_at) VALUES (1, 'system', 'auto', 'private', ?1, ?2, ?3, 2, 0, NULL, ?4)", params![path_text(&model_root), path_text(&output_root), path_text(&runtime_root), Utc::now().to_rfc3339()]).map_err(|error| format!("写入默认设置失败：{error}"))?;
-        Ok(Self { database: Mutex::new(connection), app_data_dir: app_data_dir.to_path_buf() })
+        Ok(Self { database: Mutex::new(connection), app_data_dir: app_data_dir.to_path_buf(), database_path, scheduler: None, runtime: Arc::new(RuntimeController::new()) })
+    }
+
+    /** 数据库初始化完成后启动唯一后台调度线程。 */
+    pub fn start_scheduler(&mut self, app: tauri::AppHandle) -> Result<(), String> {
+        if self.scheduler.is_some() { return Ok(()); }
+        self.scheduler = Some(LocalScheduler::start(self.database_path.clone(), self.app_data_dir.clone(), self.runtime.clone(), app)?);
+        Ok(())
     }
 
     /** 读取唯一桌面设置记录。 */
@@ -96,10 +117,99 @@ impl DesktopState {
         database.query_row("SELECT COUNT(*) FROM gallery_sync_queue WHERE status NOT IN ('synced','remote_deleted')", [], |row| row.get(0)).map_err(|error| format!("统计图库同步队列失败：{error}"))
     }
 
+    /** 按模型内容哈希幂等登记受控目录中的真实 safetensors。 */
+    pub fn register_local_model(&self, model: LocalModelRegistration) -> Result<DesktopLocalModelView, String> {
+        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        let existing: Option<String> = database.query_row("SELECT id FROM local_models WHERE model_sha256=?1 AND workflow_kind=?2", params![model.model_sha256, model.workflow_kind], |row| row.get(0)).optional().map_err(|error| format!("查询本地模型失败：{error}"))?;
+        let id = existing.unwrap_or_else(|| Uuid::new_v4().to_string());
+        let now = Utc::now().to_rfc3339();
+        database.execute("INSERT INTO local_models (id, display_name, family, workflow_kind, model_file_name, model_relative_path, model_sha256, byte_size, model_modified_ms, text_encoder_file_name, text_encoder_relative_path, text_encoder_sha256, vae_file_name, vae_relative_path, vae_sha256, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?16) ON CONFLICT(model_sha256, workflow_kind) DO UPDATE SET display_name=excluded.display_name, family=excluded.family, model_file_name=excluded.model_file_name, model_relative_path=excluded.model_relative_path, byte_size=excluded.byte_size, model_modified_ms=excluded.model_modified_ms, text_encoder_file_name=excluded.text_encoder_file_name, text_encoder_relative_path=excluded.text_encoder_relative_path, text_encoder_sha256=excluded.text_encoder_sha256, vae_file_name=excluded.vae_file_name, vae_relative_path=excluded.vae_relative_path, vae_sha256=excluded.vae_sha256, updated_at=excluded.updated_at", params![id, model.display_name, model.family, model.workflow_kind, model.model_file_name, model.model_relative_path, model.model_sha256, model.byte_size, model.model_modified_ms, model.text_encoder_file_name, model.text_encoder_relative_path, model.text_encoder_sha256, model.vae_file_name, model.vae_relative_path, model.vae_sha256, now]).map_err(|error| format!("登记本地模型失败：{error}"))?;
+        drop(database);
+        self.local_model(&id)?.ok_or_else(|| "本地模型登记后不存在".into())
+    }
+
+    /** 返回所有已登记模型，并实时校验主文件大小和修改时间。 */
+    pub fn list_local_models(&self) -> Result<Vec<DesktopLocalModelView>, String> {
+        let settings = self.load_settings()?;
+        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        let mut statement = database.prepare("SELECT id,display_name,family,workflow_kind,model_file_name,model_relative_path,model_sha256,byte_size,model_modified_ms,text_encoder_file_name,text_encoder_relative_path,vae_file_name,vae_relative_path,created_at,updated_at FROM local_models ORDER BY updated_at DESC").map_err(|error| format!("读取本地模型列表失败：{error}"))?;
+        let rows = statement.query_map([], |row| local_model_from_row(row, &settings.model_root)).map_err(|error| format!("查询本地模型列表失败：{error}"))?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|error| format!("解析本地模型列表失败：{error}"))
+    }
+
+    /** 创建持久任务后唤醒串行调度器，提交线程不等待生成完成。 */
+    pub fn create_local_job(&self, input: DesktopLocalJobCreateInput) -> Result<DesktopLocalJobView, String> {
+        let scheduler = self.scheduler.as_ref().ok_or_else(|| "本地调度器尚未启动".to_string())?;
+        let settings = self.load_settings()?;
+        let mut database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        let job = crate::scheduler::create_job(&mut database, &settings, input)?;
+        drop(database);
+        scheduler.wake();
+        Ok(job)
+    }
+
+    /** 读取最近本地任务。 */
+    pub fn list_local_jobs(&self) -> Result<Vec<DesktopLocalJobView>, String> {
+        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        crate::scheduler::list_jobs(&database)
+    }
+
+    /** 请求取消任务并唤醒调度器处理状态变化。 */
+    pub fn cancel_local_job(&self, id: &str) -> Result<DesktopLocalJobView, String> {
+        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        let job = crate::scheduler::cancel_job(&database, id)?;
+        drop(database);
+        if let Some(scheduler) = &self.scheduler { scheduler.wake(); }
+        Ok(job)
+    }
+
+    /** Runtime 停止门禁只统计真实运行中的本地任务。 */
+    pub fn running_local_job_count(&self) -> Result<u64, String> {
+        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        database.query_row("SELECT COUNT(*) FROM local_jobs WHERE status='running'", [], |row| row.get(0)).map_err(|error| format!("统计运行中本地任务失败：{error}"))
+    }
+
+    fn local_model(&self, id: &str) -> Result<Option<DesktopLocalModelView>, String> {
+        let settings = self.load_settings()?;
+        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        database.query_row("SELECT id,display_name,family,workflow_kind,model_file_name,model_relative_path,model_sha256,byte_size,model_modified_ms,text_encoder_file_name,text_encoder_relative_path,vae_file_name,vae_relative_path,created_at,updated_at FROM local_models WHERE id=?1", [id], |row| local_model_from_row(row, &settings.model_root)).optional().map_err(|error| format!("读取本地模型失败：{error}"))
+    }
+
     fn gallery_item(&self, id: &str) -> Result<Option<GallerySyncItem>, String> {
         let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
         database.query_row("SELECT id, local_task_id, artifact_path, artifact_sha256, privacy, status, uploaded_bytes, retry_count, gallery_item_id, last_error, created_at, updated_at FROM gallery_sync_queue WHERE id=?1", [id], gallery_item_from_row).optional().map_err(|error| format!("读取图库同步记录失败：{error}"))
     }
+}
+
+/** 已完成文件复制和哈希校验、等待写入 SQLite 的模型记录。 */
+pub struct LocalModelRegistration {
+    pub display_name: String,
+    pub family: String,
+    pub workflow_kind: String,
+    pub model_file_name: String,
+    pub model_relative_path: String,
+    pub model_sha256: String,
+    pub byte_size: u64,
+    pub model_modified_ms: u64,
+    pub text_encoder_file_name: Option<String>,
+    pub text_encoder_relative_path: Option<String>,
+    pub text_encoder_sha256: Option<String>,
+    pub vae_file_name: Option<String>,
+    pub vae_relative_path: Option<String>,
+    pub vae_sha256: Option<String>,
+}
+
+fn local_model_from_row(row: &rusqlite::Row<'_>, model_root: &str) -> rusqlite::Result<DesktopLocalModelView> {
+    let relative_path: String = row.get(5)?;
+    let expected_size: u64 = row.get(7)?;
+    let expected_modified_ms: u64 = row.get(8)?;
+    let metadata = Path::new(model_root).join(relative_path).metadata().ok();
+    let workflow_kind: String = row.get(3)?;
+    let text_relative_path: Option<String> = row.get(10)?;
+    let vae_relative_path: Option<String> = row.get(12)?;
+    let primary_available = metadata.as_ref().is_some_and(|value| value.is_file() && value.len() == expected_size && modified_millis(value).ok() == Some(expected_modified_ms));
+    let components_available = workflow_kind != "anima" || (text_relative_path.as_ref().is_some_and(|path| Path::new(model_root).join(path).is_file()) && vae_relative_path.as_ref().is_some_and(|path| Path::new(model_root).join(path).is_file()));
+    Ok(DesktopLocalModelView { id: row.get(0)?, display_name: row.get(1)?, family: row.get(2)?, workflow_kind, model_file_name: row.get(4)?, model_sha256: row.get(6)?, byte_size: expected_size, text_encoder_file_name: row.get(9)?, vae_file_name: row.get(11)?, available: primary_available && components_available, created_at: row.get(13)?, updated_at: row.get(14)? })
 }
 
 fn gallery_item_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<GallerySyncItem> { Ok(GallerySyncItem { id: row.get(0)?, local_task_id: row.get(1)?, artifact_path: row.get(2)?, artifact_sha256: row.get(3)?, privacy: row.get(4)?, status: row.get(5)?, uploaded_bytes: row.get(6)?, retry_count: row.get(7)?, gallery_item_id: row.get(8)?, last_error: row.get(9)?, created_at: row.get(10)?, updated_at: row.get(11)? }) }
@@ -111,6 +221,7 @@ fn ensure_column(database: &Connection, table: &str, column: &str, definition: &
     Ok(())
 }
 fn path_text(path: &Path) -> String { path.to_string_lossy().into_owned() }
+fn modified_millis(metadata: &fs::Metadata) -> Result<u64, String> { metadata.modified().map_err(|error| format!("读取模型修改时间失败：{error}"))?.duration_since(std::time::UNIX_EPOCH).map(|duration| duration.as_millis() as u64).map_err(|_| "模型修改时间早于系统纪元".to_string()) }
 fn sha256_file(path: &Path) -> Result<String, String> { let file = fs::File::open(path).map_err(|error| format!("读取本地结果失败：{error}"))?; let mut reader = BufReader::new(file); let mut hasher = Sha256::new(); let mut buffer = [0_u8; 1024 * 1024]; loop { let read = reader.read(&mut buffer).map_err(|error| format!("计算文件哈希失败：{error}"))?; if read == 0 { break; } hasher.update(&buffer[..read]); } Ok(hex::encode(hasher.finalize())) }
 
 #[cfg(test)]

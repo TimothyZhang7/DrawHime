@@ -14,6 +14,7 @@ pub fn inspect_environment(settings: &DesktopSettings) -> DesktopEnvironmentRepo
     let os_supported = cfg!(target_os = "windows") && windows_build_supported(system.os_version.as_deref(), system.os_build);
     let gpus = nvidia_gpus();
     let runtime = inspect_runtime(&settings.runtime_root);
+    let generation_assets_ready = has_generation_assets(&settings.model_root);
     let mut issues = Vec::new();
     if !os_supported {
         issues.push(issue("windows_version_unsupported", "critical", "当前 Windows 版本不在支持范围", "首版要求 Windows 10 1809 及以后版本或 Windows 11 x64。", "查看系统升级要求"));
@@ -29,10 +30,11 @@ pub fn inspect_environment(settings: &DesktopSettings) -> DesktopEnvironmentRepo
     if runtime.status == "not_installed" { issues.push(issue("runtime_missing", "warning", "本地 Runtime 尚未安装", "桌面核心和硬件检测可用；安装经过签名的推理、训练环境后才开放 GPU 任务。", "安装运行环境")); }
     if runtime.status == "installed_unverified" { issues.push(issue("runtime_unverified", "warning", "本地 Runtime 等待自检", "已发现 Runtime 清单，但尚未记录完整推理和训练自检结果。", "执行环境自检")); }
     if runtime.status == "broken" { issues.push(issue("runtime_broken", "critical", "本地 Runtime 清单损坏", "Runtime 清单不能读取或状态无效，生成和训练保持暂停。", "修复运行环境")); }
+    if runtime.status == "ready" && !generation_assets_ready { issues.push(issue("generation_model_missing", "warning", "尚未安装可生成的底模", "Runtime 已通过基础自检，但模型目录缺少完整底模资产，生成和训练保持暂停。", "前往资源安装")); }
     let gpu_supported = gpus.iter().any(|gpu| gpu.memory_total_bytes >= MINIMUM_GPU_MEMORY_BYTES);
     let runtime_ready = runtime.status == "ready";
     let low_free_memory = gpus.first().map(|gpu| gpu.memory_free_bytes < 1024 * MIB).unwrap_or(true);
-    let status = if !os_supported || !gpu_supported || runtime.status == "broken" { "blocked" } else if !runtime.installed { "installable" } else if !runtime_ready || low_free_memory { "degraded" } else { "ready" };
+    let status = if !os_supported || !gpu_supported || runtime.status == "broken" { "blocked" } else if !runtime.installed { "installable" } else if !runtime_ready || !generation_assets_ready || low_free_memory { "degraded" } else { "ready" };
     DesktopEnvironmentReport {
         status: status.into(),
         checked_at: Utc::now().to_rfc3339(),
@@ -42,7 +44,7 @@ pub fn inspect_environment(settings: &DesktopSettings) -> DesktopEnvironmentRepo
         gpus,
         disks: system.disks,
         runtime,
-        capabilities: CapabilityView { inference: os_supported && gpu_supported && runtime_ready && !low_free_memory, training: os_supported && gpu_supported && runtime_ready && !low_free_memory, captioning: os_supported && runtime_ready, model_management: true },
+        capabilities: CapabilityView { inference: os_supported && gpu_supported && runtime_ready && generation_assets_ready && !low_free_memory, training: os_supported && gpu_supported && runtime_ready && generation_assets_ready && !low_free_memory, captioning: os_supported && runtime_ready, model_management: true },
         issues,
     }
 }
@@ -70,6 +72,20 @@ fn inspect_runtime(root: &str) -> RuntimeView {
     let status = fs::read_to_string(&manifest_path).ok().and_then(|content| serde_json::from_str::<Value>(&content).ok()).and_then(|value| value.get("status").and_then(Value::as_str).map(str::to_owned));
     let normalized = match status.as_deref() { Some("ready") => "ready", Some("installed") | Some("installed_unverified") => "installed_unverified", _ => "broken" };
     RuntimeView { installed: true, status: normalized.into(), root_path: root.into() }
+}
+
+/** 只读取目录项判断是否存在完整可加载资产，避免首屏对数 GB 模型重复计算哈希。 */
+fn has_generation_assets(root: &str) -> bool {
+    let root = Path::new(root);
+    let checkpoint_ready = contains_safetensors(&root.join("checkpoints"));
+    let anima_ready = contains_safetensors(&root.join("diffusion_models"))
+        && root.join("text_encoders").join("qwen_3_06b_base.safetensors").is_file()
+        && root.join("vae").join("qwen_image_vae.safetensors").is_file();
+    checkpoint_ready || anima_ready
+}
+
+fn contains_safetensors(directory: &Path) -> bool {
+    fs::read_dir(directory).ok().into_iter().flatten().filter_map(Result::ok).any(|entry| entry.path().is_file() && entry.path().extension().is_some_and(|extension| extension.to_string_lossy().eq_ignore_ascii_case("safetensors")))
 }
 
 fn issue(code: &str, severity: &str, title: &str, message: &str, action: &str) -> EnvironmentIssue { EnvironmentIssue { code: code.into(), severity: severity.into(), title: title.into(), message: message.into(), action: action.into() } }

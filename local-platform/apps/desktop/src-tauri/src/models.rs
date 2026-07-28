@@ -7,7 +7,130 @@ use serde::{Deserialize, Serialize};
 pub struct DesktopBootstrapView {
     pub environment: DesktopEnvironmentReport,
     pub settings: DesktopSettings,
+    pub runtime: DesktopRuntimeStatusView,
     pub pending_gallery_sync_count: u64,
+}
+
+/** 桌面核心托管的 ComfyUI 子进程状态。 */
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopRuntimeStatusView {
+    pub status: String,
+    pub pid: Option<u32>,
+    pub port: Option<u16>,
+    pub started_at: Option<String>,
+    pub checked_at: String,
+    pub log_path: Option<String>,
+    pub error: Option<String>,
+}
+
+/** 已复制到受控目录并持久登记的本地底模。 */
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopLocalModelView {
+    pub id: String,
+    pub display_name: String,
+    pub family: String,
+    pub workflow_kind: String,
+    pub model_file_name: String,
+    pub model_sha256: String,
+    pub byte_size: u64,
+    pub text_encoder_file_name: Option<String>,
+    pub vae_file_name: Option<String>,
+    pub available: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/** 从用户已有 safetensors 文件导入本地底模的输入。 */
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopLocalModelImportInput {
+    pub display_name: String,
+    pub family: String,
+    pub workflow_kind: String,
+    pub model_source_path: String,
+    pub text_encoder_source_path: Option<String>,
+    pub vae_source_path: Option<String>,
+}
+
+/** 提交到本机串行调度器的生成参数。 */
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopLocalJobCreateInput {
+    pub model_id: String,
+    pub prompt: String,
+    pub negative_prompt: Option<String>,
+    pub width: u32,
+    pub height: u32,
+    pub steps: u32,
+    pub cfg: f64,
+    pub sampler_name: String,
+    pub scheduler_name: String,
+    pub seed: Option<u32>,
+    pub privacy: String,
+}
+
+/** 本地生成任务的不可变采样参数快照。 */
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopLocalJobParametersView {
+    pub width: u32,
+    pub height: u32,
+    pub steps: u32,
+    pub cfg: f64,
+    pub sampler_name: String,
+    pub scheduler_name: String,
+    pub seed: u32,
+}
+
+/** 本地生成任务产物摘要。 */
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopLocalArtifactView {
+    pub path: String,
+    pub sha256: String,
+    pub byte_size: u64,
+    pub mime_type: String,
+    pub width: u32,
+    pub height: u32,
+}
+
+/** 本地任务每次 Runtime 执行的持久审计记录。 */
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopLocalJobAttemptView {
+    pub id: String,
+    pub attempt_number: u32,
+    pub status: String,
+    pub runtime_prompt_id: Option<String>,
+    pub error: Option<String>,
+    pub started_at: String,
+    pub completed_at: Option<String>,
+}
+
+/** SQLite 中持久化的本地生成任务视图。 */
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopLocalJobView {
+    pub id: String,
+    pub status: String,
+    pub progress: u32,
+    pub prompt: String,
+    pub negative_prompt: Option<String>,
+    pub model_id: String,
+    pub model_display_name: String,
+    pub model_sha256: String,
+    pub parameters: DesktopLocalJobParametersView,
+    pub privacy: String,
+    pub runtime_prompt_id: Option<String>,
+    pub error: Option<String>,
+    pub attempts: Vec<DesktopLocalJobAttemptView>,
+    pub artifact: Option<DesktopLocalArtifactView>,
+    pub created_at: String,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub updated_at: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -1,5 +1,5 @@
 /** 本文件封装 WebView 到 Tauri 本地核心的受类型约束命令。 */
-import type { DesktopBootstrapView, DesktopEnvironmentReport, DesktopGalleryPrivacy, DesktopGallerySyncItem, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopSettings, DesktopSettingsUpdate } from "@drawhime/contracts";
+import type { DesktopBootstrapView, DesktopEnvironmentReport, DesktopGalleryPrivacy, DesktopGallerySyncItem, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView, DesktopSettings, DesktopSettingsUpdate } from "@drawhime/contracts";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
@@ -23,3 +23,23 @@ export function listenDesktopResourceProgress(handler: (progress: DesktopResourc
 export function installDesktopResource(resourceId: string): Promise<DesktopResourceInstallView> { return invoke("desktop_install_resource", { resourceId }); }
 /** 监听资源校验、解压、切换和回滚进度。 */
 export function listenDesktopResourceInstallProgress(handler: (progress: DesktopResourceInstallView) => void): Promise<UnlistenFn> { return listen<DesktopResourceInstallView>("desktop-resource-install-progress", (event) => handler(event.payload)); }
+/** 读取当前 ComfyUI 子进程的真实状态。 */
+export function loadDesktopRuntimeStatus(): Promise<DesktopRuntimeStatusView> { return invoke("desktop_runtime_status"); }
+/** 启动受控回环 Runtime 并等待健康探测通过。 */
+export function startDesktopRuntime(): Promise<DesktopRuntimeStatusView> { return invoke("desktop_start_runtime"); }
+/** 幂等停止当前桌面核心创建的 Runtime。 */
+export function stopDesktopRuntime(): Promise<DesktopRuntimeStatusView> { return invoke("desktop_stop_runtime"); }
+/** 执行 GPU 与核心节点自检并更新 Runtime 就绪状态。 */
+export function selfTestDesktopRuntime(): Promise<DesktopRuntimeStatusView> { return invoke("desktop_self_test_runtime"); }
+/** 导入并登记本机已有 safetensors 模型。 */
+export function importDesktopLocalModel(input: DesktopLocalModelImportInput): Promise<DesktopLocalModelView> { return invoke("desktop_import_local_model", { input }); }
+/** 读取当前设备已登记模型。 */
+export function listDesktopLocalModels(): Promise<DesktopLocalModelView[]> { return invoke("desktop_list_local_models"); }
+/** 持久化创建本地生成任务并立即返回。 */
+export function createDesktopLocalJob(input: DesktopLocalJobCreateInput): Promise<DesktopLocalJobView> { return invoke("desktop_create_local_job", { input }); }
+/** 读取当前设备最近本地生成任务。 */
+export function listDesktopLocalJobs(): Promise<DesktopLocalJobView[]> { return invoke("desktop_list_local_jobs"); }
+/** 取消排队中或运行中的本地任务。 */
+export function cancelDesktopLocalJob(id: string): Promise<DesktopLocalJobView> { return invoke("desktop_cancel_local_job", { id }); }
+/** 监听 SQLite 已持久化的任务状态更新。 */
+export function listenDesktopLocalJobUpdates(handler: (job: DesktopLocalJobView) => void): Promise<UnlistenFn> { return listen<DesktopLocalJobView>("desktop-local-job-updated", (event) => handler(event.payload)); }
