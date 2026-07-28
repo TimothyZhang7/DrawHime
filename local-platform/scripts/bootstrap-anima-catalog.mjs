@@ -14,7 +14,7 @@ const defaultTrainingPriceCny = "0.80";
 const sharedDefaults = { width: 1024, height: 1024, maxEdge: 1536, maxAttempts: 3, promptEnhancementEnabled: true, pricingVersion: defaultPricingVersion, priceCny: defaultPriceCny, trainingProductCode: defaultTrainingProductCode, trainingPricingVersion: defaultTrainingPricingVersion, trainingPriceCny: defaultTrainingPriceCny };
 const defaultNegativePrompt = "worst quality, low quality, score_1, score_2, score_3, artist name";
 
-// 模型文件名、哈希、CFG 与采样器来自对应 Civitai 版本；完整底模使用 24 步与 1152 潜空间长边，在生产 P40 上以约三分钟起步换取更完整的细节收敛。
+// 模型文件名、哈希、CFG 与采样器来自对应版本；像素预算按生产 P40 历史中位数校准到约 240 秒。
 const modelCatalog = [
   {
     workflowVersion: 1,
@@ -27,7 +27,7 @@ const modelCatalog = [
     sourceVersionId: null,
     sha256: null,
     byteSize: 4182218328,
-    parameters: { profileRevision: 1, steps: 8, cfg: 1, sampler: "er_sde", scheduler: "simple", samplingMaxEdge: 1536, qualityPrefix: "masterpiece, best quality, score_7", defaultNegativePrompt, systemHighresLoraEnabled: true },
+    parameters: { profileRevision: 2, targetSeconds: 240, steps: 12, cfg: 1, sampler: "er_sde", scheduler: "simple", samplingMaxEdge: 2048, samplingPixelBudget: 2359296, samplingPixelBudgetAspectSlope: 0, qualityPrefix: "masterpiece, best quality, score_7", defaultNegativePrompt, systemHighresLoraEnabled: true },
   },
   {
     workflowVersion: 8,
@@ -40,7 +40,7 @@ const modelCatalog = [
     sourceVersionId: 3047288,
     sha256: "8E279F111ED7E7EA214EA61850E002F700CCE55A8CD027675796773089B3C739",
     byteSize: 4182218504,
-    parameters: { profileRevision: 3, steps: 24, cfg: 4, sampler: "er_sde", scheduler: "simple", samplingMaxEdge: 1152, qualityPrefix: "masterpiece, best quality, score_7, very aesthetic", defaultNegativePrompt: `${defaultNegativePrompt}, blurry, jpeg artifacts, sepia, muscular female`, systemHighresLoraEnabled: false },
+    parameters: { profileRevision: 4, targetSeconds: 240, steps: 24, cfg: 4, sampler: "er_sde", scheduler: "simple", samplingMaxEdge: 1536, samplingPixelBudget: 900000, samplingPixelBudgetAspectSlope: 130000, qualityPrefix: "masterpiece, best quality, score_7, very aesthetic", defaultNegativePrompt: `${defaultNegativePrompt}, blurry, jpeg artifacts, sepia, muscular female`, systemHighresLoraEnabled: false },
   },
   {
     workflowVersion: 9,
@@ -53,7 +53,7 @@ const modelCatalog = [
     sourceVersionId: 3071702,
     sha256: "D33247D48A9C15A872AEF963940FC87362F925E3E087365810AD747042FCC454",
     byteSize: 4182218328,
-    parameters: { profileRevision: 3, steps: 24, cfg: 4, sampler: "euler_ancestral", scheduler: "normal", samplingMaxEdge: 1152, qualityPrefix: "best quality, score_7, score_9, very aesthetic, ultra detailed, fair skin, high contrast, photorealistic, raw photo, photo background", defaultNegativePrompt, systemHighresLoraEnabled: false },
+    parameters: { profileRevision: 4, targetSeconds: 240, steps: 24, cfg: 4, sampler: "euler_ancestral", scheduler: "normal", samplingMaxEdge: 1536, samplingPixelBudget: 900000, samplingPixelBudgetAspectSlope: 130000, qualityPrefix: "best quality, score_7, score_9, very aesthetic, ultra detailed, fair skin, high contrast, photorealistic, raw photo, photo background", defaultNegativePrompt, systemHighresLoraEnabled: false },
   },
   {
     workflowVersion: 10,
@@ -66,7 +66,7 @@ const modelCatalog = [
     sourceVersionId: 3074791,
     sha256: "0707CBE8DEED6C858A6BA8DFBCFE2006E3A4FD44C099AAFD048400FDEC1866DD",
     byteSize: 4182218328,
-    parameters: { profileRevision: 3, steps: 24, cfg: 4, sampler: "euler_ancestral", scheduler: "normal", samplingMaxEdge: 1152, qualityPrefix: "best quality, score_7, score_9, very aesthetic, ultra detailed, high contrast", defaultNegativePrompt, systemHighresLoraEnabled: false },
+    parameters: { profileRevision: 4, targetSeconds: 240, steps: 24, cfg: 4, sampler: "euler_ancestral", scheduler: "normal", samplingMaxEdge: 1536, samplingPixelBudget: 900000, samplingPixelBudgetAspectSlope: 130000, qualityPrefix: "best quality, score_7, score_9, very aesthetic, ultra detailed, high contrast", defaultNegativePrompt, systemHighresLoraEnabled: false },
   },
 ];
 
@@ -102,7 +102,7 @@ try {
       model: catalog.fileName,
       modelSha256: catalog.sha256,
       sourceVersionId: catalog.sourceVersionId,
-      sampling: { steps: effectiveDefaults.steps, cfg: effectiveDefaults.cfg, sampler: effectiveDefaults.sampler, scheduler: effectiveDefaults.scheduler, maxEdge: effectiveDefaults.samplingMaxEdge },
+      sampling: { targetSeconds: effectiveDefaults.targetSeconds, steps: effectiveDefaults.steps, cfg: effectiveDefaults.cfg, sampler: effectiveDefaults.sampler, scheduler: effectiveDefaults.scheduler, maxEdge: effectiveDefaults.samplingMaxEdge, pixelBudget: effectiveDefaults.samplingPixelBudget, aspectSlope: effectiveDefaults.samplingPixelBudgetAspectSlope },
       systemLoras: effectiveDefaults.systemHighresLoraEnabled === false ? [] : ["anima-turbo-lora-v0.2.safetensors", "anima-highres-aesthetic-boost.safetensors"],
       clip: "qwen_3_06b_base.safetensors",
       vae: "qwen_image_vae.safetensors",

@@ -1,7 +1,7 @@
 /** 本文件验证 Anima 工作流始终把正面与负面提示词映射到独立 conditioning。 */
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildAnimaWorkflow } from "./index.js";
+import { buildAnimaWorkflow, fitAnimaSamplingSize } from "./index.js";
 
 test("正面与负面提示词分别进入节点 6 和节点 7", () => {
   const workflow = buildAnimaWorkflow({
@@ -77,4 +77,12 @@ test("完整微调底模按顺序应用用户 LoRA 并恢复最终输出尺寸",
   assert.equal(workflow["90"]?.inputs?.width, 1536);
   assert.equal(workflow["90"]?.inputs?.height, 1024);
   assert.deepEqual(workflow["11"]?.inputs?.["🖼️ 图像"] as [string, number], ["90", 0]);
+});
+
+test("模型级像素预算按画幅统一采样工作量并允许内部超采样", () => {
+  assert.deepEqual(fitAnimaSamplingSize(1536, 1536, 1536, 900000, 130000), [952, 952]);
+  assert.deepEqual(fitAnimaSamplingSize(1536, 864, 1536, 900000, 130000), [1336, 752]);
+  assert.deepEqual(fitAnimaSamplingSize(1024, 1024, 2048, 2359296, 0), [1536, 1536]);
+  const baseSmall = buildAnimaWorkflow({ baseUrl: "http://runtime", modelFileName: "anima-base-v1.0.safetensors", prompt: "small", width: 1536, height: 1536, outputWidth: 1024, outputHeight: 1024, clientId: "small", steps: 12 }) as Record<string, { inputs?: Record<string, unknown> }>;
+  assert.deepEqual(baseSmall["90"]?.inputs, { image: ["10", 0], upscale_method: "lanczos", width: 1024, height: 1024, crop: "disabled" });
 });

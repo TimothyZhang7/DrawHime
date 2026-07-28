@@ -2,6 +2,7 @@
  * 本文件实现已在主站生产验证的 Anima ComfyUI 工作流、尺寸约束、提交、轮询和产物下载。
  */
 const ANIMA_MAX_EDGE = 1536;
+const ANIMA_SAMPLING_MAX_EDGE = 2048;
 const SIZE_ALIGNMENT = 8;
 const TURBO_LORA = "anima-turbo-lora-v0.2.safetensors";
 const HIGHRES_LORA = "anima-highres-aesthetic-boost.safetensors";
@@ -39,6 +40,10 @@ export interface AnimaGenerationInput {
   systemHighresLoraEnabled?: boolean;
   /** 扩散采样最长边；可低于最终输出边长以控制单图耗时。 */
   samplingMaxEdge?: number;
+  /** 模型级采样像素预算；按画幅动态换算潜空间尺寸以稳定不同画幅耗时。 */
+  samplingPixelBudget?: number;
+  /** 宽高比每偏离正方形 1 倍时增加的像素预算，用于补偿宽幅 GPU 利用率差异。 */
+  samplingPixelBudgetAspectSlope?: number;
   /** 工作流内部最终输出宽度；仅由 Runtime 在尺寸归一化后写入。 */
   outputWidth?: number;
   /** 工作流内部最终输出高度；仅由 Runtime 在尺寸归一化后写入。 */
@@ -62,7 +67,7 @@ export interface AnimaGenerationResult {
 export async function generateAnimaImage(input: AnimaGenerationInput): Promise<AnimaGenerationResult> {
   const baseUrl = input.baseUrl.replace(/\/$/, "");
   const [width, height] = fitSize(input.width, input.height);
-  const [samplingWidth, samplingHeight] = fitSizeWithin(width, height, normalizeSamplingMaxEdge(input.samplingMaxEdge));
+  const [samplingWidth, samplingHeight] = fitAnimaSamplingSize(width, height, normalizeSamplingMaxEdge(input.samplingMaxEdge), input.samplingPixelBudget, input.samplingPixelBudgetAspectSlope);
   const prompt = buildAnimaWorkflow({ ...input, width: samplingWidth, height: samplingHeight, outputWidth: width, outputHeight: height });
   // 独立平台已经完成钱包预留和 GPU 租约，进入 ComfyUI 时放到受控队列前部，避免旧直连链路积压使已计费任务长期停留在运行中。
   const requestJson = { prompt, client_id: input.clientId, front: true };
@@ -155,6 +160,19 @@ function fitSizeWithin(width: number, height: number, maxEdge: number): [number,
   return [alignDimension(safeWidth * scale, maxEdge), alignDimension(safeHeight * scale, maxEdge)];
 }
 
+/** 按模型像素预算统一不同画幅的采样工作量；未配置预算时保持旧版只缩不放逻辑。 */
+export function fitAnimaSamplingSize(width: number, height: number, maxEdge: number, pixelBudget?: number, aspectSlope?: number): [number, number] {
+  const normalizedBudget = normalizeSamplingPixelBudget(pixelBudget);
+  if (!normalizedBudget) return fitSizeWithin(width, height, maxEdge);
+  const safeWidth = Number.isFinite(width) && width > 0 ? width : ANIMA_MAX_EDGE;
+  const safeHeight = Number.isFinite(height) && height > 0 ? height : ANIMA_MAX_EDGE;
+  const aspect = Math.max(safeWidth, safeHeight) / Math.min(safeWidth, safeHeight);
+  const slope = Number.isFinite(aspectSlope) ? Math.max(0, Math.min(1_000_000, Number(aspectSlope))) : 0;
+  const targetPixels = Math.min(4_194_304, normalizedBudget + Math.min(1, aspect - 1) * slope);
+  const scale = Math.min(maxEdge / Math.max(safeWidth, safeHeight), Math.sqrt(targetPixels / (safeWidth * safeHeight)));
+  return [alignDimension(safeWidth * scale, maxEdge), alignDimension(safeHeight * scale, maxEdge)];
+}
+
 /** 补齐官方质量标签且不重复用户已有标签。 */
 function withQualityPrefix(value: string, configuredPrefix?: string): string {
   const prompt = value.trim();
@@ -186,7 +204,12 @@ function normalizeScheduler(value: string | undefined): string {
 
 /** 将模型级采样边长限制在兼顾质量和吞吐的有效范围。 */
 function normalizeSamplingMaxEdge(value: number | undefined): number {
-  return Number.isSafeInteger(value) && Number(value) >= 512 && Number(value) <= ANIMA_MAX_EDGE ? Number(value) : ANIMA_MAX_EDGE;
+  return Number.isSafeInteger(value) && Number(value) >= 512 && Number(value) <= ANIMA_SAMPLING_MAX_EDGE ? Number(value) : ANIMA_MAX_EDGE;
+}
+
+/** 将模型级采样像素预算限制在 512² 到 2048²，异常值回退旧尺寸逻辑。 */
+function normalizeSamplingPixelBudget(value: number | undefined): number | null {
+  return Number.isFinite(value) && Number(value) >= 262_144 && Number(value) <= 4_194_304 ? Number(value) : null;
 }
 
 /** 归一化最终输出维度，禁止内部调用绕过平台最大边长。 */

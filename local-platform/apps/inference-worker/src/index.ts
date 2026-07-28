@@ -125,7 +125,9 @@ async function processJob(jobId: string): Promise<void> {
       qualityPrefix: readOptionalString(modelDefaults.qualityPrefix),
       defaultNegativePrompt: readOptionalString(modelDefaults.defaultNegativePrompt),
       systemHighresLoraEnabled: modelDefaults.systemHighresLoraEnabled !== false,
-      samplingMaxEdge: readBoundedInteger(modelDefaults.samplingMaxEdge, 512, 1536),
+      samplingMaxEdge: readBoundedInteger(modelDefaults.samplingMaxEdge, 512, 2048),
+      samplingPixelBudget: readBoundedInteger(modelDefaults.samplingPixelBudget, 262_144, 4_194_304),
+      samplingPixelBudgetAspectSlope: readBoundedInteger(modelDefaults.samplingPixelBudgetAspectSlope, 0, 1_000_000),
       onSubmitted: async (runtimeJobId, requestJson) => {
         await database.inferenceAttempt.update({ where: { id: attempt.id }, data: { runtimeJobId, requestJson: requestJson as Prisma.InputJsonObject } });
       },
