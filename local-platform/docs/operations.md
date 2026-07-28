@@ -1,0 +1,79 @@
+# 生产运维执行规范
+
+## 唯一标准链路
+
+本项目默认按以下顺序完成一次代码或配置变更。任何步骤失败都停在当前步骤，修正并重跑后再继续。
+
+1. **发现**：确认工作目录、`git status --short`、适用 `AGENTS.md`；通过 `rg --files` 定位真实文档和源码。
+2. **理解**：完整阅读 API、scheduler、Worker、Runtime、数据库最终状态和主站集成链路；跨程序类型先更新 `docs/interfaces/README.md` 与 `packages/contracts`。
+3. **修改**：只修改本次范围，执行 `git diff --check`，不得处理无关工作树内容。
+4. **最小验证**：开发迭代只运行受影响包的 `type-check` 或测试。部署脚本会执行 `db:validate`、全仓类型检查、测试和构建，因此正式部署前不再手工重复整套命令。
+5. **生产预检**：检查本地 diff、私有配置键是否齐全、生产 `/health`/`/ready`、数据库活动任务和脱敏后的 ComfyUI 队列计数；运行部署 `--dry-run`。
+6. **部署**：前端单独变化使用 `--target web`；服务、目录、Runtime 或模型配置变化使用完整部署。部署期间不得覆盖生产 `.env`、余额、对象存储、LoRA、媒体或数据库。
+7. **验收**：验证六个服务 `/health`、API `/ready`、公网用户端和 API；模型变化额外查询模型目录、最新工作流版本和实际 Runtime 节点参数。
+8. **提交**：仅在部署与验收成功后，用明确路径暂存，执行暂存区 diff 检查并创建本地提交。
+9. **公开同步**：把已部署源码和文档同步到 `DrawHime-public/local-platform`，先做逐文件比较，再提交、推送并核对远端 SHA。
+
+## 快速命令骨架
+
+普通服务或模型配置变更：
+
+```powershell
+git status --short
+git diff --check
+pnpm --filter @drawhime/<affected-package> run type-check
+node scripts/deploy-production.mjs --dry-run
+node scripts/deploy-production.mjs
+git add -- <明确路径>
+git diff --cached --check
+git commit -m "<类型>: <中文摘要>"
+```
+
+只修改用户前端：
+
+```powershell
+pnpm --filter @drawhime/web run type-check
+node scripts/deploy-production.mjs --target web --dry-run
+node scripts/deploy-production.mjs --target web
+```
+
+文档独立修改不重启运行服务；完成链接、Markdown、diff、提交和公开同步检查即可。训练 Runtime 变化使用 `node scripts/deploy-training-runtime.mjs --dry-run` 后再正式部署，不与平台部署命令混用。
+
+## 生产队列规则
+
+- 查询独立数据库中的 `READY/RUNNING` 数量和 ComfyUI `running/pending` 数量，禁止输出完整队列对象。
+- 部署会重载 Worker 前，应优先等待正在执行的不可中断任务完成；等待必须设置总截止时间。
+- 生产已有用户队列时，不提交会插队的合成测试。使用真实任务审计、动态工作流构建测试和脱敏参数核验完成验收。
+- 必须执行生成实测时，测试任务进入正常调度和计费链路，或者在明确的维护窗口使用不抢占用户任务的测试队列。
+
+## 已发生错误与预防
+
+| 错误 | 强制预防措施 |
+|---|---|
+| 读取仓库中不存在的部署文档 | 先运行 `rg --files docs`，只读取返回的真实路径 |
+| `rg` 使用未闭合正则 | 固定文本一律使用 `rg -F`，多条件拆开执行 |
+| PowerShell/SSH 引号导致远端 URL 失真 | 多行脚本经标准输入发送，远端脚本自行展开环境变量 |
+| 压缩的远端 JavaScript 括号错误 | 保持多行结构；复杂查询写成可审计脚本并先检查语法 |
+| 一次 ComfyUI 连接超时终止轮询 | 捕获异常并退避重试，用 `/ready`、端口和进程交叉判断 |
+| 手工全仓验证后部署脚本再次验证 | 迭代只跑最小检查，完整门禁只交给部署脚本一次 |
+| 查询队列时输出用户提示词 | 数据库与 Runtime 查询显式投影必要字段，不输出 prompt、图片和凭证 |
+| 并行诊断因单条命令失败丢失其他输出 | 独立诊断使用 `Promise.allSettled`，允许无匹配的搜索不作为整批失败 |
+| `apply_patch` 上下文不精确导致补丁失败 | 先用 `rg -n -F` 核对原文并使用最小上下文；失败后重新读取目标行再重试 |
+| 公开导出 README 整文件比较被相对链接差异阻断 | 只核验本次新增片段；对公开目录必须保留的路径适配建立明确允许差异 |
+
+## 失败分支
+
+- 本地检查失败：修复源码或测试，只重跑失败的目标检查，成功后再 dry-run。
+- dry-run 失败：修正私有配置、目标或连接，不上传任何文件。
+- 部署失败：保留脚本输出和生产备份，修复后重新完整部署及验收；此时不创建部署提交。
+- 健康检查失败：检查 PM2、依赖和 Runtime，就绪前不把 HTTP 存活当作业务成功。
+- Git 提交失败：确认暂存路径和 diff，不使用全量 `git add .`，不回滚用户无关改动。
+
+## 验收清单
+
+- 本次目标的本地最小检查成功。
+- dry-run 与正式部署成功且只影响预期目标。
+- API、scheduler、GPU Agent、推理 Worker、训练 Worker、产物服务均返回健康状态。
+- 必要的 readiness、数据库连接、公网页面和关键业务配置验证成功。
+- 没有打印或提交生产凭证、用户提示词、媒体、模型权重和数据库内容。
+- 本地部署提交只包含本次已部署文件；公开仓库内容与本地提交一致。

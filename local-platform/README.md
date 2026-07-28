@@ -24,7 +24,7 @@ DrawHime 是面向本地生成模型的独立推理、LoRA 管理与训练平台
 | `training-worker` | 7112 | 打标、训练、退款和 LoRA 草稿闭环 |
 | `artifact-service` | 7113 | 产物控制面 |
 
-更完整的职责边界见 [`docs/architecture.md`](docs/architecture.md)，跨程序契约见 [`docs/interfaces/README.md`](docs/interfaces/README.md)。
+更完整的职责边界见 [`docs/architecture.md`](docs/architecture.md)，跨程序契约见 [`docs/interfaces/README.md`](docs/interfaces/README.md)，生产执行顺序与命令约束见 [`docs/operations.md`](docs/operations.md)。
 
 ## 快速开始
 
