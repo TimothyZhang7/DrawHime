@@ -63,7 +63,7 @@
 | `POST /v1/training/datasets/:id/assets` | web | api | 上传训练图片，服务端统一方向、色彩空间与 WebP 编码后写入独立对象存储并记录 SHA-256 |
 | `PATCH/DELETE /v1/training/datasets/:id/assets/:assetId` | web | api | 编辑单图 Caption 或删除未被训练任务引用的数据集图片和对象 |
 | `PATCH /v1/training/datasets/:id/trigger-words` | main-web/web | api | 更新数据集触发词并原子同步所有图片 Caption；每图保留自动注入快照，动态替换时不删除用户手工标签 |
-| `GET /v1/training/datasets/:id/trigger-words/summary` | main-web/web | api | 返回每张图片 Caption 的公共标签、用户触发词及两者并集，不修改训练集数据 |
+| `GET /v1/training/datasets/:id/trigger-words/summary` | main-web/web | api | 返回每张图片 Caption 的精确公共标签、同义归一化稳定共识标签、用户触发词及最终并集，不修改训练集数据 |
 | `GET /v1/training/datasets/:id/archive` | main-web/web | api | 鉴权后流式导出当前训练集 ZIP；每张 WebP 图片都配套一个同名 UTF-8 `.txt` Caption，任一对象读取失败时终止整个归档而不静默跳图 |
 | `POST /v1/training/datasets/:id/caption-jobs` | web | api/training-worker | 持久化创建角色、画风或概念自动打标任务；Worker 逐图读取独立对象并写入英文 Caption |
 | `POST /v1/training/datasets/:id/caption-jobs/:jobId/confirm` | web | api | 校验图片快照与全部 Caption 后由用户确认；图片变化会把旧确认标为失效 |

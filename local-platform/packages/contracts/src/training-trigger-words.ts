@@ -28,9 +28,40 @@ export function mergeCaptionWithTriggerWords(caption: string | null, previouslyA
 }
 
 /** 汇总每张图片共有标签，并始终包含用户主动设定的触发词。 */
-export function summarizeTrainingTriggerWords(captions: readonly (string | null)[], triggerWords: readonly string[]): { triggerWords: string[]; commonTags: string[]; summaryTags: string[] } {
+export function summarizeTrainingTriggerWords(captions: readonly (string | null)[], triggerWords: readonly string[]): { triggerWords: string[]; commonTags: string[]; consensusTags: string[]; summaryTags: string[] } {
   const normalizedTriggers = normalizeTrainingTags(triggerWords);
   const tagSets = captions.map((caption) => normalizeTrainingTags([caption || ""]));
   const commonTags = tagSets.length === 0 ? [] : tagSets[0]!.filter((tag) => tagSets.every((tags) => tags.includes(tag)));
-  return { triggerWords: normalizedTriggers, commonTags, summaryTags: normalizeTrainingTags([...normalizedTriggers, ...commonTags]) };
+  const consensusTags = summarizeConsensusTags(tagSets, normalizedTriggers);
+  return { triggerWords: normalizedTriggers, commonTags, consensusTags, summaryTags: normalizeTrainingTags([...normalizedTriggers, ...consensusTags]) };
+}
+
+/**
+ * 从自动打标常见的同义写法中提取稳定共识；七成图片出现即可保留，避免个别漏标导致真实角色特征被丢弃。
+ * 返回的标签只用于辅助用户设置触发词，不会自动回写训练图片 Caption。
+ */
+function summarizeConsensusTags(tagSets: readonly string[][], triggerWords: readonly string[]): string[] {
+  if (tagSets.length === 0) return [];
+  const triggerSet = new Set(triggerWords);
+  const appearances = new Map<string, number>();
+  for (const tags of tagSets) {
+    const normalized = new Set(tags.map(canonicalizeConsensusTag));
+    for (const tag of normalized) if (!triggerSet.has(tag)) appearances.set(tag, (appearances.get(tag) || 0) + 1);
+  }
+  const required = Math.max(1, Math.ceil(tagSets.length * 0.7));
+  return [...appearances.entries()]
+    .filter(([, count]) => count >= required)
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .map(([tag]) => tag)
+    .slice(0, 100);
+}
+
+/** 把自动打标的颜色、长度和饰品近义词收敛为可读且可复用的角色特征标签。 */
+function canonicalizeConsensusTag(tag: string): string {
+  if (/\b(?:aqua|cyan|turquoise|light blue|blue)\b.*\bhair\b/.test(tag) && !/\b(?:ribbons?|bows?|ornament|accessor)/.test(tag)) return "blue hair";
+  if (/\b(?:pink|purple|lavender)\b.*\bhair\b.*\b(?:streaks?|tips?|gradient)\b/.test(tag)) return "pink-purple hair accent";
+  if (/\bheart(?:-shaped)?\b.*\b(?:ahoge|hair|ornament|accessory|strand)\b/.test(tag)) return "heart hair feature";
+  if (/\b(?:blue|aqua|cyan|turquoise)\b.*\b(?:ribbons?|bows?)\b/.test(tag)) return "blue hair ribbon";
+  if (/\b(?:horn|antler)\b.*\b(?:headpiece|hair ornament|hair accessory|ornament)\b/.test(tag)) return "horn-like headpiece";
+  return tag;
 }

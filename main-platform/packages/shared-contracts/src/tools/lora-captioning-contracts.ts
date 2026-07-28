@@ -84,10 +84,11 @@ export interface LocalCaptioningTranslationListView {
   translations: LocalCaptioningTagTranslationView[];
 }
 
-/** 当前数据集的触发词与全部图片共有标签汇总。 */
+/** 当前数据集的触发词、精确交集和同义归一化稳定共识标签汇总。 */
 export interface LocalCaptioningTriggerSummaryView {
   triggerWords: string[];
   commonTags: string[];
+  consensusTags: string[];
   summaryTags: string[];
 }
 

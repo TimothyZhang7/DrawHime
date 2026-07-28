@@ -585,10 +585,11 @@ export const trainingDatasetAssetUpdateRequestSchema = z.object({ caption: z.str
 /** 训练集触发词更新请求，空数组表示移除自动注入规则。 */
 export const trainingDatasetTriggerWordsUpdateRequestSchema = z.object({ triggerWords: z.array(z.string().trim().max(200)).max(100) });
 
-/** 训练集触发词汇总结果，公共标签为每张图片 Caption 的交集。 */
+/** 训练集触发词汇总结果，包含精确交集与同义归一化后的稳定共识标签。 */
 export const trainingDatasetTriggerSummaryViewSchema = z.object({
   triggerWords: z.array(z.string()).max(100),
   commonTags: z.array(z.string()).max(10000),
+  consensusTags: z.array(z.string()).max(10000),
   summaryTags: z.array(z.string()).max(10000),
 });
 
