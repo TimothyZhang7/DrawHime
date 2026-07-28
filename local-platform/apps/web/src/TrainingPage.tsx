@@ -27,7 +27,11 @@ export function TrainingPage({ token, models }: { token: string; models: Inferen
       ]);
       setDatasets(datasetPayload.datasets);
       setJobs(jobPayload.jobs);
-      setSelectedId((current) => datasetPayload.datasets.some((item) => item.id === current) ? current : datasetPayload.datasets[0]?.id || "");
+      setSelectedId((current) => {
+        const requested = new URLSearchParams(window.location.search).get("dataset") || "";
+        if (requested && datasetPayload.datasets.some((item) => item.id === requested)) return requested;
+        return datasetPayload.datasets.some((item) => item.id === current) ? current : datasetPayload.datasets[0]?.id || "";
+      });
       if (!quiet) setMessage("");
     } catch (error) { setMessage(errorMessage(error)); }
     finally { if (!quiet) setLoading(false); }

@@ -5,6 +5,7 @@ import {
   trainingDatasetAssetUpdateRequestSchema,
   trainingCaptionJobCreateRequestSchema,
   trainingDatasetCreateRequestSchema,
+  trainingTagTranslationRequestSchema,
   trainingJobCreateRequestSchema,
   trainingPriceQuoteRequestSchema,
   type TrainingCaptionStageView,
@@ -20,6 +21,7 @@ import type { IncomingMessage } from "node:http";
 import sharp from "sharp";
 import { Prisma } from "@prisma/client";
 import { calculateTrainingPrice } from "./training-pricing.js";
+import { translateTrainingTags } from "./training-tag-translation.js";
 
 const trainingQueue = new TrainingQueue();
 const maximumDatasetImageBytes = 25 * 1024 * 1024;
@@ -27,6 +29,14 @@ type SessionRecord = { externalIdentity: { id: string; subject: string; displayN
 
 /** 注册用户训练数据集与任务路由。 */
 export function registerTrainingRoutes(router: ServiceRouter, findSession: (token: string | null) => Promise<SessionRecord | null>): void {
+  router.post("/v1/training/tag-translations", async ({ request, response }) => {
+    const session = await requireSession(request, response, findSession); if (!session) return;
+    try {
+      const input = trainingTagTranslationRequestSchema.parse(await readJsonBody<unknown>(request));
+      sendSuccess(response, await translateTrainingTags(input.tags));
+    } catch (error) { sendTrainingError(response, error); }
+  });
+
   router.get("/internal/training/assets/:artifactId/content", async ({ request, response, params }) => {
     if (!authenticateTrainingRuntime(request)) return sendError(response, 403, "training_runtime_token_invalid", "训练 Runtime 服务凭证不正确");
     const artifact = await database.jobArtifact.findFirst({ where: { id: params.artifactId, kind: "DATASET_ASSET", datasetAssets: { some: { dataset: { status: "ACTIVE" } } } } });
@@ -140,7 +150,8 @@ export function registerTrainingRoutes(router: ServiceRouter, findSession: (toke
       const input = trainingCaptionJobCreateRequestSchema.parse(await readJsonBody<unknown>(request));
       const dataset = await findOwnedMutableDataset(params.id, session.externalIdentity.id);
       ensureCaptionMutationAllowed(dataset.captionJobs[0]);
-      if (dataset._count.assets < 5) throw new TrainingRouteError(400, "dataset_assets_insufficient", "自动打标至少需要 5 张训练图片");
+      // 打标工具允许先处理单张图片；正式训练仍在任务创建处要求至少 5 张已确认图片。
+      if (dataset._count.assets < 1) throw new TrainingRouteError(400, "dataset_assets_insufficient", "自动打标至少需要 1 张训练图片");
       const assets = await database.datasetAsset.findMany({ where: { datasetId: dataset.id }, orderBy: { createdAt: "asc" }, select: { id: true } });
       const job = await database.$transaction(async (tx) => {
         await tx.trainingCaptionJob.updateMany({ where: { datasetId: dataset.id, status: { in: ["AWAITING_CONFIRMATION", "CONFIRMED"] } }, data: { status: "STALE", errorMessage: "已创建新的自动打标任务" } });

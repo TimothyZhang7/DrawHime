@@ -27,6 +27,7 @@ export * from './recharge/recharge-contracts.js';
 export * from './referral/referral-contracts.js';
 export * from './templates/template-contracts.js';
 export * from './tools/tools-contracts.js';
+export * from './tools/lora-captioning-contracts.js';
 export * from './users/user-avatar-contracts.js';
 export * from './users/user-appearance-contracts.js';
 export * from './users/user-model-preference-contracts.js';

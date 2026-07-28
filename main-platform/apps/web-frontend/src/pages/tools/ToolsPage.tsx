@@ -1,6 +1,6 @@
 /** 本页面只展示工具入口，不承载具体工具操作，保证后续工具扩展时入口页稳定。 */
 import { Link } from 'react-router-dom';
-import { ArrowRight, Grid3X3, ImageDown, ImageUpscale, MessageSquareText, ScanSearch, Shuffle, Waves, Wrench } from 'lucide-react';
+import { ArrowRight, Grid3X3, ImageDown, ImageUpscale, MessageSquareText, ScanSearch, Shuffle, Tags, Waves, Wrench } from 'lucide-react';
 import { Seo } from '../../components/Seo';
 import { toolEntries } from './tools-registry';
 import { useToolsConfig } from './useToolsConfig';
@@ -30,7 +30,7 @@ export function ToolsPage() {
           const config = tool.configId ? getToolConfig(tool.configId) : undefined;
           const enabled = !tool.configId || config?.enabled !== false;
           // 每个工具使用稳定图标，新增入口时不依赖服务端返回展示资源。
-          const Icon = tool.id === 'workbench' ? MessageSquareText : tool.id === 'image-converter' ? ImageDown : tool.id === 'image-scrambler' ? Shuffle : tool.id === 'image-wobble' ? Waves : tool.id === 'image-reverse' ? ScanSearch : tool.id === 'image-upscale' ? ImageUpscale : Grid3X3;
+          const Icon = tool.id === 'workbench' ? MessageSquareText : tool.id === 'image-converter' ? ImageDown : tool.id === 'image-scrambler' ? Shuffle : tool.id === 'image-wobble' ? Waves : tool.id === 'image-reverse' ? ScanSearch : tool.id === 'image-upscale' ? ImageUpscale : tool.id === 'lora-captioning' ? Tags : Grid3X3;
           const content = (
             <>
               <div className="tools-entry-icon"><Icon size={22} /></div>

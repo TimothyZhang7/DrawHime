@@ -32,6 +32,7 @@ import { ImageReversePage } from '../pages/tools/image-reverse/ImageReversePage'
 import { ImageReverseHistoryPage } from '../pages/tools/image-reverse/ImageReverseHistoryPage';
 import { ImageUpscalePage } from '../pages/tools/image-upscale/ImageUpscalePage';
 import { ImageUpscaleHistoryPage } from '../pages/tools/image-upscale/ImageUpscaleHistoryPage';
+import { LoraCaptioningPage } from '../pages/tools/lora-captioning/LoraCaptioningPage';
 import { LeaderboardPage } from '../pages/leaderboard/LeaderboardPage';
 import { UserPublicProfilePage } from '../pages/users/UserPublicProfilePage';
 import { Seo } from '../components/Seo';
@@ -251,6 +252,14 @@ const routeSeoFallbacks: { pattern: string; meta: RouteSeoMeta }[] = [
     },
   },
   {
+    pattern: '/tools/lora-captioning',
+    meta: {
+      title: 'LoRA 训练打标',
+      description: '创建 LoRA 训练集，批量自动打标、翻译和整理标签，并联动本地模型 LoRA 训练。',
+      index: false,
+    },
+  },
+  {
     pattern: '/upscale/history',
     meta: {
       title: '放大记录',
@@ -347,6 +356,7 @@ function AppRoutes() {
         <Route path="/tools/image-scrambler" element={<Layout><ImageScramblerPage /></Layout>} />
         <Route path="/tools/image-wobble" element={<Layout><ImageWobblePage /></Layout>} />
         <Route path="/tools/image-upscale" element={<ProtectedRoute><Layout><ImageUpscalePage /></Layout></ProtectedRoute>} />
+        <Route path="/tools/lora-captioning" element={<ProtectedRoute><Layout><LoraCaptioningPage /></Layout></ProtectedRoute>} />
         <Route path="/upscale/history" element={<ProtectedRoute><Layout><ImageUpscaleHistoryPage /></Layout></ProtectedRoute>} />
         <Route path="/tools/image-reverse" element={<ProtectedRoute><FullLayout><ImageReversePage /></FullLayout></ProtectedRoute>} />
         <Route path="/reverse" element={<ProtectedRoute><FullLayout><ImageReversePage /></FullLayout></ProtectedRoute>} />

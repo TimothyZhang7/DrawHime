@@ -122,6 +122,15 @@ const routes = [
     sitemap: false,
   },
   {
+    path: '/tools/lora-captioning',
+    title: 'LoRA 训练打标',
+    description: '创建 LoRA 训练集，批量自动打标、翻译和整理标签，并联动本地模型 LoRA 训练。',
+    h1: 'LoRA 训练打标',
+    lead: '登录后创建训练集、批量上传图片、逐图整理标签，并继续进入独立本地模型 LoRA 训练。',
+    index: false,
+    sitemap: false,
+  },
+  {
     path: '/upscale/history',
     title: '放大记录',
     description: '查看当前账号的图片放大任务、持久化源图、运行进度和历史结果。',

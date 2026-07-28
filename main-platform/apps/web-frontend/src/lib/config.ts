@@ -5,6 +5,8 @@ export const config = {
   apiBase: import.meta.env.VITE_API_BASE ?? '',
   /** wsproxy 服务地址 — 生产留空使用相对路径 */
   wsproxyBase: import.meta.env.VITE_WSPROXY_BASE ?? '',
+  /** 独立本地模型平台公开代理；生产使用同源路径，开发可单独覆盖。 */
+  localPlatformApiBase: import.meta.env.VITE_LOCAL_PLATFORM_API_BASE ?? '/local-model-api',
   /** 站点名称 */
   siteName: '绘图姬 DrawHime',
   /** 每日免费余额(元) */

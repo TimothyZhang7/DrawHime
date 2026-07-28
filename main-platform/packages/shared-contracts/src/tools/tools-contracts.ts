@@ -1,7 +1,7 @@
 /** 本文件定义用户端工具中心的跨程序契约，供 backend、前台和后台共用。 */
 
 /** 已登记的用户端工具 ID；后续新增工具必须先扩展此联合类型。 */
-export type ToolId = 'image-splitter' | 'image-converter' | 'image-scrambler' | 'image-wobble' | 'image-reverse' | 'image-upscale';
+export type ToolId = 'image-splitter' | 'image-converter' | 'image-scrambler' | 'image-wobble' | 'image-reverse' | 'image-upscale' | 'lora-captioning';
 
 /** 单个工具的公开配置视图。 */
 export interface ToolConfigView {

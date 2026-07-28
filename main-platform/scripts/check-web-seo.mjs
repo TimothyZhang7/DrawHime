@@ -44,6 +44,7 @@ const requiredRoutePages = [
   { file: 'tools/image-converter/index.html', title: '<title>格式转换与压缩 - 绘图姬 DrawHime</title>', canonical: 'href="https://www.xanime.ink/tools/image-converter"', h1: '<h1>格式转换与压缩</h1>', robots: 'content="index,follow' },
   { file: 'tools/image-scrambler/index.html', title: '<title>图片混淆 - 绘图姬 DrawHime</title>', canonical: 'href="https://www.xanime.ink/tools/image-scrambler"', h1: '<h1>图片混淆</h1>', robots: 'content="index,follow' },
   { file: 'tools/image-upscale/index.html', title: '<title>图片放大 - 绘图姬 DrawHime</title>', canonical: 'href="https://www.xanime.ink/tools/image-upscale"', h1: '<h1>图片放大</h1>', robots: 'content="noindex,nofollow' },
+  { file: 'tools/lora-captioning/index.html', title: '<title>LoRA 训练打标 - 绘图姬 DrawHime</title>', canonical: 'href="https://www.xanime.ink/tools/lora-captioning"', h1: '<h1>LoRA 训练打标</h1>', robots: 'content="noindex,nofollow' },
   { file: 'upscale/history/index.html', title: '<title>放大记录 - 绘图姬 DrawHime</title>', canonical: 'href="https://www.xanime.ink/upscale/history"', h1: '<h1>放大记录</h1>', robots: 'content="noindex,nofollow' },
   { file: 'reverse/index.html', title: '<title>图片反推 - 绘图姬 DrawHime</title>', canonical: 'href="https://www.xanime.ink/reverse"', h1: '<h1>图片反推</h1>', robots: 'content="noindex,nofollow' },
   { file: 'login/index.html', title: '<title>登录注册 - 绘图姬 DrawHime</title>', canonical: 'href="https://www.xanime.ink/login"', h1: '<h1>登录注册</h1>', robots: 'content="noindex,nofollow' },
@@ -90,6 +91,7 @@ assertIncludes(sitemap, '<loc>https://www.xanime.ink/tools/image-converter</loc>
 assertIncludes(sitemap, '<loc>https://www.xanime.ink/tools/image-scrambler</loc>', 'sitemap.xml');
 assertExcludes(sitemap, '<loc>https://www.xanime.ink/generate</loc>', 'sitemap.xml');
 assertExcludes(sitemap, '<loc>https://www.xanime.ink/tools/image-upscale</loc>', 'sitemap.xml');
+assertExcludes(sitemap, '<loc>https://www.xanime.ink/tools/lora-captioning</loc>', 'sitemap.xml');
 assertExcludes(sitemap, '<loc>https://www.xanime.ink/upscale/history</loc>', 'sitemap.xml');
 assertExcludes(sitemap, '<loc>https://www.xanime.ink/reverse</loc>', 'sitemap.xml');
 assertExcludes(sitemap, '<loc>https://www.xanime.ink/login</loc>', 'sitemap.xml');

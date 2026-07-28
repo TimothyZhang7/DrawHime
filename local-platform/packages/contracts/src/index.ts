@@ -577,6 +577,16 @@ export const trainingDatasetViewSchema = z.object({
 /** 训练数据集 Caption 更新请求。 */
 export const trainingDatasetAssetUpdateRequestSchema = z.object({ caption: z.string().trim().max(10000).nullable() });
 
+/** LoRA 打标工具批量翻译英文标签的请求。 */
+export const trainingTagTranslationRequestSchema = z.object({
+  tags: z.array(z.string().trim().min(1).max(200)).min(1).max(200),
+});
+
+/** LoRA 打标工具的中英文标签对照结果。 */
+export const trainingTagTranslationViewSchema = z.object({
+  translations: z.array(z.object({ tag: z.string().min(1), translated: z.string().min(1) })).max(200),
+});
+
 /** 训练任务视图。 */
 export const trainingJobViewSchema = z.object({
   id: z.string().min(1),
@@ -721,6 +731,8 @@ export type TrainingPriceQuoteRequest = z.infer<typeof trainingPriceQuoteRequest
 export type TrainingPriceQuoteView = z.infer<typeof trainingPriceQuoteViewSchema>;
 export type TrainingDatasetCreateRequest = z.infer<typeof trainingDatasetCreateRequestSchema>;
 export type TrainingDatasetView = z.infer<typeof trainingDatasetViewSchema>;
+export type TrainingTagTranslationRequest = z.infer<typeof trainingTagTranslationRequestSchema>;
+export type TrainingTagTranslationView = z.infer<typeof trainingTagTranslationViewSchema>;
 export type TrainingDatasetAssetUpdateRequest = z.infer<typeof trainingDatasetAssetUpdateRequestSchema>;
 export type TrainingCaptionJobCreateRequest = z.infer<typeof trainingCaptionJobCreateRequestSchema>;
 export type TrainingCaptionStageView = z.infer<typeof trainingCaptionStageViewSchema>;

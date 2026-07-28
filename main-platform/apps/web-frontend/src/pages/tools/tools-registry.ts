@@ -74,4 +74,11 @@ export const toolEntries: ToolEntry[] = [
     description: '上传一张图片，调用本地 GPU 超分模型放大并增强细节。',
     category: '图片处理',
   },
+  {
+    id: 'lora-captioning',
+    path: '/tools/lora-captioning',
+    title: 'LoRA 训练打标',
+    description: '创建训练集、批量自动打标、翻译和整理标签，并联动本地 LoRA 训练。',
+    category: '模型训练',
+  },
 ];
