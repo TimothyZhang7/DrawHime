@@ -32,6 +32,7 @@ import { createHash, randomBytes } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import { registerLoraLibraryRoutes } from "./lora-library.js";
 import { registerModelLibraryRoutes } from "./model-library.js";
+import { findLoraSelectionConflict } from "./lora-selection.js";
 import { registerAdminRuntimeRoutes } from "./admin-runtime.js";
 import { registerBotRoutes } from "./bot-routes.js";
 import { registerTrainingRoutes } from "./training-routes.js";
@@ -496,6 +497,11 @@ async function createInferenceJob(identity: { id: string; subject: string }, inp
     include: { loraEntry: { select: { title: true, type: true, triggerWords: true } } },
   }) : [];
   if (selectedLoras.length !== input.loraVersionIds.length) throw new ApiOperationError(400, "lora_version_invalid", "所选 LoRA 不存在、已停用或与主模型系列不匹配");
+  const defaults = readObject(workflow.modelVersion.defaultParameters);
+  // 内容哈希是实际 GPU 文件身份；不同版本 ID 指向同一内容，或与底模内置 LoRA 相同，都只能加载一次。
+  const loraConflict = findLoraSelectionConflict(selectedLoras.map((lora) => lora.sha256), defaults.systemLoraSha256);
+  if (loraConflict?.type === "duplicate_content") throw new ApiOperationError(400, "lora_content_duplicate", "所选 LoRA 包含内容相同的版本，请只保留一个");
+  if (loraConflict?.type === "system_duplicate") throw new ApiOperationError(400, "lora_system_duplicate", "当前底模已经内置该 LoRA，请取消重复选择");
   const loraMap = new Map(selectedLoras.map((item) => [item.id, item]));
   const loraSelections = input.loraVersionIds.map((id) => {
     const lora = loraMap.get(id);
@@ -511,7 +517,6 @@ async function createInferenceJob(identity: { id: string; subject: string }, inp
   });
   // 任务参数必须固化归一后的真实强度，Bot 等未显式传值的调用不能只在展示快照里保存默认强度。
   const normalizedLoraStrengths = Object.fromEntries(loraSelections.map((selection) => [selection.loraVersionId, selection.strength]));
-  const defaults = readObject(workflow.modelVersion.defaultParameters);
   if (input.promptEnhancement && defaults.promptEnhancementEnabled !== true) throw new ApiOperationError(400, "prompt_enhancement_disabled", "当前模型未开放 AI 提示增强");
   const productCode = String(defaults.productCode || "");
   const pricingVersion = Number(defaults.pricingVersion || 0);

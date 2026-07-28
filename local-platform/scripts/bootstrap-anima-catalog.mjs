@@ -29,7 +29,7 @@ const modelCatalog = [
     sourceVersionId: null,
     sha256: null,
     byteSize: 4182218328,
-    parameters: { profileRevision: 5, qualityProfile: "balanced-260s-v2", targetSeconds: 260, steps: 13, cfg: 1, sampler: "er_sde", scheduler: "simple", samplingMaxEdge: 2048, samplingPixelBudget: 2350000, samplingPixelBudgetAspectSlope: 0, qualityPrefix: "masterpiece, best quality, score_7", defaultNegativePrompt, systemHighresLoraEnabled: true },
+    parameters: { profileRevision: 6, qualityProfile: "balanced-260s-v2", targetSeconds: 260, steps: 13, cfg: 1, sampler: "er_sde", scheduler: "simple", samplingMaxEdge: 2048, samplingPixelBudget: 2350000, samplingPixelBudgetAspectSlope: 0, qualityPrefix: "masterpiece, best quality, score_7", defaultNegativePrompt, systemHighresLoraEnabled: true, systemLoraSha256: ["1b55e40bdb1d0e5a78cb498f245fccfdaae97823265db957d2aabdcf4cd3caf1", "db5b2dcc4e1afa215058b7a85fb9377124c2e9aabd48c25e595af7199207c299"] },
   },
   {
     workflowVersion: 8,
