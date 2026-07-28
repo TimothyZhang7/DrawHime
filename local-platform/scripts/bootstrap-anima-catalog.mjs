@@ -14,7 +14,7 @@ const defaultTrainingPriceCny = "0.80";
 const sharedDefaults = { width: 1024, height: 1024, maxEdge: 1536, maxAttempts: 3, promptEnhancementEnabled: true, pricingVersion: defaultPricingVersion, priceCny: defaultPriceCny, trainingProductCode: defaultTrainingProductCode, trainingPricingVersion: defaultTrainingPricingVersion, trainingPriceCny: defaultTrainingPriceCny };
 const defaultNegativePrompt = "worst quality, low quality, score_1, score_2, score_3, artist name";
 
-// 模型文件名、哈希、CFG 与采样器来自对应 Civitai 版本；步数和潜空间边长按生产 P40 吞吐基线收敛。
+// 模型文件名、哈希、CFG 与采样器来自对应 Civitai 版本；完整底模使用 24 步与 1152 潜空间长边，在生产 P40 上以约三分钟起步换取更完整的细节收敛。
 const modelCatalog = [
   {
     workflowVersion: 1,
@@ -30,7 +30,7 @@ const modelCatalog = [
     parameters: { profileRevision: 1, steps: 8, cfg: 1, sampler: "er_sde", scheduler: "simple", samplingMaxEdge: 1536, qualityPrefix: "masterpiece, best quality, score_7", defaultNegativePrompt, systemHighresLoraEnabled: true },
   },
   {
-    workflowVersion: 5,
+    workflowVersion: 8,
     fileName: "animeBulldozer_anima.safetensors",
     displayName: "Anime Bulldozer Anima",
     description: "Anime/bulldozer Anima 完整微调底模，偏高完成度动漫插画。",
@@ -40,10 +40,10 @@ const modelCatalog = [
     sourceVersionId: 3047288,
     sha256: "8E279F111ED7E7EA214EA61850E002F700CCE55A8CD027675796773089B3C739",
     byteSize: 4182218504,
-    parameters: { profileRevision: 2, steps: 12, cfg: 4, sampler: "er_sde", scheduler: "simple", samplingMaxEdge: 1024, qualityPrefix: "masterpiece, best quality, score_7, very aesthetic", defaultNegativePrompt: `${defaultNegativePrompt}, blurry, jpeg artifacts, sepia, muscular female`, systemHighresLoraEnabled: false },
+    parameters: { profileRevision: 3, steps: 24, cfg: 4, sampler: "er_sde", scheduler: "simple", samplingMaxEdge: 1152, qualityPrefix: "masterpiece, best quality, score_7, very aesthetic", defaultNegativePrompt: `${defaultNegativePrompt}, blurry, jpeg artifacts, sepia, muscular female`, systemHighresLoraEnabled: false },
   },
   {
-    workflowVersion: 6,
+    workflowVersion: 9,
     fileName: "miaomiaoRealskin_anima11.safetensors",
     displayName: "MiaoMiao RealSkin Anima 1.1",
     description: "MiaoMiao RealSkin Anima 1.1 完整微调底模，面向写实皮肤与摄影质感。",
@@ -53,10 +53,10 @@ const modelCatalog = [
     sourceVersionId: 3071702,
     sha256: "D33247D48A9C15A872AEF963940FC87362F925E3E087365810AD747042FCC454",
     byteSize: 4182218328,
-    parameters: { profileRevision: 2, steps: 12, cfg: 4, sampler: "euler_ancestral", scheduler: "normal", samplingMaxEdge: 1024, qualityPrefix: "best quality, score_7, score_9, very aesthetic, ultra detailed, fair skin, high contrast, photorealistic, raw photo, photo background", defaultNegativePrompt, systemHighresLoraEnabled: false },
+    parameters: { profileRevision: 3, steps: 24, cfg: 4, sampler: "euler_ancestral", scheduler: "normal", samplingMaxEdge: 1152, qualityPrefix: "best quality, score_7, score_9, very aesthetic, ultra detailed, fair skin, high contrast, photorealistic, raw photo, photo background", defaultNegativePrompt, systemHighresLoraEnabled: false },
   },
   {
-    workflowVersion: 7,
+    workflowVersion: 10,
     fileName: "miaomiao3DHarem_animaLH3D10.safetensors",
     displayName: "MiaoMiao 3D Harem Anima LH3D 1.0",
     description: "MiaoMiao 3D Harem Anima LH3D 1.0 完整微调底模，面向精细三维动漫质感。",
@@ -66,7 +66,7 @@ const modelCatalog = [
     sourceVersionId: 3074791,
     sha256: "0707CBE8DEED6C858A6BA8DFBCFE2006E3A4FD44C099AAFD048400FDEC1866DD",
     byteSize: 4182218328,
-    parameters: { profileRevision: 2, steps: 12, cfg: 4, sampler: "euler_ancestral", scheduler: "normal", samplingMaxEdge: 1024, qualityPrefix: "best quality, score_7, score_9, very aesthetic, ultra detailed, high contrast", defaultNegativePrompt, systemHighresLoraEnabled: false },
+    parameters: { profileRevision: 3, steps: 24, cfg: 4, sampler: "euler_ancestral", scheduler: "normal", samplingMaxEdge: 1152, qualityPrefix: "best quality, score_7, score_9, very aesthetic, ultra detailed, high contrast", defaultNegativePrompt, systemHighresLoraEnabled: false },
   },
 ];
 
@@ -98,7 +98,7 @@ try {
     });
     const workflowJson = {
       runtimeBuilder: "@drawhime/inference-runtime:buildAnimaWorkflow",
-      revision: 3,
+      revision: 4,
       model: catalog.fileName,
       modelSha256: catalog.sha256,
       sourceVersionId: catalog.sourceVersionId,
