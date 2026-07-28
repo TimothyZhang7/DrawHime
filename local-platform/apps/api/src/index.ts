@@ -506,6 +506,8 @@ async function createInferenceJob(identity: { id: string; subject: string }, inp
       triggerWords: readTriggerWords(lora.loraEntry.triggerWords),
     };
   });
+  // 任务参数必须固化归一后的真实强度，Bot 等未显式传值的调用不能只在展示快照里保存默认强度。
+  const normalizedLoraStrengths = Object.fromEntries(loraSelections.map((selection) => [selection.loraVersionId, selection.strength]));
   const defaults = readObject(workflow.modelVersion.defaultParameters);
   if (input.promptEnhancement && defaults.promptEnhancementEnabled !== true) throw new ApiOperationError(400, "prompt_enhancement_disabled", "当前模型未开放 AI 提示增强");
   const productCode = String(defaults.productCode || "");
@@ -528,7 +530,7 @@ async function createInferenceJob(identity: { id: string; subject: string }, inp
         effectivePrompt: input.promptEnhancement ? null : input.prompt,
         // 正负提示词使用独立数据库字段，空白负面提示词归一为空，禁止混入正面提示词参数。
         negativePrompt: input.negativePrompt?.trim() || null,
-        parameters: { width: input.width, height: input.height, batchSize: input.batchSize, seed: input.seed, loraVersionIds: input.loraVersionIds, loraStrengths, loraSelections, sourceArtifactIds: input.sourceArtifactIds, promptEnhancement: input.promptEnhancement, publishToGallery: input.publishToGallery, isPrivate: input.isPrivate, productCode, pricingVersion },
+        parameters: { width: input.width, height: input.height, batchSize: input.batchSize, seed: input.seed, loraVersionIds: input.loraVersionIds, loraStrengths: normalizedLoraStrengths, loraSelections, sourceArtifactIds: input.sourceArtifactIds, promptEnhancement: input.promptEnhancement, publishToGallery: input.publishToGallery, isPrivate: input.isPrivate, productCode, pricingVersion },
         stages: input.promptEnhancement ? { create: { sequence: 1, stageType: "PROMPT_ENHANCEMENT", status: "PENDING", inputJson: { format: "anima", promptLength: input.prompt.length } } } : undefined,
       },
     });

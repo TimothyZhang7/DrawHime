@@ -101,7 +101,7 @@ async function processJob(jobId: string): Promise<void> {
   try {
     const parameters = readParameters(job.parameters);
     const modelDefaults = readJsonObject(job.modelVersion.defaultParameters);
-    const loras = await resolveTaskLoras(parameters.loraVersionIds, parameters.loraStrengths);
+    const loras = await resolveTaskLoras(parameters.loraVersionIds, parameters.loraStrengths, parameters.loraSnapshots);
     const submittedPrompt = appendLoraTriggerWords(job.effectivePrompt || job.requestedPrompt, loras);
     if (submittedPrompt !== job.effectivePrompt) {
       // 图库和任务详情必须保存真正送入 Runtime 的提示词，不能只保存增强前的文本。
@@ -125,6 +125,7 @@ async function processJob(jobId: string): Promise<void> {
       qualityPrefix: readOptionalString(modelDefaults.qualityPrefix),
       defaultNegativePrompt: readOptionalString(modelDefaults.defaultNegativePrompt),
       systemHighresLoraEnabled: modelDefaults.systemHighresLoraEnabled !== false,
+      samplingMaxEdge: readBoundedInteger(modelDefaults.samplingMaxEdge, 512, 1536),
       onSubmitted: async (runtimeJobId, requestJson) => {
         await database.inferenceAttempt.update({ where: { id: attempt.id }, data: { runtimeJobId, requestJson: requestJson as Prisma.InputJsonObject } });
       },
@@ -386,13 +387,30 @@ async function reconcileGalleryPublications(): Promise<void> {
   }
 }
 
+/** 任务创建时固化的 LoRA 触发词快照，避免排队期间编辑条目改变最终请求。 */
+interface TaskLoraSnapshot {
+  strength?: number;
+  triggerWords?: string[];
+}
+
 /** 从任务 JSON 读取经过 API 校验的推理参数。 */
-function readParameters(value: unknown): { width: number; height: number; seed: number | null; loraVersionIds: string[]; loraStrengths: Record<string, number> } {
+function readParameters(value: unknown): { width: number; height: number; seed: number | null; loraVersionIds: string[]; loraStrengths: Record<string, number>; loraSnapshots: Record<string, TaskLoraSnapshot> } {
   const data = value && typeof value === "object" ? value as Record<string, unknown> : {};
-  const loraStrengths = data.loraStrengths && typeof data.loraStrengths === "object" && !Array.isArray(data.loraStrengths)
+  const loraSnapshots = Object.fromEntries((Array.isArray(data.loraSelections) ? data.loraSelections : []).flatMap((selection) => {
+    if (!selection || typeof selection !== "object") return [];
+    const row = selection as Record<string, unknown>;
+    const id = typeof row.loraVersionId === "string" ? row.loraVersionId : "";
+    if (!id) return [];
+    const strength = typeof row.strength === "number" && Number.isFinite(row.strength) && row.strength >= 0 && row.strength <= 1.5 ? row.strength : undefined;
+    const triggerWords = Array.isArray(row.triggerWords) ? row.triggerWords.filter((word): word is string => typeof word === "string" && word.trim().length > 0).map((word) => word.trim()).slice(0, 32) : undefined;
+    return [[id, { strength, triggerWords } satisfies TaskLoraSnapshot]];
+  })) as Record<string, TaskLoraSnapshot>;
+  const explicitStrengths = data.loraStrengths && typeof data.loraStrengths === "object" && !Array.isArray(data.loraStrengths)
     ? Object.fromEntries(Object.entries(data.loraStrengths).flatMap(([id, strength]) => typeof strength === "number" && Number.isFinite(strength) && strength >= 0 && strength <= 1.5 ? [[id, strength]] : []))
     : {};
-  return { width: Number(data.width), height: Number(data.height), seed: data.seed === null ? null : Number(data.seed), loraVersionIds: Array.isArray(data.loraVersionIds) ? data.loraVersionIds.filter((value): value is string => typeof value === "string") : [], loraStrengths };
+  // 主站旧请求只固化 loraSelections，新字段存在时仍以显式 loraStrengths 为最高优先级。
+  const loraStrengths = { ...Object.fromEntries(Object.entries(loraSnapshots).flatMap(([id, snapshot]) => snapshot.strength === undefined ? [] : [[id, snapshot.strength]])), ...explicitStrengths };
+  return { width: Number(data.width), height: Number(data.height), seed: data.seed === null ? null : Number(data.seed), loraVersionIds: Array.isArray(data.loraVersionIds) ? data.loraVersionIds.filter((item): item is string => typeof item === "string") : [], loraStrengths, loraSnapshots };
 }
 
 /** 把 Prisma JSON 读取为普通对象，供发布参数审计使用。 */
@@ -430,7 +448,7 @@ function isRetryableRuntimeError(error: unknown): boolean {
 }
 
 /** 从独立对象存储解析任务 LoRA，并在提交工作流前按 SHA-256 同步到 ComfyUI。 */
-async function resolveTaskLoras(versionIds: string[], strengths: Record<string, number>): Promise<Array<{ fileName: string; strength: number; triggerWords: string[] }>> {
+async function resolveTaskLoras(versionIds: string[], strengths: Record<string, number>, snapshots: Record<string, TaskLoraSnapshot>): Promise<Array<{ fileName: string; strength: number; triggerWords: string[] }>> {
   if (versionIds.length === 0) return [];
   const versions = await database.loraVersion.findMany({ where: { id: { in: versionIds }, status: "ACTIVE", loraEntry: { status: "ACTIVE" } }, include: { loraEntry: { select: { type: true, triggerWords: true } } } });
   const map = new Map(versions.map((version) => [version.id, version]));
@@ -441,7 +459,7 @@ async function resolveTaskLoras(versionIds: string[], strengths: Record<string, 
     // GPU 同步扩展只接受以内容哈希命名的受控文件名，禁止把用户上传文件名直接传入 GPU 主机。
     const gpuFileName = buildGpuLoraFileName(version.sha256);
     await ensureComfyLora(version.objectKey, gpuFileName, version.sha256, Number(version.byteSize));
-    result.push({ fileName: gpuFileName, strength: normalizeRuntimeLoraStrength(strengths[versionId], version.loraEntry.type), triggerWords: readRuntimeTriggerWords(version.loraEntry.triggerWords) });
+    result.push({ fileName: gpuFileName, strength: normalizeRuntimeLoraStrength(strengths[versionId], version.loraEntry.type), triggerWords: snapshots[versionId]?.triggerWords ?? readRuntimeTriggerWords(version.loraEntry.triggerWords) });
   }
   return result;
 }

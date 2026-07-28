@@ -37,6 +37,12 @@ export interface AnimaGenerationInput {
   defaultNegativePrompt?: string;
   /** 是否叠加平台高分辨率美学 LoRA；完整微调底模默认关闭以保留自身风格。 */
   systemHighresLoraEnabled?: boolean;
+  /** 扩散采样最长边；可低于最终输出边长以控制单图耗时。 */
+  samplingMaxEdge?: number;
+  /** 工作流内部最终输出宽度；仅由 Runtime 在尺寸归一化后写入。 */
+  outputWidth?: number;
+  /** 工作流内部最终输出高度；仅由 Runtime 在尺寸归一化后写入。 */
+  outputHeight?: number;
   /** ComfyUI 接受任务后立即持久化 Runtime ID，供重启恢复取消旧队列项。 */
   onSubmitted?: (promptId: string, requestJson: Record<string, unknown>) => Promise<void>;
 }
@@ -56,7 +62,8 @@ export interface AnimaGenerationResult {
 export async function generateAnimaImage(input: AnimaGenerationInput): Promise<AnimaGenerationResult> {
   const baseUrl = input.baseUrl.replace(/\/$/, "");
   const [width, height] = fitSize(input.width, input.height);
-  const prompt = buildAnimaWorkflow({ ...input, width, height });
+  const [samplingWidth, samplingHeight] = fitSizeWithin(width, height, normalizeSamplingMaxEdge(input.samplingMaxEdge));
+  const prompt = buildAnimaWorkflow({ ...input, width: samplingWidth, height: samplingHeight, outputWidth: width, outputHeight: height });
   // 独立平台已经完成钱包预留和 GPU 租约，进入 ComfyUI 时放到受控队列前部，避免旧直连链路积压使已计费任务长期停留在运行中。
   const requestJson = { prompt, client_id: input.clientId, front: true };
   const submitted = await fetchWithRetry(`${baseUrl}/prompt`, {
@@ -88,7 +95,7 @@ export async function generateAnimaImage(input: AnimaGenerationInput): Promise<A
         height,
         runtimeJobId: promptId,
         requestJson,
-        responseJson: { promptId, image },
+        responseJson: { promptId, image, samplingWidth, samplingHeight, outputWidth: width, outputHeight: height },
       };
     }
     if (item.status?.status_str === "error") throw new Error("ComfyUI 工作流执行失败");
@@ -108,14 +115,19 @@ export function buildAnimaWorkflow(input: AnimaGenerationInput): Record<string, 
   // 正面和负面文本在工作流构建时即分离，禁止通过字符串拼接形成单一 conditioning。
   const positivePrompt = withQualityPrefix(input.prompt, input.qualityPrefix);
   const negativePrompt = input.negativePrompt?.trim() || input.defaultNegativePrompt?.trim() || DEFAULT_NEGATIVE;
+  const outputWidth = normalizeOutputDimension(input.outputWidth, input.width);
+  const outputHeight = normalizeOutputDimension(input.outputHeight, input.height);
+  const shouldScaleOutput = outputWidth !== input.width || outputHeight !== input.height;
   const prompt: Record<string, unknown> = {
     "1": { class_type: "UNETLoader", inputs: { unet_name: input.modelFileName, weight_dtype: "default" } },
     "2": { class_type: "CLIPLoader", inputs: { clip_name: "qwen_3_06b_base.safetensors", type: "stable_diffusion", device: "default" } },
     "3": { class_type: "VAELoader", inputs: { vae_name: "qwen_image_vae.safetensors" } },
     "8": { class_type: "EmptyLatentImage", inputs: { width: input.width, height: input.height, batch_size: 1 } },
     "10": { class_type: "VAEDecode", inputs: { samples: ["9", 0], vae: ["3", 0] } },
-    "11": { class_type: "DapaoSafeSaveImage", inputs: { "🖼️ 图像": ["10", 0], "📄 文件名前缀": `local_${input.clientId}`, "💾 格式": "WEBP", "📉 质量": 100, "😶‍🌫️ 移除元数据": true } },
+    "11": { class_type: "DapaoSafeSaveImage", inputs: { "🖼️ 图像": shouldScaleOutput ? ["90", 0] : ["10", 0], "📄 文件名前缀": `local_${input.clientId}`, "💾 格式": "WEBP", "📉 质量": 100, "😶‍🌫️ 移除元数据": true } },
   };
+  // 完整微调底模在较小潜空间采样后使用 Lanczos 恢复用户选择的输出尺寸，避免高分辨率采样阻塞队列十余分钟。
+  if (shouldScaleOutput) prompt["90"] = { class_type: "ImageScale", inputs: { image: ["10", 0], upscale_method: "lanczos", width: outputWidth, height: outputHeight, crop: "disabled" } };
   if (isBaseModel) prompt["4"] = { class_type: "LoraLoader", inputs: { model: ["1", 0], clip: ["2", 0], lora_name: TURBO_LORA, strength_model: 1, strength_clip: 1 } };
   if (systemHighresLoraEnabled) prompt["5"] = { class_type: "LoraLoader", inputs: { model: modelInput, clip: clipInput, lora_name: HIGHRES_LORA, strength_model: HIGHRES_STRENGTH, strength_clip: HIGHRES_STRENGTH } };
   for (const [index, lora] of (input.loras ?? []).entries()) {
@@ -132,10 +144,15 @@ export function buildAnimaWorkflow(input: AnimaGenerationInput): Record<string, 
 
 /** 保持画幅并把最长边收敛到 1536，所有维度按潜空间要求对齐到 8。 */
 export function fitSize(width: number, height: number): [number, number] {
+  return fitSizeWithin(width, height, ANIMA_MAX_EDGE);
+}
+
+/** 保持画幅并把尺寸限制在给定最长边，最终维度始终按潜空间要求对齐。 */
+function fitSizeWithin(width: number, height: number, maxEdge: number): [number, number] {
   const safeWidth = Number.isFinite(width) && width > 0 ? width : ANIMA_MAX_EDGE;
   const safeHeight = Number.isFinite(height) && height > 0 ? height : ANIMA_MAX_EDGE;
-  const scale = Math.min(1, ANIMA_MAX_EDGE / Math.max(safeWidth, safeHeight));
-  return [alignDimension(safeWidth * scale), alignDimension(safeHeight * scale)];
+  const scale = Math.min(1, maxEdge / Math.max(safeWidth, safeHeight));
+  return [alignDimension(safeWidth * scale, maxEdge), alignDimension(safeHeight * scale, maxEdge)];
 }
 
 /** 补齐官方质量标签且不重复用户已有标签。 */
@@ -167,6 +184,17 @@ function normalizeScheduler(value: string | undefined): string {
   return value && SUPPORTED_SCHEDULERS.has(value) ? value : "simple";
 }
 
+/** 将模型级采样边长限制在兼顾质量和吞吐的有效范围。 */
+function normalizeSamplingMaxEdge(value: number | undefined): number {
+  return Number.isSafeInteger(value) && Number(value) >= 512 && Number(value) <= ANIMA_MAX_EDGE ? Number(value) : ANIMA_MAX_EDGE;
+}
+
+/** 归一化最终输出维度，禁止内部调用绕过平台最大边长。 */
+function normalizeOutputDimension(value: number | undefined, fallback: number): number {
+  const candidate = Number.isFinite(value) && Number(value) > 0 ? Number(value) : fallback;
+  return alignDimension(candidate, ANIMA_MAX_EDGE);
+}
+
 /** 归一化随机种子到 ComfyUI 可稳定表示的正整数范围。 */
 function normalizeSeed(seed?: number | null): number {
   if (Number.isSafeInteger(seed) && Number(seed) >= 0) return Number(seed);
@@ -174,8 +202,8 @@ function normalizeSeed(seed?: number | null): number {
 }
 
 /** 维度对齐并限制最小潜空间尺寸。 */
-function alignDimension(value: number): number {
-  return Math.max(64, Math.min(ANIMA_MAX_EDGE, Math.round(value / SIZE_ALIGNMENT) * SIZE_ALIGNMENT));
+function alignDimension(value: number, maxEdge: number): number {
+  return Math.max(64, Math.min(maxEdge, Math.round(value / SIZE_ALIGNMENT) * SIZE_ALIGNMENT));
 }
 
 /** ComfyUI 历史响应的最小结构。 */

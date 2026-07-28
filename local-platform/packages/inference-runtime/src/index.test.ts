@@ -28,9 +28,9 @@ test("完整微调底模使用独立采样参数且不叠加系统美学 LoRA", 
     width: 920,
     height: 1536,
     clientId: "full-checkpoint-preset-test",
-    steps: 30,
-    cfg: 4.5,
-    samplerName: "euler",
+    steps: 12,
+    cfg: 4,
+    samplerName: "euler_ancestral",
     scheduler: "normal",
     qualityPrefix: "best quality, score_9, photorealistic",
     defaultNegativePrompt: "model_default_negative_token",
@@ -40,9 +40,41 @@ test("完整微调底模使用独立采样参数且不叠加系统美学 LoRA", 
   assert.equal((workflow["6"]?.inputs?.clip as [string, number] | undefined)?.[0], "2");
   assert.match(String(workflow["6"]?.inputs?.text), /photorealistic/);
   assert.equal(workflow["7"]?.inputs?.text, "model_default_negative_token");
-  assert.equal(workflow["9"]?.inputs?.steps, 30);
-  assert.equal(workflow["9"]?.inputs?.cfg, 4.5);
-  assert.equal(workflow["9"]?.inputs?.sampler_name, "euler");
+  assert.equal(workflow["9"]?.inputs?.steps, 12);
+  assert.equal(workflow["9"]?.inputs?.cfg, 4);
+  assert.equal(workflow["9"]?.inputs?.sampler_name, "euler_ancestral");
   assert.equal(workflow["9"]?.inputs?.scheduler, "normal");
   assert.deepEqual(workflow["9"]?.inputs?.model as [string, number], ["1", 0]);
+});
+
+test("完整微调底模按顺序应用用户 LoRA 并恢复最终输出尺寸", () => {
+  const workflow = buildAnimaWorkflow({
+    baseUrl: "http://127.0.0.1:8188",
+    modelFileName: "animeBulldozer_anima.safetensors",
+    prompt: "character_trigger",
+    width: 1024,
+    height: 680,
+    outputWidth: 1536,
+    outputHeight: 1024,
+    clientId: "full-checkpoint-lora-chain-test",
+    steps: 12,
+    cfg: 4,
+    samplerName: "er_sde",
+    scheduler: "simple",
+    systemHighresLoraEnabled: false,
+    loras: [
+      { fileName: "character.safetensors", strength: 1 },
+      { fileName: "style.safetensors", strength: 0.8 },
+    ],
+  }) as Record<string, { class_type?: string; inputs?: Record<string, unknown> }>;
+  assert.deepEqual(workflow["12"]?.inputs?.model as [string, number], ["1", 0]);
+  assert.deepEqual(workflow["12"]?.inputs?.clip as [string, number], ["2", 0]);
+  assert.deepEqual(workflow["13"]?.inputs?.model as [string, number], ["12", 0]);
+  assert.deepEqual(workflow["13"]?.inputs?.clip as [string, number], ["12", 1]);
+  assert.deepEqual(workflow["9"]?.inputs?.model as [string, number], ["13", 0]);
+  assert.deepEqual(workflow["6"]?.inputs?.clip as [string, number], ["13", 1]);
+  assert.equal(workflow["90"]?.class_type, "ImageScale");
+  assert.equal(workflow["90"]?.inputs?.width, 1536);
+  assert.equal(workflow["90"]?.inputs?.height, 1024);
+  assert.deepEqual(workflow["11"]?.inputs?.["🖼️ 图像"] as [string, number], ["90", 0]);
 });

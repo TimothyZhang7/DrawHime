@@ -28,8 +28,8 @@
 | `POST /v1/auth/session/exchange` | web/admin | api | 主站 Bearer JWT 换取 `LocalPlatformSessionView` |
 | `GET /v1/auth/me` | web/admin | api | `LocalPlatformSessionView` |
 | `DELETE /v1/auth/session` | web/admin | api | 撤销当前独立平台会话 |
-| `GET /v1/models` | web/admin | api | 当前可用本地模型、工作流、模型独立的采样器/调度器/步数/CFG/质量前缀、最大尺寸和主站价格版本；完整微调底模不得套用 Anima Base 的 Turbo 参数 |
-| `POST /v1/inference/jobs` | web | api | `InferenceJobCreateRequest` 创建持久化任务并完成主站资金预留后入队；正面提示词与可空的用户负面提示词独立保存，Worker 分别映射到 Runtime 的 positive/negative conditioning；`loraVersionIds` 可跨角色、画风、概念、服装、姿势等类型多选，最多 4 个且不可重复；`loraStrengths` 固化每个版本的 0–1.5 强度，Worker 追加已选 LoRA 触发词并把实际提示词写入任务审计 |
+| `GET /v1/models` | web/admin | api | 当前可用本地模型、工作流、模型独立的采样器/调度器/步数/CFG/质量前缀、采样最长边、最终输出最大尺寸和主站价格版本；完整微调底模不得套用 Anima Base 的 Turbo 参数 |
+| `POST /v1/inference/jobs` | web | api | `InferenceJobCreateRequest` 创建持久化任务并完成主站资金预留后入队；正面提示词与可空的用户负面提示词独立保存，Worker 分别映射到 Runtime 的 positive/negative conditioning；`loraVersionIds` 可跨角色、画风、概念、服装、姿势等类型多选，最多 4 个且不可重复；`loraStrengths` 与 `loraSelections` 固化每个版本的 0–1.5 强度及触发词快照，Worker 以显式强度优先并把实际 LoRA 链、采样尺寸和最终提示词写入任务审计 |
 | `GET /v1/inference/jobs` | web/admin | api | 当前身份任务列表；管理员可读取全局列表 |
 | `GET /v1/inference/jobs/:id` | web/admin | api | `InferenceJobView`，包含阶段、尝试、固化参数、任务所用 LoRA 的标题、类型、权重与封面地址、产物哈希与字节数、计费镜像和主站图库发布状态；普通用户只读取自己的任务 |
 | `GET /v1/inference/jobs/:id/loras/:versionId/cover` | web/admin | api | 经任务归属鉴权读取该任务实际选用 LoRA 的首张示例封面；即使 LoRA 后续下架，历史任务仍可审计展示 |
