@@ -3,7 +3,8 @@
  */
 import type { LocalCaptioningAssetView, LocalCaptioningDatasetListView, LocalCaptioningDatasetView, LocalCaptioningStageView, LocalCaptioningTranslationListView } from '@aiimage/shared-contracts';
 import { ArrowLeft, Check, ChevronRight, ImagePlus, Languages, LoaderCircle, Plus, RefreshCw, Save, Sparkles, Tags, Trash2, X } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { CSSProperties, Dispatch, SetStateAction } from 'react';
 import { Link } from 'react-router-dom';
 import { Seo } from '../../../components/Seo';
 import { ensureLocalTrainingSession, loadTrainingImage, localTrainingJson, uploadTrainingImage } from './localTrainingApi';
@@ -11,6 +12,8 @@ import './LoraCaptioningPage.css';
 
 const maximumDatasetAssets = 200;
 const uploadConcurrency = 3;
+type TagTranslation = LocalCaptioningTranslationListView['translations'][number];
+type TranslationMap = Record<string, TagTranslation>;
 
 /** LoRA 训练打标工具入口。 */
 export function LoraCaptioningPage() {
@@ -19,7 +22,7 @@ export function LoraCaptioningPage() {
   const [selectedId, setSelectedId] = useState('');
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
-  const [translations, setTranslations] = useState<Record<string, string>>({});
+  const [translations, setTranslations] = useState<TranslationMap>({});
 
   /** 从独立平台读取当前账号的权威训练集。 */
   const refresh = useCallback(async (sessionToken: string, quiet = false) => {
@@ -86,14 +89,17 @@ function DatasetSidebar({ token, datasets, selectedId, onSelect, onCreated, onEr
 }
 
 /** 当前训练集的上传、自动打标、翻译、确认和逐图标签操作区。 */
-function CaptioningWorkspace({ token, dataset, translations, onTranslations, onChanged, onArchived, onMessage }: { token: string; dataset: LocalCaptioningDatasetView; translations: Record<string, string>; onTranslations: (value: Record<string, string>) => void; onChanged: () => Promise<void>; onArchived: () => Promise<void>; onMessage: (message: string) => void }) {
+function CaptioningWorkspace({ token, dataset, translations, onTranslations, onChanged, onArchived, onMessage }: { token: string; dataset: LocalCaptioningDatasetView; translations: TranslationMap; onTranslations: Dispatch<SetStateAction<TranslationMap>>; onChanged: () => Promise<void>; onArchived: () => Promise<void>; onMessage: (message: string) => void }) {
   const [mode, setMode] = useState<'character' | 'style' | 'concept'>('character');
   const [busy, setBusy] = useState(false);
+  const [translating, setTranslating] = useState(false);
   const [uploadText, setUploadText] = useState('添加图片');
+  const automaticTranslationKeys = useRef(new Set<string>());
   const stage = dataset.captionStage;
   const active = ['queued', 'running'].includes(stage?.status || '');
   const locked = active || dataset.trainingJobCount > 0;
   const allCaptioned = dataset.assets.length > 0 && dataset.assets.every((asset) => Boolean(asset.caption?.trim()));
+  const allTags = useMemo(() => [...new Set(dataset.assets.flatMap((asset) => splitTags(asset.caption || '')))], [dataset.assets]);
 
   /** 受控并发上传本次选择的全部可容纳文件，单图失败不回滚其他成功图片。 */
   const upload = async (files: File[]) => {
@@ -129,22 +135,35 @@ function CaptioningWorkspace({ token, dataset, translations, onTranslations, onC
     catch (error) { onMessage(errorMessage(error)); }
     finally { setBusy(false); }
   };
-  /** 批量翻译当前训练集全部去重标签，翻译只用于核对。 */
+  /** 分批读取后端持久化翻译集，缺失标签由独立平台补全并保存。 */
+  const requestTranslations = useCallback(async (tags: string[]) => {
+    const merged: TranslationMap = {};
+    for (let index = 0; index < tags.length; index += 150) {
+      const result = await localTrainingJson<LocalCaptioningTranslationListView>('/v1/training/tag-translations', token, { method: 'POST', body: JSON.stringify({ tags: tags.slice(index, index + 150) }) });
+      for (const item of result.translations) merged[item.tag] = item;
+    }
+    onTranslations((current) => ({ ...current, ...merged }));
+    return Object.keys(merged).length;
+  }, [onTranslations, token]);
+  /** 手动刷新当前训练集全部标签的翻译、来源和稳定色。 */
   const translateAll = async () => {
-    const tags = [...new Set(dataset.assets.flatMap((asset) => splitTags(asset.caption || '')))];
-    if (!tags.length) return onMessage('当前训练集还没有可翻译标签');
-    setBusy(true);
-    try {
-      const merged: Record<string, string> = {};
-      for (let index = 0; index < tags.length; index += 150) {
-        const result = await localTrainingJson<LocalCaptioningTranslationListView>('/v1/training/tag-translations', token, { method: 'POST', body: JSON.stringify({ tags: tags.slice(index, index + 150) }) });
-        for (const item of result.translations) merged[item.tag] = item.translated;
-      }
-      onTranslations({ ...translations, ...merged });
-      onMessage(`已翻译 ${Object.keys(merged).length} 个去重标签`);
-    } catch (error) { onMessage(errorMessage(error)); }
-    finally { setBusy(false); }
+    if (!allTags.length) return onMessage('当前训练集还没有可翻译标签');
+    setTranslating(true);
+    try { onMessage(`已读取 ${await requestTranslations(allTags)} 个去重标签的翻译集`); }
+    catch (error) { onMessage(errorMessage(error)); }
+    finally { setTranslating(false); }
   };
+  const missingTags = useMemo(() => allTags.filter((tag) => !translations[tag]), [allTags, translations]);
+  const automaticTranslationKey = `${dataset.id}:${missingTags.join('\u0000')}`;
+  /** 自动补齐已打标图片的中文栏，同一标签集合在当前页面只发起一次请求。 */
+  useEffect(() => {
+    if (!token || active || missingTags.length === 0 || automaticTranslationKeys.current.has(automaticTranslationKey)) return;
+    automaticTranslationKeys.current.add(automaticTranslationKey);
+    let mounted = true;
+    setTranslating(true);
+    void requestTranslations(missingTags).catch((error) => { if (mounted) onMessage(errorMessage(error)); }).finally(() => { if (mounted) setTranslating(false); });
+    return () => { mounted = false; };
+  }, [active, automaticTranslationKey, missingTags, onMessage, requestTranslations, token]);
   /** 确认当前图片快照和所有 Caption，开放独立平台正式训练。 */
   const confirm = async () => {
     if (!stage || !window.confirm('确认已逐图核对全部标签，并将当前训练集标记为可训练？')) return;
@@ -160,15 +179,15 @@ function CaptioningWorkspace({ token, dataset, translations, onTranslations, onC
     catch (error) { onMessage(errorMessage(error)); }
   };
   return <main className="lora-captioning-workspace"><header className="lora-captioning-dataset-head"><div><span>{dataset.assets.length} / {maximumDatasetAssets} 张</span><h2>{dataset.title}</h2><p>{dataset.description || '未填写训练集说明'}</p></div><div><label><ImagePlus size={15} />{uploadText}<input type="file" accept="image/*,.avif,.heic,.heif,.webp" multiple disabled={busy || locked || dataset.assets.length >= maximumDatasetAssets} onChange={(event) => void upload(Array.from(event.target.files || []))} /></label><button className="danger" disabled={busy || dataset.trainingJobCount > 0} onClick={() => void archive()}><Trash2 size={14} />归档</button></div></header>
-    <section className="lora-caption-controls"><label><span>打标重点</span><select value={mode} disabled={busy || active} onChange={(event) => setMode(event.target.value as typeof mode)}><option value="character">角色：外观、服装、姿势</option><option value="style">画风：线条、色彩、光影</option><option value="concept">概念：主体、场景、画风</option></select></label><button onClick={() => void autoCaption()} disabled={busy || active || dataset.assets.length < 1 || dataset.trainingJobCount > 0}><Sparkles size={15} />{stage ? '重新自动打标' : '自动打标'}</button><button onClick={() => void translateAll()} disabled={busy || !allCaptioned}><Languages size={15} />翻译全部</button><button className="confirm" onClick={() => void confirm()} disabled={busy || !allCaptioned || stage?.status !== 'awaiting_confirmation'}><Check size={15} />{stage?.status === 'confirmed' ? '已确认' : '确认标签'}</button><a href={`/local-model/?tab=training&dataset=${encodeURIComponent(dataset.id)}`}><ChevronRight size={15} />进入 LoRA 训练</a></section>
+    <section className="lora-caption-controls"><label><span>打标重点</span><select value={mode} disabled={busy || active} onChange={(event) => setMode(event.target.value as typeof mode)}><option value="character">角色：外观、服装、姿势</option><option value="style">画风：线条、色彩、光影</option><option value="concept">概念：主体、场景、画风</option></select></label><button onClick={() => void autoCaption()} disabled={busy || active || dataset.assets.length < 1 || dataset.trainingJobCount > 0}><Sparkles size={15} />{stage ? '重新自动打标' : '自动打标'}</button><button onClick={() => void translateAll()} disabled={busy || translating || allTags.length === 0}><Languages size={15} />{translating ? '读取翻译集' : '刷新翻译'}</button><button className="confirm" onClick={() => void confirm()} disabled={busy || !allCaptioned || stage?.status !== 'awaiting_confirmation'}><Check size={15} />{stage?.status === 'confirmed' ? '已确认' : '确认标签'}</button><a href={`/local-model/?tab=training&dataset=${encodeURIComponent(dataset.id)}`}><ChevronRight size={15} />进入 LoRA 训练</a></section>
     {stage && <section className={`lora-caption-progress is-${stage.status}`}><div><Tags size={17} /><span><strong>{stageLabel(stage.status)}</strong><small>{stage.completedAssets}/{stage.totalAssets} 张 · {Math.round(stage.progress)}%</small></span></div><div><i style={{ width: `${stage.progress}%` }} /></div>{stage.errorMessage && <p>{stage.errorMessage}</p>}</section>}
     {locked && <div className="lora-captioning-lock">{active ? '自动打标正在处理当前图片快照，完成前暂不允许修改。' : '该训练集已经用于训练，标签与图片已锁定以保留审计。'}</div>}
     <section className="lora-captioning-assets">{dataset.assets.map((asset) => <CaptionAssetCard key={asset.id} token={token} datasetId={dataset.id} asset={asset} locked={locked} translations={translations} onChanged={onChanged} onMessage={onMessage} />)}{dataset.assets.length === 0 && <label className="lora-caption-drop"><ImagePlus size={34} /><strong>选择任意数量训练图片</strong><span>一次多选并受控并发上传；最多保存 200 张，单图失败不会丢失其他图片。</span><input type="file" accept="image/*,.avif,.heic,.heif,.webp" multiple disabled={busy} onChange={(event) => void upload(Array.from(event.target.files || []))} /></label>}</section>
   </main>;
 }
 
-/** 单图标签卡片支持标签增删、翻译对照与显式后端保存。 */
-function CaptionAssetCard({ token, datasetId, asset, locked, translations, onChanged, onMessage }: { token: string; datasetId: string; asset: LocalCaptioningAssetView; locked: boolean; translations: Record<string, string>; onChanged: () => Promise<void>; onMessage: (message: string) => void }) {
+/** 单图标签行按图片、英文原文、中文翻译三栏展示并支持显式后端保存。 */
+function CaptionAssetCard({ token, datasetId, asset, locked, translations, onChanged, onMessage }: { token: string; datasetId: string; asset: LocalCaptioningAssetView; locked: boolean; translations: TranslationMap; onChanged: () => Promise<void>; onMessage: (message: string) => void }) {
   const [tags, setTags] = useState(() => splitTags(asset.caption || ''));
   const [newTag, setNewTag] = useState('');
   const [edited, setEdited] = useState(false);
@@ -189,7 +208,11 @@ function CaptionAssetCard({ token, datasetId, asset, locked, translations, onCha
     try { await localTrainingJson(`/v1/training/datasets/${datasetId}/assets/${asset.id}`, token, { method: 'DELETE' }); await onChanged(); }
     catch (error) { onMessage(errorMessage(error)); }
   };
-  return <article className={`lora-caption-asset${asset.caption?.trim() ? ' captioned' : ''}`}><div className="lora-caption-image"><PrivateDatasetImage token={token} datasetId={datasetId} assetId={asset.id} /><span>{asset.width && asset.height ? `${asset.width} × ${asset.height}` : '训练图片'}</span><button disabled={locked} onClick={() => void removeImage()} aria-label="删除图片"><Trash2 size={14} /></button></div><div className="lora-caption-tags">{tags.length ? tags.map((tag) => <span key={tag}><b>{tag}</b>{translations[tag] && <small>{translations[tag]}</small>}<button disabled={locked} onClick={() => { setTags((current) => current.filter((item) => item !== tag)); setEdited(true); }} aria-label={`删除标签 ${tag}`}><X size={11} /></button></span>) : <p>尚未打标，可自动打标或手动添加。</p>}</div><div className="lora-caption-add"><input value={newTag} disabled={locked} onChange={(event) => setNewTag(event.target.value)} placeholder="输入英文标签" onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addTag(); } }} /><button disabled={locked || !newTag.trim()} onClick={addTag}><Plus size={13} />添加</button></div><button className="lora-caption-save" disabled={locked || saving || !dirty} onClick={() => void save()}>{saving ? <LoaderCircle className="spin" /> : <Save size={14} />}{saving ? '保存中' : dirty ? '保存标签到后端' : '已保存'}</button></article>;
+  return <article className={`lora-caption-asset${asset.caption?.trim() ? ' captioned' : ''}`}>
+    <div className="lora-caption-image"><PrivateDatasetImage token={token} datasetId={datasetId} assetId={asset.id} /><span>{asset.width && asset.height ? `${asset.width} × ${asset.height}` : '训练图片'}</span><button disabled={locked} onClick={() => void removeImage()} aria-label="删除图片"><Trash2 size={14} /></button></div>
+    <section className="lora-caption-column lora-caption-original"><header><span>英文原标签</span><small>{tags.length} 个</small></header><div className="lora-caption-tag-list">{tags.length ? tags.map((tag) => <span className="lora-caption-tag" style={tagColorStyle(translations[tag])} key={tag}><b>{tag}</b><button disabled={locked} onClick={() => { setTags((current) => current.filter((item) => item !== tag)); setEdited(true); }} aria-label={`删除标签 ${tag}`}><X size={11} /></button></span>) : <p>尚未打标，可自动打标或手动添加。</p>}</div><footer><div className="lora-caption-add"><input value={newTag} disabled={locked} onChange={(event) => setNewTag(event.target.value)} placeholder="输入英文标签" onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addTag(); } }} /><button disabled={locked || !newTag.trim()} onClick={addTag}><Plus size={13} />添加</button></div><button className="lora-caption-save" disabled={locked || saving || !dirty} onClick={() => void save()}>{saving ? <LoaderCircle className="spin" /> : <Save size={14} />}{saving ? '保存中' : dirty ? '保存标签' : '已保存'}</button></footer></section>
+    <section className="lora-caption-column lora-caption-translated"><header><span>中文翻译</span><small>同色对应原标签</small></header><div className="lora-caption-tag-list">{tags.length ? tags.map((tag) => { const translation = translations[tag]; return translation ? <span className="lora-caption-tag translation" style={tagColorStyle(translation)} key={tag} title={translation.source === 'common' ? '平台常用标签翻译集' : '智能翻译并已持久化'}><b>{translation.translated}</b><small>{translation.source === 'common' ? '常用' : '补全'}</small></span> : <span className="lora-caption-tag is-pending" key={tag}><LoaderCircle className="spin" /><b>{tag}</b><small>读取中</small></span>; }) : <p>英文标签生成后会自动读取中文翻译。</p>}</div></section>
+  </article>;
 }
 
 /** 图片进入视口后再读取私有二进制，避免大训练集首屏并发加载全部原图。 */
@@ -209,6 +232,8 @@ function splitTags(value: string): string[] { return [...new Set(value.split(/[,
 function normalizeTag(value: string): string { return value.trim().replace(/\s+/g, ' ').toLowerCase(); }
 /** 统一 Caption 序列化格式，避免无意义空白产生脏状态。 */
 function normalizeCaption(value: string): string { return splitTags(value).join(', '); }
+/** 把后端持久化色写入同一英文、中文标签的 CSS 变量。 */
+function tagColorStyle(translation: TagTranslation | undefined): CSSProperties { return { '--tag-color': translation?.color || '#64748b' } as CSSProperties; }
 /** 输出打标阶段中文状态。 */
 function stageLabel(status: LocalCaptioningStageView['status'] | null | undefined): string {
   return { queued: '等待打标', running: '自动打标中', awaiting_confirmation: '等待确认', confirmed: '已确认', failed: '打标失败', stale: '需要重新打标' }[String(status)] || '未打标';

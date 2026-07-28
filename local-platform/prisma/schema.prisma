@@ -633,6 +633,20 @@ model TrainingCaptionJob {
   @@index([status, createdAt])
 }
 
+/// LoRA 训练标签的持久化中文翻译、稳定色与使用统计。
+model TrainingTagTranslation {
+  id          String   @id @default(uuid()) @db.VarChar(36)
+  tag         String   @unique @db.VarChar(191)
+  translated  String   @db.VarChar(500)
+  color       String   @unique @db.Char(7)
+  source      String   @db.VarChar(100)
+  usageCount  Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([usageCount, updatedAt])
+}
+
 model DatasetAsset {
   id         String   @id @default(uuid()) @db.VarChar(36)
   datasetId  String   @db.VarChar(36)

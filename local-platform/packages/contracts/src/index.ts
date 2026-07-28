@@ -584,7 +584,12 @@ export const trainingTagTranslationRequestSchema = z.object({
 
 /** LoRA 打标工具的中英文标签对照结果。 */
 export const trainingTagTranslationViewSchema = z.object({
-  translations: z.array(z.object({ tag: z.string().min(1), translated: z.string().min(1) })).max(200),
+  translations: z.array(z.object({
+    tag: z.string().min(1),
+    translated: z.string().min(1),
+    color: z.string().regex(/^#[a-f0-9]{6}$/i),
+    source: z.enum(["common", "ai"]),
+  })).max(200),
 });
 
 /** 训练任务视图。 */

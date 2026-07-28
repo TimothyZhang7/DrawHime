@@ -18,6 +18,7 @@
     "db:migrate:deploy": "prisma migrate deploy",
     "db:validate": "prisma validate",
     "bootstrap:anima": "node scripts/bootstrap-anima-catalog.mjs",
+    "bootstrap:tag-translations": "node apps/api/dist/bootstrap-tag-translations.js",
     "sync:anima-models": "node scripts/sync-anima-base-models.mjs",
     "migrate:main-loras": "node scripts/migrate-main-loras.mjs",
     "deploy:training-runtime": "node scripts/deploy-training-runtime.mjs",

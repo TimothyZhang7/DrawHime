@@ -65,6 +65,10 @@ export interface LocalCaptioningDatasetListView {
 export interface LocalCaptioningTagTranslationView {
   tag: string;
   translated: string;
+  /** 后端翻译集分配的稳定唯一色。 */
+  color: string;
+  /** 翻译来源：内置常用词或 AI 补全。 */
+  source: 'common' | 'ai';
 }
 
 /** 标签翻译响应数据。 */

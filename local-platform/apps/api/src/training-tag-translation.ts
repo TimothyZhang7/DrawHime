@@ -2,25 +2,19 @@
  * 本文件调用独立平台已有提示辅助端点，把英文 LoRA 训练标签批量翻译为简体中文对照。
  */
 import type { TrainingTagTranslationView } from "@drawhime/contracts";
-
-const translationCache = new Map<string, string>();
-const maximumCachedTags = 5000;
+import { normalizeTag, normalizeTags, readTagTranslations, saveAiTagTranslation } from "./training-tag-library.js";
 
 /** 批量翻译去重后的英文标签；中文结果只用于人工核对，不改写训练 Caption。 */
 export async function translateTrainingTags(tags: string[]): Promise<TrainingTagTranslationView> {
-  const normalized = [...new Set(tags.map(normalizeTag).filter(Boolean))];
-  const missing = normalized.filter((tag) => !translationCache.has(tag));
+  const normalized = normalizeTags(tags);
+  const stored = await readTagTranslations(normalized, false);
+  const storedTags = new Set(stored.map((item) => item.tag));
+  const missing = normalized.filter((tag) => !storedTags.has(tag));
   if (missing.length > 0) {
     const translated = await requestTranslations(missing);
-    for (const item of translated) translationCache.set(item.tag, item.translated);
-    trimCache();
+    await Promise.all(translated.map((item) => saveAiTagTranslation(item.tag, item.translated)));
   }
-  return {
-    translations: normalized.flatMap((tag) => {
-      const translated = translationCache.get(tag);
-      return translated ? [{ tag, translated }] : [];
-    }),
-  };
+  return { translations: await readTagTranslations(normalized) };
 }
 
 /** 调用真实 OpenAI 兼容文本模型并要求稳定 JSON 数组。 */
@@ -79,20 +73,6 @@ function readTranslationItems(text: string): Array<{ tag: string; translated: st
       ? [{ tag: record.tag, translated: record.translated }]
       : [];
   });
-}
-
-/** 统一英文标签空白和大小写，缓存键与训练 Caption 保持一致。 */
-function normalizeTag(value: string): string {
-  return value.trim().replace(/\s+/g, " ").toLowerCase();
-}
-
-/** 限制进程内翻译缓存大小，避免长期运行持续增长。 */
-function trimCache(): void {
-  while (translationCache.size > maximumCachedTags) {
-    const first = translationCache.keys().next().value;
-    if (typeof first !== "string") return;
-    translationCache.delete(first);
-  }
 }
 
 /** 读取必填提示辅助配置，缺失时明确返回未配置错误。 */

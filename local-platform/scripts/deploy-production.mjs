@@ -212,6 +212,7 @@ set +a
 pnpm run db:generate
 pnpm run db:migrate:deploy
 pnpm run build
+pnpm run bootstrap:tag-translations
 pnpm run bootstrap:anima
 pnpm run migrate:main-loras
 test -f ecosystem.config.cjs || cp ecosystem.config.example.cjs ecosystem.config.cjs
