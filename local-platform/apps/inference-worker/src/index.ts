@@ -12,11 +12,11 @@ import {
   createObjectStorageCheck,
   createRedisCheck,
   InferenceQueue,
-  getObjectBuffer,
   putObjectBuffer,
   startService,
 } from "@drawhime/service-runtime";
 import { enhanceAnimaPrompt } from "./prompt-assist.js";
+import { ensureComfyLora } from "./lora-sync.js";
 
 const queue = new InferenceQueue();
 let shuttingDown = false;
@@ -461,7 +461,14 @@ async function resolveTaskLoras(versionIds: string[], strengths: Record<string, 
     if (!version) throw new Error("任务 LoRA 文件版本已经不可用");
     // GPU 同步扩展只接受以内容哈希命名的受控文件名，禁止把用户上传文件名直接传入 GPU 主机。
     const gpuFileName = buildGpuLoraFileName(version.sha256);
-    await ensureComfyLora(version.objectKey, gpuFileName, version.sha256, Number(version.byteSize));
+    await ensureComfyLora({
+      baseUrl: requiredEnvironment("COMFYUI_BASE_URL"),
+      token: requiredEnvironment("COMFYUI_SERVICE_TOKEN"),
+      objectKey: version.objectKey,
+      fileName: gpuFileName,
+      sha256: version.sha256,
+      sizeBytes: Number(version.byteSize),
+    });
     result.push({ fileName: gpuFileName, strength: normalizeRuntimeLoraStrength(strengths[versionId], version.loraEntry.type), triggerWords: snapshots[versionId]?.triggerWords ?? readRuntimeTriggerWords(version.loraEntry.triggerWords) });
   }
   return result;
@@ -491,45 +498,6 @@ function buildGpuLoraFileName(sha256: string): string {
   const normalized = sha256.trim().toLowerCase();
   if (!/^[a-f0-9]{64}$/.test(normalized)) throw new Error("任务 LoRA 文件哈希不正确");
   return `aiimage_lora_${normalized}.safetensors`;
-}
-
-/** 检查并同步一个 LoRA 到受保护的 ComfyUI 扩展端点。 */
-async function ensureComfyLora(objectKey: string, fileName: string, sha256: string, sizeBytes: number): Promise<void> {
-  const baseUrl = requiredEnvironment("COMFYUI_BASE_URL").replace(/\/$/, "");
-  const token = requiredEnvironment("COMFYUI_SERVICE_TOKEN");
-  const url = `${baseUrl}/aiimage/loras/${encodeURIComponent(fileName)}`;
-  const status = await readComfyLoraStatus(url, token);
-  if (status.status === 200) {
-    if (status.data?.sha256 === sha256 && Number(status.data.sizeBytes) === sizeBytes) return;
-  } else if (status.status !== 404) {
-    throw new Error(`ComfyUI LoRA 检查失败：HTTP ${status.status}`);
-  }
-  const object = await getObjectBuffer(objectKey);
-  if (object.body.length !== sizeBytes || createHash("sha256").update(object.body).digest("hex") !== sha256) throw new Error("独立对象存储 LoRA 校验失败");
-  try {
-    const uploaded = await fetch(url, { method: "PUT", headers: { "content-type": "application/octet-stream", "content-length": String(sizeBytes), "x-service-token": token, "x-aiimage-sha256": sha256 }, body: new Blob([new Uint8Array(object.body)]) });
-    const result = await uploaded.json().catch(() => null) as { ok?: boolean; sha256?: string; sizeBytes?: number; message?: string } | null;
-    if (!uploaded.ok || result?.ok !== true || result.sha256 !== sha256 || Number(result.sizeBytes) !== sizeBytes) throw new Error(result?.message || `ComfyUI LoRA 同步失败：HTTP ${uploaded.status}`);
-  } catch (error) {
-    // 大文件已完整写入但响应连接被中途关闭时，必须按 GPU 端最终 SHA-256 判定成功，避免错误退款。
-    const verified = await readComfyLoraStatus(url, token).catch(() => null);
-    if (verified?.data?.sha256 !== sha256 || Number(verified.data.sizeBytes) !== sizeBytes) throw error;
-  }
-}
-
-/** 短状态请求最多重试三次；只限制单次网络读取，不限制 LoRA 上传或模型生成总时长。 */
-async function readComfyLoraStatus(url: string, token: string): Promise<{ status: number; data: { sha256?: string; sizeBytes?: number } | null }> {
-  let lastError: unknown;
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
-    try {
-      const response = await fetch(url, { headers: { "x-service-token": token }, signal: AbortSignal.timeout(30000) });
-      return { status: response.status, data: response.ok ? await response.json().catch(() => null) as { sha256?: string; sizeBytes?: number } | null : null };
-    } catch (error) {
-      lastError = error;
-      if (attempt < 3) await sleep(attempt * 500);
-    }
-  }
-  throw lastError;
 }
 
 /** 读取必填运行配置。 */

@@ -102,6 +102,24 @@ export async function getObjectBuffer(objectKey: string): Promise<{ body: Buffer
   }
 }
 
+/** 按闭区间读取大对象分片，供 GPU 断点同步限制单次内存和网络失败范围。 */
+export async function getObjectRange(objectKey: string, start: number, endInclusive: number): Promise<Buffer> {
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(endInclusive) || start < 0 || endInclusive < start) {
+    throw new Error("对象存储读取范围不正确");
+  }
+  const { client, bucket } = createObjectStorageClient();
+  try {
+    const result = await client.send(new GetObjectCommand({ Bucket: bucket, Key: objectKey, Range: `bytes=${start}-${endInclusive}` }));
+    if (!result.Body) throw new Error("对象存储返回空分片");
+    const body = Buffer.from(await result.Body.transformToByteArray());
+    const expectedBytes = endInclusive - start + 1;
+    if (body.length !== expectedBytes) throw new Error(`对象存储分片长度不正确：期望 ${expectedBytes}，收到 ${body.length}`);
+    return body;
+  } finally {
+    client.destroy();
+  }
+}
+
 /** 把独立对象存储中的大对象直接写入目标流，避免完整文件进入 Node 堆内存。 */
 export async function streamObjectToWritable(objectKey: string, destination: Writable): Promise<void> {
   const { client, bucket } = createObjectStorageClient();

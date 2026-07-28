@@ -87,6 +87,14 @@
 | `GET /internal/bot/jobs?ids=` | 主站 backend | api | 批量读取 Bot 本地任务状态；成功图片只返回已发布到主站正式图库的媒体地址 |
 | `GET /internal/artifacts/:id/content` | 主站 backend | api | 使用 `x-local-platform-token` 读取已成功、已提交计费任务的产物；主站必须再次校验 SHA-256 和字节数 |
 
+### ComfyUI LoRA 断点同步
+
+- 调用方：`inference-worker`；提供方：GPU ComfyUI 自定义节点。
+- `GET /aiimage/loras/:fileName` 保留为已安装文件的大小与 SHA-256 查询；`PUT /aiimage/loras/:fileName` 保留完整文件上传兼容能力。
+- `GET /aiimage/loras/:fileName/upload` 查询固定 SHA 临时文件的真实接收偏移；`PUT` 按该偏移追加单个分片；`POST` 在完整 SHA-256、总大小和 safetensors 结构校验后原子安装；`DELETE` 清理未完成分片。
+- 断点接口统一校验 `x-service-token`、`x-aiimage-sha256`、`x-aiimage-total-bytes`，分片追加额外校验 `x-aiimage-offset`。成功响应使用 `{ ok: true, data }`；偏移冲突返回 HTTP 409 和真实偏移，Worker 必须重新查询后续传，不得从头覆盖。
+- Worker 从独立对象存储按 4 MiB Range 读取并上传，单片使用有上限的超时、重试与偏移复核；Runtime 任务只能在完整文件原子安装成功后提交到 ComfyUI。
+
 用户端入口支持 `GET /local-model/?tab=create|jobs|loras|training`，LoRA 详情使用 `tab=loras&lora=:id` 并支持浏览器前进后退；主站历史 `/loras` 入口使用完整页面跳转到 `tab=loras`，不会重新进入主站旧写链路。
 
 ### 用户提交冷却语义
