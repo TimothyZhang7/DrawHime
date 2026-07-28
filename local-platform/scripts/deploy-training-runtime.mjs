@@ -36,12 +36,14 @@ const setup = `set -euo pipefail
 ROOT=/data/drawhime-training
 REV=${revision}
 if [ ! -d /data/sd-scripts/.git ]; then git clone https://github.com/kohya-ss/sd-scripts.git /data/sd-scripts; fi
-# GPU 主机公网偶发 HTTP/2 中断，固定 HTTP/1.1 并有限重试同一不可变修订。
-for attempt in 1 2 3; do
-  git -c http.version=HTTP/1.1 -C /data/sd-scripts fetch --depth 1 origin "$REV" && break
-  if [ "$attempt" = 3 ]; then exit 1; fi
-  sleep $((attempt * 5))
-done
+# 已有固定修订时直接复用本地对象，避免每次 Runtime 参数更新都被 GitHub 网络阻塞。
+if ! git -C /data/sd-scripts cat-file -e "$REV^{commit}" 2>/dev/null; then
+  for attempt in 1 2 3; do
+    git -c http.version=HTTP/1.1 -C /data/sd-scripts fetch --depth 1 origin "$REV" && break
+    if [ "$attempt" = 3 ]; then exit 1; fi
+    sleep $((attempt * 5))
+  done
+fi
 git -C /data/sd-scripts checkout --detach "$REV"
 if [ ! -x "$ROOT/venv/bin/python" ]; then /data/anaconda3/envs/anima/bin/python -m venv --system-site-packages "$ROOT/venv"; fi
 "$ROOT/venv/bin/python" -m pip install --index-url https://pypi.tuna.tsinghua.edu.cn/simple --upgrade pip setuptools wheel

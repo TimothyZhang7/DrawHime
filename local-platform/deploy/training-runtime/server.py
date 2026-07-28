@@ -150,13 +150,15 @@ def write_dataset_config(job_id: str, image_dir: Path, parameters: dict[str, Any
 def build_command(job_id: str, payload: dict[str, Any], config: Path) -> list[str]:
     """依据 Anima 官方训练脚本构建 P40 显存受控命令。"""
     parameters = payload["parameters"]
+    resolution = int(parameters["resolution"])
+    blocks_to_swap = 8 if resolution <= 768 else 12 if resolution <= 1024 else 18
     output_dir = JOBS / job_id / "output"
     output_dir.mkdir(parents=True, exist_ok=True)
     image_passes = len(payload["dataset"]) * int(parameters["repeats"]) * int(parameters["epochs"])
     optimizer_steps = max(1, (image_passes + int(parameters["gradientAccumulationSteps"]) - 1) // int(parameters["gradientAccumulationSteps"]))
     warmup_steps = round(optimizer_steps * float(parameters["warmupRatio"]))
     command = [
-        str(VENV / "bin" / "accelerate"), "launch", "--num_cpu_threads_per_process", "1",
+        str(VENV / "bin" / "accelerate"), "launch", "--num_cpu_threads_per_process", "4",
         str(SD_SCRIPTS / "anima_train_network.py"),
         f"--pretrained_model_name_or_path={MODEL_ROOT / 'diffusion_models' / payload['baseModelFile']}",
         f"--qwen3={MODEL_ROOT / 'text_encoders' / payload['textEncoderFile']}",
@@ -168,13 +170,13 @@ def build_command(job_id: str, payload: dict[str, Any], config: Path) -> list[st
         f"--learning_rate={float(parameters['learningRate'])}", "--optimizer_type=AdamW8bit", f"--lr_scheduler={parameters['lrScheduler']}",
         f"--lr_warmup_steps={warmup_steps}", f"--gradient_accumulation_steps={int(parameters['gradientAccumulationSteps'])}",
         "--timestep_sampling=sigmoid", "--discrete_flow_shift=1.0", f"--max_train_epochs={int(parameters['epochs'])}",
-        "--mixed_precision=bf16", "--save_precision=bf16", "--gradient_checkpointing", "--cache_latents", "--cache_latents_to_disk",
-        "--qwen_image_vae_2d", "--blocks_to_swap=18",
-        f"--seed={int(parameters['seed'])}", "--max_data_loader_n_workers=2", "--persistent_data_loader_workers",
+        "--mixed_precision=bf16", "--save_precision=bf16", "--gradient_checkpointing", "--cache_latents",
+        "--qwen_image_vae_2d", f"--blocks_to_swap={blocks_to_swap}",
+        f"--seed={int(parameters['seed'])}", "--max_data_loader_n_workers=4", "--persistent_data_loader_workers",
     ]
     # sd-scripts 禁止在随机打乱 Caption 时缓存 Text Encoder 输出；保留用户参数并自动切换兼容执行路径。
     if not parameters["shuffleCaption"]:
-        command.extend(["--cache_text_encoder_outputs", "--cache_text_encoder_outputs_to_disk"])
+        command.append("--cache_text_encoder_outputs")
     if parameters["lrScheduler"] == "cosine_with_restarts":
         command.append("--lr_scheduler_num_cycles=2")
     return command
@@ -252,7 +254,8 @@ def run_training(job_id: str, payload: dict[str, Any]) -> None:
                 current_state = load_state(job_id) or {}
                 if current_state.get("status") == "cancelled":
                     return
-                current_state.update({"status": "running", "progress": 2, "currentEpoch": 0, "metrics": {"command": command, "textEncoderCacheEnabled": not payload["parameters"]["shuffleCaption"]}, "errorMessage": None})
+                blocks_to_swap = next((int(item.split("=", 1)[1]) for item in command if item.startswith("--blocks_to_swap=")), 18)
+                current_state.update({"status": "running", "progress": 2, "currentEpoch": 0, "metrics": {"command": command, "runtimeProfile": "anima-p40-fast-v1", "blocksToSwap": blocks_to_swap, "memoryCacheEnabled": True, "textEncoderCacheEnabled": not payload["parameters"]["shuffleCaption"]}, "errorMessage": None})
                 process = subprocess.Popen(command, cwd=SD_SCRIPTS, env=environment, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, start_new_session=True)
                 processes[job_id] = process
                 current_state["pid"] = process.pid
