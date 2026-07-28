@@ -9,21 +9,21 @@
 3. **修改**：只修改本次范围，执行 `git diff --check`，不得处理无关工作树内容。
 4. **最小验证**：开发迭代只运行受影响包的 `type-check` 或测试。部署脚本会执行 `db:validate`、全仓类型检查、测试和构建，因此正式部署前不再手工重复整套命令。
 5. **生产预检**：检查本地 diff、私有配置键是否齐全、生产 `/health`/`/ready`、数据库活动任务和脱敏后的 ComfyUI 队列计数；运行部署 `--dry-run`。
-6. **部署**：前端单独变化使用 `--target web`；服务、目录、Runtime 或模型配置变化使用完整部署。部署期间不得覆盖生产 `.env`、余额、对象存储、LoRA、媒体或数据库。
+6. **部署**：按实际端点选择 `web`、`admin`、`api`、`scheduler`、`gpu-agent`、`inference-worker`、`training-worker` 或 `artifact-service`；只改部署工具与文档使用 `source`。只有基础设施、跨全平台配置或首次安装才使用 `all`。
 7. **验收**：验证六个服务 `/health`、API `/ready`、公网用户端和 API；模型变化额外查询模型目录、最新工作流版本和实际 Runtime 节点参数。
 8. **提交**：仅在部署与验收成功后，用明确路径暂存，执行暂存区 diff 检查并创建本地提交。
 9. **公开同步**：把已部署源码和文档同步到 `DrawHime-public/local-platform`，先做逐文件比较，再提交、推送并核对远端 SHA。
 
 ## 快速命令骨架
 
-普通服务或模型配置变更：
+普通单服务变更：
 
 ```powershell
 git status --short
 git diff --check
 pnpm --filter @drawhime/<affected-package> run type-check
-node scripts/deploy-production.mjs --dry-run
-node scripts/deploy-production.mjs
+node scripts/deploy-production.mjs --target <affected-service> --dry-run
+node scripts/deploy-production.mjs --target <affected-service>
 git add -- <明确路径>
 git diff --cached --check
 git commit -m "<类型>: <中文摘要>"
@@ -38,6 +38,8 @@ node scripts/deploy-production.mjs --target web
 ```
 
 文档独立修改不重启运行服务；完成链接、Markdown、diff、提交和公开同步检查即可。训练 Runtime 变化使用 `node scripts/deploy-training-runtime.mjs --dry-run` 后再正式部署，不与平台部署命令混用。
+
+可选目标：`web`、`admin`、`api`、`scheduler`、`gpu-agent`、`inference-worker`、`training-worker`、`artifact-service`、`source`、`all`。单服务目标只上传共享包与对应 app，只构建和重启该 PM2 进程；`api` 额外执行 Prisma 生成、生产迁移和标签种子，其他服务不触碰数据库。前端目标直接上传本机构建产物，不在生产机安装依赖。
 
 ## 生产队列规则
 

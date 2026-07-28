@@ -1,5 +1,5 @@
 /**
- * 本文件把独立本地模型平台部署到生产主机，负责源码、基础设施、迁移、PM2、静态目录和 OpenResty 验证。
+ * 本文件按目标增量部署独立本地模型平台，并保留 all 模式负责首次安装、基础设施、迁移和全平台验证。
  */
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync } from "node:fs";
@@ -18,9 +18,18 @@ const trainingRuntimeBaseUrl = requirePrivateEnvironment("TRAINING_RUNTIME_BASE_
 const stamp = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
 const dryRun = process.argv.includes("--dry-run");
 const target = readTargetArgument(process.argv.slice(2));
-if (!new Set(["all", "web"]).has(target)) throw new Error(`不支持的部署目标：${target}`);
-const archive = resolve(root, target === "web" ? `drawhime-local-web-${stamp}.tar.gz` : `drawhime-local-platform-${stamp}.tar.gz`);
-const remoteArchive = target === "web" ? `/tmp/drawhime-local-web-${stamp}.tar.gz` : `/tmp/drawhime-local-platform-${stamp}.tar.gz`;
+const serviceTargets = {
+  api: { workspace: "@drawhime/api", app: "api", pm2: "local-api", port: 7102, prisma: true },
+  scheduler: { workspace: "@drawhime/scheduler", app: "scheduler", pm2: "local-scheduler", port: 7103 },
+  "gpu-agent": { workspace: "@drawhime/gpu-agent", app: "gpu-agent", pm2: "local-gpu-agent", port: 7110 },
+  "inference-worker": { workspace: "@drawhime/inference-worker", app: "inference-worker", pm2: "local-inference-worker", port: 7111 },
+  "training-worker": { workspace: "@drawhime/training-worker", app: "training-worker", pm2: "local-training-worker", port: 7112 },
+  "artifact-service": { workspace: "@drawhime/artifact-service", app: "artifact-service", pm2: "local-artifact-service", port: 7113 },
+};
+const validTargets = new Set(["all", "web", "admin", "source", ...Object.keys(serviceTargets)]);
+if (!validTargets.has(target)) throw new Error(`不支持的部署目标：${target}`);
+const archive = resolve(root, `drawhime-local-${target}-${stamp}.tar.gz`);
+const remoteArchive = `/tmp/drawhime-local-${target}-${stamp}.tar.gz`;
 
 const sshArguments = [
   ...(existsSync(key) ? ["-i", key] : []),
@@ -33,12 +42,20 @@ const sshArguments = [
 ];
 
 if (dryRun) {
-  process.stdout.write(`部署模式：${target === "web" ? "web（仅用户前端静态文件）" : "all（完整平台）"}\n目标：${host}:${port}\n生产目录：/local-platform\n用户路径：https://www.xanime.ink/local-model/\n管理路径：https://admin.xanime.ink/local-model-admin/\n`);
+  process.stdout.write(`部署模式：${describeTarget(target)}\n目标：${host}:${port}\n生产目录：/local-platform\n用户路径：https://www.xanime.ink/local-model/\n管理路径：https://admin.xanime.ink/local-model-admin/\n`);
   process.exit(0);
 }
 
-if (target === "web") {
-  deployWebOnly();
+if (target === "web" || target === "admin") {
+  deployFrontendOnly(target);
+  process.exit(0);
+}
+if (target === "source") {
+  deploySourceOnly();
+  process.exit(0);
+}
+if (serviceTargets[target]) {
+  deployServiceOnly(target, serviceTargets[target]);
   process.exit(0);
 }
 
@@ -74,28 +91,31 @@ function readTargetArgument(arguments_) {
   return index >= 0 ? arguments_[index + 1] : "all";
 }
 
-/** 只发布本机构建完成的用户前端静态产物，不触碰数据库、服务进程和 LoRA 数据。 */
-function deployWebOnly() {
-  run("pnpm", ["--filter", "@drawhime/web", "run", "type-check"]);
-  run("pnpm", ["--filter", "@drawhime/web", "run", "build"]);
-  const distribution = resolve(root, "apps", "web", "dist");
+/** 只发布指定前端静态产物，不触碰数据库、服务进程和 LoRA 数据。 */
+function deployFrontendOnly(frontendTarget) {
+  const definition = frontendTarget === "web"
+    ? { workspace: "@drawhime/web", app: "web", publicRoot: "/data/1panel/www/sites/xanime.ink/local-model", url: "https://www.xanime.ink/local-model/", marker: "绘图姬" }
+    : { workspace: "@drawhime/admin", app: "admin", publicRoot: "/data/1panel/www/sites/admin.xanime.ink/local-model-admin", url: "https://admin.xanime.ink/local-model-admin/", marker: "DrawHime Local" };
+  run("pnpm", ["--filter", definition.workspace, "run", "type-check"]);
+  run("pnpm", ["--filter", definition.workspace, "run", "build"]);
+  const distribution = resolve(root, "apps", definition.app, "dist");
   if (!existsSync(resolve(distribution, "index.html"))) throw new Error("用户前端构建产物缺少 index.html");
   try {
     // 直接上传静态产物，避免远端重复安装依赖和全仓构建。
     run("tar", ["-czf", archive, "-C", distribution, "."]);
     run("ssh", [...sshArguments, "-p", port, host, `cat > '${remoteArchive}'`], { input: readFileSync(archive) });
-    run("ssh", [...sshArguments, "-p", port, host, "bash", "-s"], { input: webOnlyProductionScript() });
+    run("ssh", [...sshArguments, "-p", port, host, "bash", "-s"], { input: frontendOnlyProductionScript(frontendTarget, definition) });
   } finally {
     rmSync(archive, { force: true });
   }
 }
 
-/** 生成用户前端静态产物的远端校验、备份和兼容缓存发布脚本。 */
-function webOnlyProductionScript() {
+/** 生成单个前端静态产物的远端校验、备份和兼容缓存发布脚本。 */
+function frontendOnlyProductionScript(frontendTarget, definition) {
   return `set -euo pipefail
-WEB_ROOT=/data/1panel/www/sites/xanime.ink/local-model
-TMP=/tmp/drawhime-local-web-${stamp}
-BACKUP=/local-platform/backups/web-${stamp}
+WEB_ROOT='${definition.publicRoot}'
+TMP=/tmp/drawhime-local-${frontendTarget}-${stamp}
+BACKUP=/local-platform/backups/${frontendTarget}-${stamp}
 mkdir -p "$TMP" "$BACKUP" "$WEB_ROOT"
 tar -xzf '${remoteArchive}' -C "$TMP"
 test -f "$TMP/index.html"
@@ -107,15 +127,117 @@ cp -a "$TMP"/. "$WEB_ROOT"/
 chmod -R a+rX "$WEB_ROOT"
 if id 1panel >/dev/null 2>&1; then chown -R 1panel:1panel "$WEB_ROOT"; fi
 for attempt in $(seq 1 20); do
-  if curl -kfsS 'https://www.xanime.ink/local-model/?deploy=${stamp}' 2>/dev/null | grep -q '绘图姬'; then
+  if curl -kfsS '${definition.url}?deploy=${stamp}' 2>/dev/null | grep -q '${definition.marker}'; then
     rm -rf "$TMP" '${remoteArchive}'
-    echo '本地模型用户前端快速部署验证完成'
+    echo '${frontendTarget} 前端快速部署验证完成'
     exit 0
   fi
   sleep 1
 done
-echo '验证失败：https://www.xanime.ink/local-model/' >&2
+echo '验证失败：${definition.url}' >&2
 exit 1
+`;
+}
+
+/** 返回 dry-run 使用的目标说明，明确本次不会全量重启。 */
+function describeTarget(selectedTarget) {
+  if (selectedTarget === "all") return "all（完整平台）";
+  if (selectedTarget === "web") return "web（仅用户前端）";
+  if (selectedTarget === "admin") return "admin（仅管理前端）";
+  if (selectedTarget === "source") return "source（仅部署工具与文档）";
+  return `${selectedTarget}（仅对应服务）`;
+}
+
+/** 只构建、上传、重启和验证一个后端服务，数据库迁移仅由 API 目标执行。 */
+function deployServiceOnly(serviceTarget, definition) {
+  const validationEnvironment = { ...process.env, DATABASE_URL: process.env.DATABASE_URL || "mysql://local_platform:local_platform@127.0.0.1:3317/drawhime_local" };
+  if (definition.prisma) {
+    run("pnpm", ["run", "db:validate"], { env: validationEnvironment });
+    run("pnpm", ["run", "db:generate"], { env: validationEnvironment });
+  }
+  run("pnpm", ["run", "build:packages"]);
+  run("pnpm", ["--filter", definition.workspace, "run", "type-check"]);
+  run("pnpm", ["--filter", definition.workspace, "run", "build"]);
+  if (serviceTarget === "api") run("pnpm", ["--filter", definition.workspace, "run", "test"]);
+  const packageItems = ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "tsconfig.base.json", ".npmrc", "packages", `apps/${definition.app}`, ...(definition.prisma ? ["prisma"] : [])];
+  try {
+    run("tar", ["-czf", archive, "--exclude=node_modules", "--exclude=dist", "--exclude=*.tsbuildinfo", "--exclude=.env", "-C", root, ...packageItems]);
+    run("ssh", [...sshArguments, "-p", port, host, `cat > '${remoteArchive}'`], { input: readFileSync(archive) });
+    run("ssh", [...sshArguments, "-p", port, host, "bash", "-s"], { input: serviceOnlyProductionScript(serviceTarget, definition) });
+  } finally {
+    rmSync(archive, { force: true });
+  }
+}
+
+/** 生成单服务增量发布脚本；保留其他服务源码、静态站点、对象存储和全部数据库数据。 */
+function serviceOnlyProductionScript(serviceTarget, definition) {
+  const prismaCommands = definition.prisma
+    ? "pnpm run db:generate\npnpm run db:migrate:deploy"
+    : "";
+  const postBuildCommands = definition.prisma ? "pnpm run bootstrap:tag-translations" : "";
+  return `set -euo pipefail
+ROOT=/local-platform
+TMP=/tmp/drawhime-local-${serviceTarget}-${stamp}
+BACKUP="$ROOT/backups/${serviceTarget}-${stamp}"
+mkdir -p "$TMP" "$BACKUP"
+tar -xzf '${remoteArchive}' -C "$TMP"
+tar -C "$ROOT" -czf "$BACKUP/source-before.tar.gz" --ignore-failed-read packages apps/${definition.app} ${definition.prisma ? "prisma" : ""} package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json || true
+rm -rf "$ROOT/packages" "$ROOT/apps/${definition.app}"
+cp -a "$TMP/packages" "$ROOT/packages"
+mkdir -p "$ROOT/apps"
+cp -a "$TMP/apps/${definition.app}" "$ROOT/apps/"
+${definition.prisma ? 'rm -rf "$ROOT/prisma"\ncp -a "$TMP/prisma" "$ROOT/prisma"' : ""}
+for item in package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json .npmrc; do cp -a "$TMP/$item" "$ROOT/$item"; done
+cd "$ROOT"
+export PUPPETEER_SKIP_DOWNLOAD=true
+pnpm install --frozen-lockfile
+pnpm run build:packages
+${prismaCommands}
+pnpm --filter ${definition.workspace} run build
+${postBuildCommands}
+pm2 restart ecosystem.config.cjs --only ${definition.pm2} --update-env
+pm2 save
+code=000
+for attempt in $(seq 1 20); do
+  code=$(curl -sS -o /tmp/local-${serviceTarget}-health.json -w '%{http_code}' http://127.0.0.1:${definition.port}/health || true)
+  [ "$code" = 200 ] && break
+  sleep 1
+done
+test "$code" = 200
+${serviceTarget === "api" ? "curl -kfsS https://www.xanime.ink/local-model-api/health | grep -q '\"service\":\"api\"'" : ""}
+rm -rf "$TMP" '${remoteArchive}'
+echo '${serviceTarget} 增量部署验证完成'
+`;
+}
+
+/** 只同步部署脚本、配置样例和文档，不安装依赖、不构建也不重启服务。 */
+function deploySourceOnly() {
+  run(process.execPath, ["--check", "scripts/deploy-production.mjs"]);
+  const items = ["AGENTS.md", "README.md", "configs", "deploy", "docs", "scripts", "ecosystem.config.example.cjs"];
+  try {
+    run("tar", ["-czf", archive, "--exclude=.env", "--exclude=.private", "-C", root, ...items]);
+    run("ssh", [...sshArguments, "-p", port, host, `cat > '${remoteArchive}'`], { input: readFileSync(archive) });
+    run("ssh", [...sshArguments, "-p", port, host, "bash", "-s"], { input: sourceOnlyProductionScript() });
+  } finally {
+    rmSync(archive, { force: true });
+  }
+}
+
+/** 生成部署工具源码同步脚本，保留生产私有配置并验证远端脚本语法。 */
+function sourceOnlyProductionScript() {
+  return `set -euo pipefail
+ROOT=/local-platform
+TMP=/tmp/drawhime-local-source-${stamp}
+BACKUP="$ROOT/backups/source-${stamp}"
+mkdir -p "$TMP" "$BACKUP"
+tar -xzf '${remoteArchive}' -C "$TMP"
+tar -C "$ROOT" -czf "$BACKUP/source-before.tar.gz" --ignore-failed-read AGENTS.md README.md configs deploy docs scripts ecosystem.config.example.cjs || true
+for item in AGENTS.md README.md configs deploy docs scripts ecosystem.config.example.cjs; do
+  if [ -e "$TMP/$item" ]; then rm -rf "$ROOT/$item"; cp -a "$TMP/$item" "$ROOT/$item"; fi
+done
+node --check "$ROOT/scripts/deploy-production.mjs"
+rm -rf "$TMP" '${remoteArchive}'
+echo '部署工具与文档增量同步完成'
 `;
 }
 

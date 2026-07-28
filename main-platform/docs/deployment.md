@@ -71,4 +71,8 @@ pm2 save
 
 ```powershell
 node scripts/quick-deploy.mjs --target backend --host root@HOST --dry-run
+node scripts/quick-deploy.mjs --changed --host root@HOST --dry-run
+node scripts/quick-deploy.mjs --target source --host root@HOST
 ```
+
+`--changed` 根据 Git 已跟踪改动选择最小服务或前端；`source` 仅同步部署工具、规范和文档。普通 app 变化只构建并重启对应端点，共享包、锁文件或全局构建配置变化会保守选择全部真实依赖端点。

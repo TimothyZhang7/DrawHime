@@ -12,6 +12,7 @@
     "test": "pnpm run build:packages && pnpm --filter @drawhime/api run build && pnpm --filter @drawhime/service-runtime --filter @drawhime/inference-runtime --filter @drawhime/api run test",
     "dev": "node scripts/dev.mjs",
     "deploy:production": "node scripts/deploy-production.mjs",
+    "deploy:quick": "node scripts/deploy-production.mjs",
     "db:generate": "prisma generate",
     "db:migrate:dev": "prisma migrate dev",
     "db:migrate:diff": "prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma --script",

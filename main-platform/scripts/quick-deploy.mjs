@@ -38,10 +38,9 @@ const frontends = {
   admin: { app: 'admin-portal', build: 'admin', dest: '/data/1panel/www/sites/admin.xanime.ink/index', url: 'https://admin.xanime.ink', rootSite: 'admin.xanime.ink' },
 };
 
-const allTargets = [...Object.keys(services), ...Object.keys(frontends)];
+const sourceTarget = 'source';
+const allTargets = [...Object.keys(services), ...Object.keys(frontends), sourceTarget];
 const retiredWorkspaceApps = ['workflow-service', 'workflow-studio', 'local-inference-service'];
-// 支撑型 workspace 目录只随源码包同步，不参与 PM2 重启；用于保留完整源码和独立部署脚本依赖的服务目录。
-const workspaceSupportApps = ['local-model-platform', 'image-upscale-gpu'];
 const args = parseArgs(process.argv.slice(2));
 const targets = resolveTargets(args);
 const deployHost = resolveDeployHost(args, targets);
@@ -89,6 +88,7 @@ function printPlan() {
   log(`远端目录：${remoteRootPath}`);
   log(`服务端：${serviceTargets.length ? serviceTargets.join(', ') : '无'}`);
   log(`前端：${frontendTargets.length ? frontendTargets.join(', ') : '无'}`);
+  log(`源码与部署工具：${targets.includes(sourceTarget) ? '同步' : '不单独同步'}`);
   log(`本地检查：${args.skipLocalCheck ? '跳过' : args.fullLocalCheck ? '全量 type-check' : '目标相关 type-check'}`);
   log(`远端检查：${args.fullRemoteCheck ? '全量 type-check 后构建' : '目标构建内置类型检查'}`);
   log(`远端会备份：${remoteRootPath}/backups/quick-${stamp}`);
@@ -110,12 +110,14 @@ function parseArgs(rawArgs) {
     fullRemoteCheck: false,
     fullLocalCheck: false,
     keepPackage: false,
+    changed: false,
   };
   for (let index = 0; index < rawArgs.length; index += 1) {
     const arg = rawArgs[index];
     if (arg === '--target' || arg === '-t') parsed.target.push(...String(rawArgs[++index] ?? '').split(','));
     else if (arg.startsWith('--target=')) parsed.target.push(...arg.slice('--target='.length).split(','));
     else if (arg === '--all') parsed.target.push('all');
+    else if (arg === '--changed') parsed.changed = true;
     else if (arg === '--host') {
       parsed.host = rawArgs[++index] ?? parsed.host;
       parsed.hostExplicit = true;
@@ -153,6 +155,7 @@ function printHelp() {
   console.log(`用法：
   node scripts/quick-deploy.mjs --target backend
   node scripts/quick-deploy.mjs --target web
+  node scripts/quick-deploy.mjs --changed
   node scripts/quick-deploy.mjs --all
 
 target 可选：
@@ -160,6 +163,7 @@ target 可选：
 
 常用参数：
   --dry-run           只显示计划
+  --changed           根据当前已跟踪改动自动选择受影响端点
   --skip-local-check  跳过本地目标相关检查
   --skip-install      远端跳过 pnpm install --frozen-lockfile
   --full-local-check  本地恢复执行 db:generate 和全仓 pnpm run type-check
@@ -178,15 +182,32 @@ target 可选：
 
 function resolveTargets(parsed) {
   const requested = parsed.target.map((item) => item.trim()).filter(Boolean);
-  if (requested.length === 0) throw new Error('必须指定 --target 或 --all');
+  if (parsed.changed || requested.length === 0) requested.push(...detectChangedTargets());
+  if (requested.length === 0) throw new Error('当前没有可部署的已跟踪改动，请指定 --target');
   if (requested.includes('all')) return allTargets.filter((target) => !services[target]?.isolated);
   const normalized = [...new Set(requested)];
   for (const target of normalized) {
-    if (!services[target] && !frontends[target]) {
+    if (!services[target] && !frontends[target] && target !== sourceTarget) {
       throw new Error(`未知 target：${target}，可选：${allTargets.join(', ')}`);
     }
   }
   return normalized;
+}
+
+/** 根据 Git 已跟踪文件的未提交变化推导最小端点集合；未跟踪文件必须先纳入 Git 意图再自动部署。 */
+function detectChangedTargets() {
+  const result = spawnSync('git', ['diff', '--name-only', 'HEAD'], { cwd: rootDir, encoding: 'utf8', shell: false });
+  if (result.status !== 0) throw new Error(`读取 Git 改动失败：${result.stderr?.trim() || '未知错误'}`);
+  const changed = String(result.stdout || '').split(/\r?\n/).filter(Boolean);
+  const inferred = new Set();
+  for (const path of changed) {
+    const appTarget = Object.entries({ ...services, ...frontends }).find(([, definition]) => path.startsWith(`apps/${definition.app}/`))?.[0];
+    if (appTarget) inferred.add(appTarget);
+    else if (path.startsWith('packages/') || ['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'tsconfig.base.json', '.npmrc', 'docker-compose.yml', 'ecosystem.config.example.js'].includes(path)) allTargets.filter((target) => target !== sourceTarget).forEach((target) => inferred.add(target));
+    else if (path.startsWith('apps/backend/prisma/')) inferred.add('backend');
+    else inferred.add(sourceTarget);
+  }
+  return [...inferred];
 }
 
 /** 根据 target 解析 SSH 主机；公开源码不内置任何生产地址。 */
@@ -206,6 +227,10 @@ function resolveRemoteRoot(selectedTargets) {
 
 /** 本地默认只检查本次 target 相关项目，避免每次前端部署都跑完整服务矩阵。 */
 function runLocalChecks() {
+  if (isSourceOnly()) {
+    runLocal(process.execPath, ['--check', 'scripts/quick-deploy.mjs']);
+    return;
+  }
   if (args.fullLocalCheck) {
     runPnpm(['--prefix', 'apps/backend', 'run', 'db:generate'], { env: deployEnv() });
     runPnpm(['run', 'type-check'], { env: deployEnv() });
@@ -219,26 +244,11 @@ function runLocalChecks() {
 }
 
 function createSourcePackage() {
-  const appPaths = [...selectedApps(), ...workspaceSupportApps].map((app) => `apps/${app}`);
+  const appPaths = (isSourceOnly() ? [] : selectedApps()).map((app) => `apps/${app}`);
   const rootFiles = [
-    'package.json',
-    'pnpm-lock.yaml',
-    'pnpm-workspace.yaml',
-    'tsconfig.base.json',
-    '.npmrc',
-    '.gitignore',
-    'AGENTS.md',
-    'AI_INDEX.md',
-    'DEPLOY.md',
-    'README.md',
-    'docker-compose.yml',
-    'ecosystem.config.example.js',
-    'configs',
-    'deploy',
-    'docs',
-    'scripts',
-    'standards',
-    'packages',
+    ...(!isSourceOnly() ? ['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'tsconfig.base.json', '.npmrc', '.gitignore', 'docker-compose.yml', 'ecosystem.config.example.js'] : []),
+    ...(!isSourceOnly() ? ['packages'] : []),
+    ...(targets.includes(sourceTarget) ? ['AGENTS.md', 'AI_INDEX.md', 'DEPLOY.md', 'README.md', 'TASKS.md', 'codex-skills', 'configs', 'deploy', 'docs', 'scripts', 'specs', 'standards'] : []),
     ...appPaths,
   ].filter((item, index, array) => array.indexOf(item) === index && existsSync(resolve(rootDir, item)));
   const output = resolve(rootDir, `aiimage-quick-${stamp}.tar.gz`);
@@ -294,21 +304,14 @@ function remotePackagePath(packagePath) {
 
 function remotePrepareScript(remotePackage, remoteStamp) {
   const apps = selectedApps();
-  const supportApps = workspaceSupportApps.filter((app) => existsSync(resolve(rootDir, 'apps', app)));
+  const supportApps = [];
+  const sharedPaths = [
+    ...(!isSourceOnly() ? ['packages'] : []),
+    ...(targets.includes(sourceTarget) ? ['codex-skills', 'configs', 'deploy', 'docs', 'scripts', 'specs', 'standards'] : []),
+  ];
   const rootFiles = [
-    'package.json',
-    'pnpm-lock.yaml',
-    'pnpm-workspace.yaml',
-    'tsconfig.base.json',
-    '.npmrc',
-    '.gitignore',
-    'AGENTS.md',
-    'AI_INDEX.md',
-    'DEPLOY.md',
-    'README.md',
-    'TASKS.md',
-    'docker-compose.yml',
-    'ecosystem.config.example.js',
+    ...(!isSourceOnly() ? ['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'tsconfig.base.json', '.npmrc', '.gitignore', 'docker-compose.yml', 'ecosystem.config.example.js'] : []),
+    ...(targets.includes(sourceTarget) ? ['AGENTS.md', 'AI_INDEX.md', 'DEPLOY.md', 'README.md', 'TASKS.md'] : []),
   ];
   const tempDir = `/tmp/aiimage-quick-${remoteStamp}`;
   return `set -euo pipefail
@@ -324,11 +327,11 @@ BK="$ROOT/backups/quick-${remoteStamp}"
 mkdir -p "$ROOT"
 test -f "$ROOT/ecosystem.config.js" || { echo "缺少 $ROOT/ecosystem.config.js，请先在目标服务器创建包含私有 env 的 PM2 配置"; exit 2; }
 tar -C "$ROOT" -czf "$BK/selected-before.tar.gz" --ignore-failed-read \\
-  ${rootFiles.map(sh).join(' ')} codex-skills configs deploy docs scripts specs standards packages ${[...apps, ...supportApps].map((app) => sh(`apps/${app}`)).join(' ')} || true
+  ${rootFiles.map(sh).join(' ')} ${sharedPaths.map(sh).join(' ')} ${[...apps, ...supportApps].map((app) => sh(`apps/${app}`)).join(' ')} || true
 cp -a "$ROOT/ecosystem.config.js" "$BK/ecosystem.config.js"
 cp -a "$ROOT/apps/backend/.env" "$BK/backend.env" 2>/dev/null || true
 cp -a "$ROOT/apps/backend/.env.production" "$BK/backend.env.production" 2>/dev/null || true
-for item in codex-skills configs deploy docs scripts specs standards packages; do
+for item in ${sharedPaths.map(sh).join(' ')}; do
   if [ -e ${sh(`${tempDir}/`)}"$item" ]; then
     rm -rf "$ROOT/$item"
     cp -a ${sh(`${tempDir}/`)}"$item" "$ROOT/$item"
@@ -363,6 +366,7 @@ echo "[quick-deploy] prepare done backup=$BK"`;
 }
 
 function remoteBuildScript() {
+  if (isSourceOnly()) return 'set -euo pipefail\necho "[quick-deploy] source-only build skipped"';
   const buildCommands = [];
   buildCommands.push(`cd ${sh(remoteRootPath)}`);
   buildCommands.push('export PUPPETEER_SKIP_DOWNLOAD=true');
@@ -396,6 +400,7 @@ function remoteBuildScript() {
   // 各 target 的 build 脚本已通过 tsc 或 tsc -b 完成类型校验，默认不再重复执行同一 app 的 noEmit 检查。
   for (const target of targets) {
     const def = services[target] ?? frontends[target];
+    if (!def) continue;
     buildCommands.push(`pnpm run build:${def.build}`);
   }
   return `set -euo pipefail
@@ -450,6 +455,7 @@ function remoteRestartScript() {
 
 function remoteVerifyScript() {
   const commands = ['set -euo pipefail', 'echo "[quick-deploy] verify"'];
+  if (isSourceOnly()) commands.push(`test -f ${sh(`${remoteRootPath}/scripts/quick-deploy.mjs`)}`, 'echo "source-sync:ok"');
   for (const target of targets.filter((item) => services[item])) {
     const port = services[target].port;
     commands.push(`code="000"; body=""; for attempt in 1 2 3 4 5 6; do code=$(curl -s -o /tmp/quick-health-${port}.txt -w '%{http_code}' http://127.0.0.1:${port}/health || true); body=$(head -c 160 /tmp/quick-health-${port}.txt 2>/dev/null || true); echo "${target}:${port}:attempt=$attempt:$code $body"; [ "$code" = "200" ] && break; sleep 2; done; test "$code" = "200"`);
@@ -469,6 +475,11 @@ function selectedApps() {
   return targets
     .map((target) => services[target]?.app ?? frontends[target]?.app)
     .filter((item, index, array) => Boolean(item) && array.indexOf(item) === index);
+}
+
+/** 判断本次只同步部署工具与文档，不构建或重启运行端点。 */
+function isSourceOnly() {
+  return targets.length === 1 && targets[0] === sourceTarget;
 }
 
 async function runRemote(script, options = {}) {
@@ -521,10 +532,13 @@ function sshArgs() {
   };
 }
 
-/** 选择部署 SSH 密钥；公开版本只读取显式配置或标准默认密钥。 */
+/** 选择部署 SSH 密钥；优先尊重显式环境变量，其次兼容当前开发机的 mny_root。 */
 function resolveSshKey() {
   if (process.env.AIIMAGE_DEPLOY_KEY) return resolveHome(process.env.AIIMAGE_DEPLOY_KEY);
-  return resolveHome('~/.ssh/id_ed25519');
+  const defaultKey = resolveHome('~/.ssh/id_ed25519');
+  if (existsSync(defaultKey)) return defaultKey;
+  const migrationKey = resolveHome('~/.ssh/mny_root');
+  return existsSync(migrationKey) ? migrationKey : defaultKey;
 }
 
 function deployEnv() {

@@ -69,6 +69,12 @@ pnpm run sync:anima-models -- --check
 ```powershell
 node scripts/deploy-production.mjs --dry-run
 node scripts/deploy-production.mjs
+
+# 日常优先使用受影响端点；完整 all 只用于基础设施或跨平台变更
+node scripts/deploy-production.mjs --target api --dry-run
+node scripts/deploy-production.mjs --target api
+node scripts/deploy-production.mjs --target web
+node scripts/deploy-production.mjs --target source
 node scripts/deploy-training-runtime.mjs --dry-run
 ```
 
@@ -80,4 +86,4 @@ node scripts/deploy-training-runtime.mjs --dry-run
 
 ## 许可证
 
-源代码以 [MIT License](../LICENSE) 发布。模型权重、训练数据、生成媒体及第三方依赖分别遵循其自身许可，不因本仓库许可证而改变。
+源代码以 [MIT License](LICENSE) 发布。模型权重、训练数据、生成媒体及第三方依赖分别遵循其自身许可，不因本仓库许可证而改变。

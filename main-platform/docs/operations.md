@@ -5,8 +5,8 @@
 1. 确认仓库、适用 `AGENTS.md` 和工作树，只通过 `rg --files` 定位真实文件。
 2. 读完入口、调用方、共享契约和最终写入方后修改，执行 `git diff --check`。
 3. 开发阶段只运行受影响目标的最小检查，共享契约变化才扩大范围。
-4. 检查活动任务与目标健康状态，先运行 `node scripts/quick-deploy.mjs --target <target> --dry-run`。
-5. 执行一次 `node scripts/quick-deploy.mjs --target <target>`，不重复运行部署入口已经包含的等价检查。
+4. 检查活动任务与目标健康状态，优先运行 `node scripts/quick-deploy.mjs --changed --dry-run` 推导最小端点。
+5. 执行一次 `node scripts/quick-deploy.mjs --changed`；需要人工覆盖时才显式传入 `--target <target>`。
 6. 验证目标 `/health`、必要的 `/ready` 或 `/health/db`、公网入口和本次业务状态。
 7. 全部验收成功后，用明确路径暂存、检查暂存区并创建部署提交。
 8. 同步公开源码时仅复制已部署文件，比较内容后提交、推送并验证远端 SHA。
@@ -20,6 +20,7 @@
 - 生产查询显式投影必要字段，不输出提示词、参考图、完整队列载荷、令牌或私有环境变量。
 - `apply_patch` 前用 `rg -n -F` 核对精确上下文，失败后重新读取目标行并使用最小补丁。
 - 任一命令失败都必须修正并重新通过当前步骤，部署或验收失败时不得创建已部署提交。
+- `--changed` 只读取 Git 已跟踪改动；新文件先用 `git add -N` 登记。只改部署工具或文档时使用 `source`，不构建、不发布静态站点、不重启 PM2。
 
 ## 错误复盘
 
