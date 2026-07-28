@@ -30,6 +30,7 @@ import { Prisma } from "@prisma/client";
 import { calculateTrainingPrice } from "./training-pricing.js";
 import { translateTrainingTags } from "./training-tag-translation.js";
 import { streamTrainingDatasetArchive, trainingDatasetArchiveContentDisposition } from "./training-dataset-archive.js";
+import { findRecoverableCaptionStage } from "./training-caption-stage-recovery.js";
 
 const trainingQueue = new TrainingQueue();
 const maximumDatasetImageBytes = 25 * 1024 * 1024;
@@ -61,7 +62,9 @@ export function registerTrainingRoutes(router: ServiceRouter, findSession: (toke
       include: datasetInclude,
       orderBy: { updatedAt: "desc" }, take: 100,
     });
-    sendSuccess(response, { datasets: rows.map(toDatasetView) });
+    // 旧数据曾只在删除图片的请求中恢复快照；列表读取也主动修复，刷新页面即可得到真实阶段。
+    const datasets = await Promise.all(rows.map(async (row) => await recoverStaleCaptionStage(row.id) ? getDatasetView(row.id, false) : toDatasetView(row)));
+    sendSuccess(response, { datasets });
   });
 
   router.post("/v1/training/datasets", async ({ request, response }) => {
@@ -279,7 +282,9 @@ export function registerTrainingRoutes(router: ServiceRouter, findSession: (toke
       const input = trainingJobCreateRequestSchema.parse(await readJsonBody<unknown>(request));
       const existing = await database.trainingJob.findUnique({ where: { idempotencyKey: input.idempotencyKey } });
       if (existing) return sendSuccess(response, await getTrainingJobView(existing.id));
-      const dataset = await database.trainingDataset.findFirst({ where: { id: input.datasetId, ownerIdentityId: session.externalIdentity.id, status: "ACTIVE" }, include: { assets: { orderBy: { createdAt: "asc" }, select: { id: true, caption: true } }, captionJobs: { orderBy: { createdAt: "desc" }, take: 1 }, _count: { select: { assets: true } } } });
+      // 创建训练前同步恢复历史匹配快照，保证训练页与打标工具使用同一阶段判定。
+      await recoverStaleCaptionStage(input.datasetId);
+      const dataset = await database.trainingDataset.findFirst({ where: { id: input.datasetId, ownerIdentityId: session.externalIdentity.id, status: "ACTIVE" }, include: { assets: { orderBy: { createdAt: "asc" }, select: { id: true, caption: true } }, captionJobs: { where: { scope: "DATASET" }, orderBy: { updatedAt: "desc" }, take: 1 }, _count: { select: { assets: true } } } });
       if (!dataset) throw new TrainingRouteError(404, "dataset_not_found", "训练数据集不存在");
       if (dataset._count.assets < 5) throw new TrainingRouteError(400, "dataset_assets_insufficient", "正式训练至少需要 5 张已标注图片");
       const captionJob = dataset.captionJobs[0];
@@ -367,10 +372,28 @@ async function ensureTrainingReservation(jobId: string, subject: string, product
   }
 }
 
-const datasetInclude = { owner: true, assets: { include: { artifact: true, captionJobs: { where: { scope: "ASSET" }, orderBy: { createdAt: "desc" as const }, take: 1 } }, orderBy: { createdAt: "asc" as const } }, captionJobs: { where: { scope: "DATASET" }, orderBy: { createdAt: "desc" as const }, take: 1 }, _count: { select: { trainingJobs: true } } };
+const datasetInclude = { owner: true, assets: { include: { artifact: true, captionJobs: { where: { scope: "ASSET" }, orderBy: { updatedAt: "desc" as const }, take: 1 } }, orderBy: { createdAt: "asc" as const } }, captionJobs: { where: { scope: "DATASET" }, orderBy: { updatedAt: "desc" as const }, take: 1 }, _count: { select: { trainingJobs: true } } };
 type DatasetRow = Awaited<ReturnType<typeof getDatasetRow>>;
 async function getDatasetRow(id: string) { return database.trainingDataset.findUniqueOrThrow({ where: { id }, include: datasetInclude }); }
-async function getDatasetView(id: string): Promise<TrainingDatasetView> { return toDatasetView(await getDatasetRow(id)); }
+async function getDatasetView(id: string, recover = true): Promise<TrainingDatasetView> { if (recover) await recoverStaleCaptionStage(id); return toDatasetView(await getDatasetRow(id)); }
+
+/**
+ * 当用户删除后新增的图片并回到某次已完成的历史快照时，恢复该阶段为待确认。
+ * 只处理当前最新阶段已经失效的训练集，不改变排队、运行或失败任务。
+ */
+async function recoverStaleCaptionStage(datasetId: string): Promise<boolean> {
+  const latest = await database.trainingCaptionJob.findFirst({ where: { datasetId, scope: "DATASET" }, orderBy: { updatedAt: "desc" }, select: { status: true } });
+  if (latest?.status !== "STALE") return false;
+  return database.$transaction(async (tx) => {
+    const assets = await tx.datasetAsset.findMany({ where: { datasetId }, orderBy: { createdAt: "asc" }, select: { id: true, caption: true } });
+    const stages = await tx.trainingCaptionJob.findMany({ where: { datasetId, scope: "DATASET", status: { in: ["STALE", "AWAITING_CONFIRMATION", "CONFIRMED"] } }, orderBy: { updatedAt: "desc" }, select: { id: true, status: true, assetSnapshot: true, completedAssets: true, totalAssets: true } });
+    const matching = findRecoverableCaptionStage(stages, assets.map((asset) => asset.id), assets.every((asset) => Boolean(asset.caption?.trim())));
+    if (!matching) return false;
+    await tx.trainingCaptionJob.updateMany({ where: { datasetId, scope: "DATASET", status: { in: ["AWAITING_CONFIRMATION", "CONFIRMED"] }, NOT: { id: matching.id } }, data: { status: "STALE", confirmedAt: null, errorMessage: "数据集图片已变化，请重新自动打标并确认" } });
+    await tx.trainingCaptionJob.update({ where: { id: matching.id }, data: { status: "AWAITING_CONFIRMATION", progress: 100, completedAssets: assets.length, confirmedAt: null, errorMessage: "已恢复匹配的图片快照，请重新确认" } });
+    return true;
+  });
+}
 
 /** 把数据集数据库记录转换成不暴露对象键的视图。 */
 function toDatasetView(row: DatasetRow): TrainingDatasetView { return { id: row.id, title: row.title, description: row.description, triggerWords: readTrainingTags(row.triggerWords), status: row.status.toLowerCase() as TrainingDatasetView["status"], ownerDisplayName: row.owner.displayName, assets: row.assets.map((asset) => ({ id: asset.id, artifactId: asset.artifactId, caption: asset.caption, width: asset.artifact.width, height: asset.artifact.height, byteSize: Number(asset.artifact.byteSize), sha256: asset.artifact.sha256, contentUrl: `/local-model-api/v1/training/datasets/${row.id}/assets/${asset.id}/content`, captionStage: asset.captionJobs[0] ? toCaptionStageView(asset.captionJobs[0]) : null, createdAt: asset.createdAt.toISOString() })), trainingJobCount: row._count.trainingJobs, captionStage: row.captionJobs[0] ? toCaptionStageView(row.captionJobs[0]) : null, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() }; }
@@ -381,7 +404,7 @@ export async function getTrainingJobView(id: string): Promise<TrainingJobView> {
   return { id: row.id, title: row.title, status: row.status.toLowerCase() as TrainingJobView["status"], progress: Number(row.progress), datasetId: row.datasetId, datasetTitle: row.dataset.title, baseModelVersionId: row.baseModelVersionId, baseModelDisplayName: row.baseModelVersion.displayName, parameters: readObject(row.parameters), outputLoraVersionId: row.outputLoraVersionId, errorCode: row.errorCode, errorMessage: row.errorMessage, attempts: row.attempts.map((attempt) => ({ id: attempt.id, attemptNumber: attempt.attemptNumber, status: attempt.status.toLowerCase() as TrainingJobView["attempts"][number]["status"], runtimeJobId: attempt.runtimeJobId, metrics: nullableObject(attempt.metrics), errorMessage: attempt.errorMessage, startedAt: attempt.startedAt?.toISOString() ?? null, completedAt: attempt.completedAt?.toISOString() ?? null })), billing: row.billingReservation ? { status: row.billingReservation.status.toLowerCase() as NonNullable<TrainingJobView["billing"]>["status"], amount: (Number(row.billingReservation.amountMinor) / 100).toFixed(2), currency: row.billingReservation.currency } : null, startedAt: row.startedAt?.toISOString() ?? null, completedAt: row.completedAt?.toISOString() ?? null, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() };
 }
 
-async function findOwnedMutableDataset(id: string, ownerIdentityId: string) { const row = await database.trainingDataset.findFirst({ where: { id, ownerIdentityId, status: "ACTIVE" }, include: { captionJobs: { orderBy: { createdAt: "desc" }, take: 1 }, _count: { select: { assets: true, trainingJobs: true } } } }); if (!row) throw new TrainingRouteError(404, "dataset_not_found", "训练数据集不存在"); if (row._count.trainingJobs > 0) throw new TrainingRouteError(409, "dataset_locked", "数据集已用于训练，内容需要保持不可变"); return row; }
+async function findOwnedMutableDataset(id: string, ownerIdentityId: string) { const row = await database.trainingDataset.findFirst({ where: { id, ownerIdentityId, status: "ACTIVE" }, include: { captionJobs: { orderBy: { updatedAt: "desc" }, take: 1 }, _count: { select: { assets: true, trainingJobs: true } } } }); if (!row) throw new TrainingRouteError(404, "dataset_not_found", "训练数据集不存在"); if (row._count.trainingJobs > 0) throw new TrainingRouteError(409, "dataset_locked", "数据集已用于训练，内容需要保持不可变"); return row; }
 async function authorizeTrainingJob(id: string, identity: { id: string; roles: unknown }) { const row = await database.trainingJob.findFirst({ where: { id, deletedAt: null } }); return row && (row.externalIdentityId === identity.id || readRoles(identity.roles).includes("admin")) ? row : null; }
 async function requireSession(request: IncomingMessage, response: Parameters<typeof sendError>[0], findSession: (token: string | null) => Promise<SessionRecord | null>) { const session = await findSession(readBearerToken(request)); if (!session) sendError(response, 401, "local_session_invalid", "本地模型平台登录状态已失效"); return session; }
 function validateTrainingParameters(parameters: TrainingParameters): void { if (parameters.alpha > parameters.rank) throw new TrainingRouteError(400, "training_alpha_invalid", "Alpha 不能大于 Rank"); }
