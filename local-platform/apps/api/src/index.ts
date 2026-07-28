@@ -35,6 +35,7 @@ import { registerAdminRuntimeRoutes } from "./admin-runtime.js";
 import { registerBotRoutes } from "./bot-routes.js";
 import { registerTrainingRoutes } from "./training-routes.js";
 import { toInferenceJobView } from "./inference-views.js";
+import { inferenceSubmissionCooldownRemainingSeconds, normalizeInferenceSubmissionCooldownSeconds } from "./submission-cooldown.js";
 
 const inferenceQueue = new InferenceQueue();
 
@@ -516,7 +517,18 @@ async function createInferenceJob(identity: { id: string; subject: string }, inp
   if (!productCode || !Number.isSafeInteger(pricingVersion) || pricingVersion <= 0 || priceCny <= 0) {
     throw new ApiOperationError(503, "model_price_missing", "模型尚未配置有效主站价格版本");
   }
+  const runtimeConfig = await database.platformRuntimeConfig.findUnique({ where: { id: 1 } });
+  const submissionCooldownSeconds = normalizeInferenceSubmissionCooldownSeconds(runtimeConfig?.inferenceSubmissionCooldownSeconds);
+  const submittedAt = new Date();
   const job = await database.$transaction(async (tx) => {
+    // 身份级闸门通过同一行 upsert 获取事务锁，并发请求只能依次检查和推进最后提交时间。
+    const submissionGate = await tx.inferenceSubmissionGate.upsert({
+      where: { externalIdentityId: identity.id },
+      create: { externalIdentityId: identity.id, lastSubmittedAt: new Date(0) },
+      update: { updatedAt: submittedAt },
+    });
+    const remainingSeconds = inferenceSubmissionCooldownRemainingSeconds(submissionGate.lastSubmittedAt, submissionCooldownSeconds, submittedAt);
+    if (remainingSeconds > 0) throw new ApiOperationError(429, "inference_submission_cooldown", `提交过于频繁，请等待 ${remainingSeconds} 秒后再试`);
     const created = await tx.inferenceJob.create({
       data: {
         externalIdentityId: identity.id,
@@ -530,15 +542,16 @@ async function createInferenceJob(identity: { id: string; subject: string }, inp
         effectivePrompt: input.promptEnhancement ? null : input.prompt,
         // 正负提示词使用独立数据库字段，空白负面提示词归一为空，禁止混入正面提示词参数。
         negativePrompt: input.negativePrompt?.trim() || null,
-        parameters: { width: input.width, height: input.height, batchSize: input.batchSize, seed: input.seed, loraVersionIds: input.loraVersionIds, loraStrengths: normalizedLoraStrengths, loraSelections, sourceArtifactIds: input.sourceArtifactIds, promptEnhancement: input.promptEnhancement, publishToGallery: input.publishToGallery, isPrivate: input.isPrivate, productCode, pricingVersion },
+        parameters: { width: input.width, height: input.height, batchSize: input.batchSize, seed: input.seed, loraVersionIds: input.loraVersionIds, loraStrengths: normalizedLoraStrengths, loraSelections, sourceArtifactIds: input.sourceArtifactIds, promptEnhancement: input.promptEnhancement, publishToGallery: input.publishToGallery, isPrivate: input.isPrivate, productCode, pricingVersion, submissionCooldownSeconds },
         stages: input.promptEnhancement ? { create: { sequence: 1, stageType: "PROMPT_ENHANCEMENT", status: "PENDING", inputJson: { format: "anima", promptLength: input.prompt.length } } } : undefined,
       },
     });
     await tx.billingReservationMirror.create({
       data: { jobId: created.id, idempotencyKey: `reserve:${created.id}`, priceVersion: `${productCode}@${pricingVersion}`, amountMinor: BigInt(Math.round(priceCny * input.batchSize * 100)), currency: "CNY", status: "PENDING" },
     });
+    await tx.inferenceSubmissionGate.update({ where: { externalIdentityId: identity.id }, data: { lastSubmittedAt: submittedAt, lastJobId: created.id } });
     return created;
-  });
+  }, { isolationLevel: "Serializable", maxWait: 5000, timeout: 10000 });
   await ensureMainReservation(job.id);
   return { jobId: job.id, created: true };
 }

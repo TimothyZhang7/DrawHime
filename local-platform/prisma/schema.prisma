@@ -103,6 +103,7 @@ model ExternalIdentity {
   trainingDatasets TrainingDataset[]
   trainingJobs   TrainingJob[]
   sessions       PlatformSession[]
+  inferenceSubmissionGate InferenceSubmissionGate?
 
   @@unique([issuer, subject])
   @@index([lastAuthenticatedAt])
@@ -121,6 +122,25 @@ model PlatformSession {
 
   @@index([externalIdentityId, expiresAt])
   @@index([expiresAt, revokedAt])
+}
+
+model PlatformRuntimeConfig {
+  id                                 Int      @id
+  inferenceSubmissionCooldownSeconds Int      @default(180)
+  createdAt                          DateTime @default(now())
+  updatedAt                          DateTime @updatedAt
+}
+
+model InferenceSubmissionGate {
+  externalIdentityId String   @id @db.VarChar(36)
+  lastSubmittedAt    DateTime
+  lastJobId          String?  @db.VarChar(36)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  externalIdentity ExternalIdentity @relation(fields: [externalIdentityId], references: [id], onDelete: Cascade)
+
+  @@index([lastSubmittedAt])
 }
 
 model ModelFamily {

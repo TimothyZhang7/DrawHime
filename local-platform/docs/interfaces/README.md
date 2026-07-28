@@ -29,7 +29,7 @@
 | `GET /v1/auth/me` | web/admin | api | `LocalPlatformSessionView` |
 | `DELETE /v1/auth/session` | web/admin | api | 撤销当前独立平台会话 |
 | `GET /v1/models` | web/admin | api | 当前可用本地模型、工作流、模型独立的采样器/调度器/步数/CFG/质量前缀、采样最长边、最终输出最大尺寸和主站价格版本；完整微调底模不得套用 Anima Base 的 Turbo 参数 |
-| `POST /v1/inference/jobs` | web | api | `InferenceJobCreateRequest` 创建持久化任务并完成主站资金预留后入队；正面提示词与可空的用户负面提示词独立保存，Worker 分别映射到 Runtime 的 positive/negative conditioning；`loraVersionIds` 可跨角色、画风、概念、服装、姿势等类型多选，最多 4 个且不可重复；`loraStrengths` 与 `loraSelections` 固化每个版本的 0–1.5 强度及触发词快照，Worker 以显式强度优先并把实际 LoRA 链、采样尺寸和最终提示词写入任务审计 |
+| `POST /v1/inference/jobs` | web | api | `InferenceJobCreateRequest` 创建持久化任务并完成主站资金预留后入队；同一独立身份默认每 180 秒只接受一个新任务，幂等重放不重复占用冷却，命中限制返回 HTTP 429 `inference_submission_cooldown`；正面提示词与可空的用户负面提示词独立保存，Worker 分别映射到 Runtime 的 positive/negative conditioning；`loraVersionIds` 可跨角色、画风、概念、服装、姿势等类型多选，最多 4 个且不可重复；`loraStrengths` 与 `loraSelections` 固化每个版本的 0–1.5 强度及触发词快照，Worker 以显式强度优先并把实际 LoRA 链、采样尺寸和最终提示词写入任务审计 |
 | `GET /v1/inference/jobs` | web/admin | api | 当前身份任务列表；管理员可读取全局列表 |
 | `GET /v1/inference/jobs/:id` | web/admin | api | `InferenceJobView`，包含阶段、尝试、固化参数、任务所用 LoRA 的标题、类型、权重与封面地址、产物哈希与字节数、计费镜像和主站图库发布状态；普通用户只读取自己的任务 |
 | `GET /v1/inference/jobs/:id/loras/:versionId/cover` | web/admin | api | 经任务归属鉴权读取该任务实际选用 LoRA 的首张示例封面；即使 LoRA 后续下架，历史任务仍可审计展示 |
@@ -67,15 +67,23 @@
 | `GET /v1/training/jobs/:id/output` | training-worker | GPU training-runtime | 使用标准单段 `Range: bytes=start-end` 分片读取训练产物；返回 `206`、`Accept-Ranges`、`Content-Range`、分片长度与整体 SHA-256，Worker 仅重传失败分片并在完成后校验总长度和 SHA-256 |
 | `POST /v1/training/jobs/:id/cancel` | training-worker | GPU training-runtime | 幂等取消排队中或运行中的训练，排队线程与子进程同步退出 |
 | `GET /v1/admin/runtime` | admin | api | 主站管理员读取真实 GPU 心跳、显存、活动租约、模型、工作流和队列状态，不返回服务 token 或对象存储密钥 |
+| `PATCH /v1/admin/runtime-config` | admin | api | 更新全平台用户任务提交冷却秒数，允许 0–3600 秒，默认 180 秒；0 表示关闭，变更后按用户最后一次成功提交时间立即重新计算 |
 | `PATCH /v1/admin/models/:id` | admin | api | 更新模型展示、启停、最大边、模型级尝试次数和不可变价格版本；运行中任务存在时禁止停用 |
 | `PATCH /v1/admin/workflows/:id` | admin | api | 启停不可变工作流版本；有活动任务时禁止停用，启用模型必须至少保留一个活动工作流 |
 | `PATCH /v1/admin/gpu-hosts/:id` | admin | api | 管理员启停 GPU 主机；停用后调度器不再分配新租约，运行中租约继续安全收尾 |
 | `GET /internal/bot/catalog` | 主站 backend | api | 使用固定服务凭证读取 Bot 可选本地模型，不返回 Runtime、对象存储或主站凭证 |
-| `POST /internal/bot/jobs` | 主站 backend | api | 以 QQ 身份创建单图持久化任务；模型启用提示增强时在独立任务内默认异步执行一次，再按 QQ 可访问钱包预留并调度 GPU |
+| `POST /internal/bot/jobs` | 主站 backend | api | 以 QQ 身份创建单图持久化任务；与网页端共用独立身份级提交冷却和 HTTP 429 语义；模型启用提示增强时在独立任务内默认异步执行一次，再按 QQ 可访问钱包预留并调度 GPU |
 | `GET /internal/bot/jobs?ids=` | 主站 backend | api | 批量读取 Bot 本地任务状态；成功图片只返回已发布到主站正式图库的媒体地址 |
 | `GET /internal/artifacts/:id/content` | 主站 backend | api | 使用 `x-local-platform-token` 读取已成功、已提交计费任务的产物；主站必须再次校验 SHA-256 和字节数 |
 
 用户端入口支持 `GET /local-model/?tab=create|jobs|loras|training`，LoRA 详情使用 `tab=loras&lora=:id` 并支持浏览器前进后退；主站历史 `/loras` 入口使用完整页面跳转到 `tab=loras`，不会重新进入主站旧写链路。
+
+### 用户提交冷却语义
+
+- 冷却只限制同一用户创建新推理任务，不暂停 GPU，不延迟已经入队的任务；一个任务结束后 scheduler 立即领取下一条已有任务。
+- 冷却时间从任务与计费镜像在同一事务内成功创建时开始计算；请求校验失败、事务回滚和相同幂等键重放不消耗新的冷却窗口。
+- Web 与 Bot 都按独立平台 `ExternalIdentity` 隔离计算，避免单个身份短时间灌入大量任务长期占据 FIFO 队列。
+- 管理员修改全局秒数后，API 使用用户最后一次成功提交时间重新计算剩余时间；无需批量改写历史任务或冷却记录。
 
 ### 健康响应语义
 

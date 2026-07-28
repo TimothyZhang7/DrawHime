@@ -9,7 +9,7 @@
     "build:frontends": "pnpm --filter @drawhime/web --filter @drawhime/admin run build",
     "build": "pnpm run build:packages && pnpm run build:services && pnpm run build:frontends",
     "type-check": "pnpm run build:packages && pnpm -r run type-check",
-    "test": "pnpm run build:packages && pnpm --filter @drawhime/service-runtime --filter @drawhime/inference-runtime run test",
+    "test": "pnpm run build:packages && pnpm --filter @drawhime/api run build && pnpm --filter @drawhime/service-runtime --filter @drawhime/inference-runtime --filter @drawhime/api run test",
     "dev": "node scripts/dev.mjs",
     "deploy:production": "node scripts/deploy-production.mjs",
     "db:generate": "prisma generate",

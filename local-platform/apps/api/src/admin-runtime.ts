@@ -2,11 +2,12 @@
  * 本文件实现本地模型管理端的 GPU、模型、工作流和队列真实控制接口。
  */
 import type { ExternalIdentity } from "@prisma/client";
-import { adminGpuHostUpdateRequestSchema, adminModelUpdateRequestSchema, adminWorkflowUpdateRequestSchema, type AdminRuntimeOverviewView } from "@drawhime/contracts";
+import { adminGpuHostUpdateRequestSchema, adminModelUpdateRequestSchema, adminRuntimeConfigUpdateRequestSchema, adminWorkflowUpdateRequestSchema, type AdminRuntimeOverviewView } from "@drawhime/contracts";
 import { database } from "@drawhime/database";
 import { MainPlatformIntegrationError, publishMainPrice } from "@drawhime/main-platform-client";
 import { readJsonBody, sendError, sendSuccess, type ServiceRouter } from "@drawhime/service-runtime";
 import type { IncomingMessage } from "node:http";
+import { DEFAULT_INFERENCE_SUBMISSION_COOLDOWN_SECONDS, normalizeInferenceSubmissionCooldownSeconds } from "./submission-cooldown.js";
 
 type SessionRecord = { externalIdentity: ExternalIdentity };
 type FindSession = (token: string | null) => Promise<SessionRecord | null>;
@@ -17,6 +18,21 @@ export function registerAdminRuntimeRoutes(router: ServiceRouter, findSession: F
     const session = await requireAdmin(request, response, findSession);
     if (!session) return;
     sendSuccess(response, await buildRuntimeOverview());
+  });
+
+  router.register("PATCH", "/v1/admin/runtime-config", async ({ request, response }) => {
+    const session = await requireAdmin(request, response, findSession);
+    if (!session) return;
+    try {
+      const input = adminRuntimeConfigUpdateRequestSchema.parse(await readJsonBody<unknown>(request));
+      // 单例配置使用幂等 upsert，管理员调整后新提交立即按最后成功提交时间重新计算。
+      await database.platformRuntimeConfig.upsert({
+        where: { id: 1 },
+        create: { id: 1, inferenceSubmissionCooldownSeconds: input.inferenceSubmissionCooldownSeconds },
+        update: { inferenceSubmissionCooldownSeconds: input.inferenceSubmissionCooldownSeconds },
+      });
+      sendSuccess(response, await buildRuntimeOverview());
+    } catch (error) { sendAdminError(response, error); }
   });
 
   router.register("PATCH", "/v1/admin/models/:id", async ({ request, response, params }) => {
@@ -86,7 +102,7 @@ export function registerAdminRuntimeRoutes(router: ServiceRouter, findSession: F
 /** 聚合管理端运行状态，不返回 Runtime token、对象存储键或主站凭证。 */
 async function buildRuntimeOverview(): Promise<AdminRuntimeOverviewView> {
   const activeLeaseStatuses = ["OFFERED", "ACCEPTED", "RUNNING"] as const;
-  const [reserving, ready, running, failed, succeeded, trainingReserving, trainingReady, trainingRunning, trainingEvaluating, trainingFailed, trainingSucceeded, hosts, models] = await Promise.all([
+  const [reserving, ready, running, failed, succeeded, trainingReserving, trainingReady, trainingRunning, trainingEvaluating, trainingFailed, trainingSucceeded, hosts, models, runtimeConfig] = await Promise.all([
     database.inferenceJob.count({ where: { status: "RESERVING" } }),
     database.inferenceJob.count({ where: { status: "READY" } }),
     database.inferenceJob.count({ where: { status: "RUNNING" } }),
@@ -107,9 +123,11 @@ async function buildRuntimeOverview(): Promise<AdminRuntimeOverviewView> {
       include: { family: true, workflowVersions: { where: { status: { not: "ARCHIVED" } }, include: { runtimeDefinition: true, workflowTemplate: true }, orderBy: { version: "desc" } } },
       orderBy: { displayName: "asc" },
     }),
+    database.platformRuntimeConfig.findUnique({ where: { id: 1 } }),
   ]);
   return {
     generatedAt: new Date().toISOString(),
+    settings: { inferenceSubmissionCooldownSeconds: normalizeInferenceSubmissionCooldownSeconds(runtimeConfig?.inferenceSubmissionCooldownSeconds ?? DEFAULT_INFERENCE_SUBMISSION_COOLDOWN_SECONDS) },
     queue: { reserving, ready, running, failed, succeeded },
     trainingQueue: { reserving: trainingReserving, ready: trainingReady, running: trainingRunning, evaluating: trainingEvaluating, failed: trainingFailed, succeeded: trainingSucceeded },
     gpuHosts: hosts.map((host) => ({

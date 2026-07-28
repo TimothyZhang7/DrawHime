@@ -1,7 +1,7 @@
 /**
  * 本文件实现独立本地模型管理端，展示真实服务、模型、LoRA 与全局任务数据。
  */
-import type { AdminModelUpdateRequest, AdminRuntimeOverviewView, AdminWorkflowUpdateRequest, InferenceJobView, InferenceLoraView, InferenceModelView, LocalPlatformSessionView, PlatformOverviewView, TrainingDatasetView, TrainingJobView } from "@drawhime/contracts";
+import type { AdminModelUpdateRequest, AdminRuntimeConfigUpdateRequest, AdminRuntimeOverviewView, AdminWorkflowUpdateRequest, InferenceJobView, InferenceLoraView, InferenceModelView, LocalPlatformSessionView, PlatformOverviewView, TrainingDatasetView, TrainingJobView } from "@drawhime/contracts";
 import { Boxes, BrainCircuit, Cpu, Gauge, Layers3, LogOut, Menu, RefreshCw, ShieldCheck, Sparkles, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -110,8 +110,20 @@ function GpuPage({ runtime, onUpdate }: { runtime: AdminRuntimeOverviewView | nu
   return <><section className="summary-grid"><Summary label="预留中" value={String(runtime?.queue.reserving ?? 0)} /><Summary label="等待 GPU" value={String(runtime?.queue.ready ?? 0)} /><Summary label="推理 / 训练" value={`${runtime?.queue.running ?? 0} / ${runtime?.trainingQueue.running ?? 0}`} tone="purple" /><Summary label="累计成功" value={String(runtime?.queue.succeeded ?? 0)} tone="green" /></section><section className="asset-grid">{runtime?.gpuHosts.map((host) => <article className="panel asset gpu-asset" key={host.id}><span>{host.agentKey}</span><div className="asset-heading"><h2>{host.displayName}</h2><button className={host.active ? "toggle active" : "toggle"} onClick={() => void onUpdate(`/v1/admin/gpu-hosts/${host.id}`, { active: !host.active })}>{host.active ? "接收任务" : "已停用"}</button></div><p>Agent {host.agentVersion ?? "-"} · 心跳 {host.lastHeartbeatAt ? new Date(host.lastHeartbeatAt).toLocaleTimeString("zh-CN") : "无"}</p>{host.devices.map((device) => { const total = device.totalVramBytes / 1024 / 1024 / 1024; const free = (device.freeVramBytes ?? 0) / 1024 / 1024 / 1024; const activity = device.activeTrainingJobId ? `训练 ${device.activeTrainingJobId}` : device.activeLeaseJobId ? `推理 ${device.activeLeaseJobId}` : "空闲"; return <div className="gpu-device" key={device.id}><div><strong>{device.name}</strong><small>{activity}</small></div><div className="vram"><i style={{ width: `${Math.max(0, Math.min(100, 100 - free / total * 100))}%` }} /></div><small>{free.toFixed(1)} / {total.toFixed(1)} GB 可用 · {device.utilizationPercent?.toFixed(1) ?? "-"}% · {device.temperatureCelsius?.toFixed(0) ?? "-"}°C</small></div>; })}</article>)}</section></>;
 }
 
-/** 模型资产与模型级价格、尺寸、尝试次数页面。 */
-function ModelsPage({ runtime, onUpdate }: { runtime: AdminRuntimeOverviewView | null; onUpdate: (path: string, body: unknown) => Promise<void> }) { return <section className="asset-grid">{runtime?.models.map((model) => <ModelEditor key={model.id} model={model} onUpdate={onUpdate} />)}</section>; }
+/** 模型资产、全局提交冷却与模型级价格页面。 */
+function ModelsPage({ runtime, onUpdate }: { runtime: AdminRuntimeOverviewView | null; onUpdate: (path: string, body: unknown) => Promise<void> }) { return <><RuntimeConfigEditor runtime={runtime} onUpdate={onUpdate} /><section className="asset-grid">{runtime?.models.map((model) => <ModelEditor key={model.id} model={model} onUpdate={onUpdate} />)}</section></>; }
+
+/** 全平台用户提交冷却编辑器；只限制创建新任务，不让 GPU 在任务之间空转。 */
+function RuntimeConfigEditor({ runtime, onUpdate }: { runtime: AdminRuntimeOverviewView | null; onUpdate: (path: string, body: unknown) => Promise<void> }) {
+  const configuredSeconds = runtime?.settings.inferenceSubmissionCooldownSeconds ?? 180;
+  const [cooldownMinutes, setCooldownMinutes] = useState(configuredSeconds / 60);
+  useEffect(() => { setCooldownMinutes(configuredSeconds / 60); }, [configuredSeconds]);
+  const save = () => {
+    const body: AdminRuntimeConfigUpdateRequest = { inferenceSubmissionCooldownSeconds: Math.round(cooldownMinutes * 60) };
+    return onUpdate("/v1/admin/runtime-config", body);
+  };
+  return <section className="panel runtime-config"><div><span>任务公平性</span><h2>用户提交冷却</h2><p>同一用户成功提交一个本地模型任务后，需要等待设定时间才能再次提交。GPU 会连续处理已经入队的不同用户任务。</p></div><label>冷却时间（分钟）<input type="number" min="0" max="60" step="0.5" value={cooldownMinutes} onChange={(event) => setCooldownMinutes(Number(event.target.value))} /></label><button className="save-button" onClick={() => void save()}>保存全局冷却</button></section>;
+}
 
 /** 单个模型的受控配置编辑器。 */
 function ModelEditor({ model, onUpdate }: { model: AdminRuntimeOverviewView["models"][number]; onUpdate: (path: string, body: unknown) => Promise<void> }) {

@@ -610,6 +610,12 @@ export const adminModelUpdateRequestSchema = z.object({
   promptEnhancementEnabled: z.boolean(),
 });
 
+/** 管理端全局运行配置更新请求。 */
+export const adminRuntimeConfigUpdateRequestSchema = z.object({
+  /** 同一独立身份两次成功创建推理任务之间的最短秒数，0 表示关闭。 */
+  inferenceSubmissionCooldownSeconds: z.number().int().min(0).max(3600),
+});
+
 /** 管理端 GPU 主机启停请求。 */
 export const adminGpuHostUpdateRequestSchema = z.object({ active: z.boolean() });
 
@@ -619,6 +625,7 @@ export const adminWorkflowUpdateRequestSchema = z.object({ active: z.boolean() }
 /** 管理端真实运行资产总览。 */
 export const adminRuntimeOverviewViewSchema = z.object({
   generatedAt: z.string().datetime(),
+  settings: z.object({ inferenceSubmissionCooldownSeconds: z.number().int().min(0).max(3600) }),
   queue: z.object({ reserving: z.number().int(), ready: z.number().int(), running: z.number().int(), failed: z.number().int(), succeeded: z.number().int() }),
   trainingQueue: z.object({ reserving: z.number().int(), ready: z.number().int(), running: z.number().int(), evaluating: z.number().int(), failed: z.number().int(), succeeded: z.number().int() }),
   gpuHosts: z.array(z.object({
@@ -676,6 +683,7 @@ export type TrainingCaptionStageView = z.infer<typeof trainingCaptionStageViewSc
 export type TrainingRuntimeSubmitRequest = z.infer<typeof trainingRuntimeSubmitRequestSchema>;
 export type TrainingRuntimeJobView = z.infer<typeof trainingRuntimeJobViewSchema>;
 export type AdminModelUpdateRequest = z.infer<typeof adminModelUpdateRequestSchema>;
+export type AdminRuntimeConfigUpdateRequest = z.infer<typeof adminRuntimeConfigUpdateRequestSchema>;
 export type AdminGpuHostUpdateRequest = z.infer<typeof adminGpuHostUpdateRequestSchema>;
 export type AdminWorkflowUpdateRequest = z.infer<typeof adminWorkflowUpdateRequestSchema>;
 export type AdminRuntimeOverviewView = z.infer<typeof adminRuntimeOverviewViewSchema>;
