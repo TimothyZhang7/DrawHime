@@ -383,6 +383,47 @@ export const loraLibraryEntryViewSchema = z.object({
   updatedAt: z.string().datetime(),
 });
 
+/** 管理员按当前真实 Anima Runtime 格式登记底模。 */
+export const modelLibraryCreateRequestSchema = z.object({
+  displayName: z.string().trim().min(1).max(191),
+  description: z.string().trim().min(1).max(10000),
+  familyName: z.string().trim().min(1).max(100),
+  modelFileName: z.string().trim().regex(/^[a-zA-Z0-9._-]+\.safetensors$/),
+  modelSha256: z.string().regex(/^[a-f0-9]{64}$/i),
+  modelByteSize: z.number().int().positive(),
+  sourceUrl: z.string().url().max(1000).nullable(),
+  usageGuide: z.string().trim().min(1).max(20000),
+  steps: z.number().int().min(1).max(50),
+  cfg: z.number().min(0.1).max(20),
+  sampler: z.enum(["er_sde", "euler", "euler_ancestral"]),
+  scheduler: z.enum(["simple", "normal"]),
+  samplingMaxEdge: z.number().int().min(512).max(1536),
+  qualityPrefix: z.string().trim().min(1).max(2000),
+  defaultNegativePrompt: z.string().trim().max(5000),
+  productCode: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._:-]{1,127}$/),
+  pricingVersion: z.number().int().positive(),
+  priceCny: z.string().regex(/^\d{1,6}\.\d{2}$/),
+  visible: z.boolean(),
+});
+
+/** 管理员编辑底模仓库展示信息。 */
+export const modelLibraryUpdateRequestSchema = z.object({
+  displayName: z.string().trim().min(1).max(191),
+  description: z.string().trim().min(1).max(10000),
+  sourceUrl: z.string().url().max(1000).nullable(),
+  usageGuide: z.string().trim().min(1).max(20000),
+  visible: z.boolean(),
+});
+
+/** 用户可浏览的底模仓库条目。 */
+export const modelLibraryEntryViewSchema = z.object({
+  id: z.string(), displayName: z.string(), description: z.string(), family: z.string(), familyName: z.string(), modelFileName: z.string(), runtimeFormat: z.string(), sourceUrl: z.string().nullable(), usageGuide: z.string(), visible: z.boolean(), isAdmin: z.boolean(), priceCny: z.string(),
+  parameters: z.object({ steps: z.number(), cfg: z.number(), sampler: z.string(), scheduler: z.string(), samplingMaxEdge: z.number(), maxEdge: z.number() }),
+  examples: z.array(z.object({ id: z.string(), width: z.number().int().nullable(), height: z.number().int().nullable(), prompt: z.string().nullable(), contentUrl: z.string() })),
+  referenceTasks: z.array(z.object({ id: z.string(), prompt: z.string(), imageUrl: z.string(), galleryItemId: z.string(), createdAt: z.string().datetime() })).max(12),
+  createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
+});
+
 /** LoRA 分片上传会话创建请求。 */
 export const loraUploadSessionCreateRequestSchema = z.object({
   fileName: z.string().trim().min(1).max(255),
@@ -663,6 +704,9 @@ export type GalleryLoraMetadataView = z.infer<typeof galleryLoraMetadataViewSche
 export type LoraLibraryCreateRequest = z.infer<typeof loraLibraryCreateRequestSchema>;
 export type LoraLibraryUpdateRequest = z.infer<typeof loraLibraryUpdateRequestSchema>;
 export type LoraLibraryEntryView = z.infer<typeof loraLibraryEntryViewSchema>;
+export type ModelLibraryCreateRequest = z.infer<typeof modelLibraryCreateRequestSchema>;
+export type ModelLibraryUpdateRequest = z.infer<typeof modelLibraryUpdateRequestSchema>;
+export type ModelLibraryEntryView = z.infer<typeof modelLibraryEntryViewSchema>;
 export type LoraUploadSessionCreateRequest = z.infer<typeof loraUploadSessionCreateRequestSchema>;
 export type LoraUploadSessionView = z.infer<typeof loraUploadSessionViewSchema>;
 export type InferenceJobCancelRequest = z.infer<typeof inferenceJobCancelRequestSchema>;

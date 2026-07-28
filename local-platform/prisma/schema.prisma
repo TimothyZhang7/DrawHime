@@ -175,6 +175,7 @@ model ModelVersion {
   workflowVersions  WorkflowVersion[]
   inferenceJobs     InferenceJob[]
   baseTrainingJobs  TrainingJob[]
+  repositoryExamples ModelExample[]
 
   @@unique([familyId, version])
   @@index([status])
@@ -402,6 +403,7 @@ model JobArtifact {
   job             InferenceJob?      @relation(fields: [jobId], references: [id])
   galleryPublication GalleryPublicationMirror?
   loraExamples    LoraExample[]
+  modelExamples   ModelExample[]
   datasetAssets   DatasetAsset[]
 
   @@index([jobId, kind])
@@ -556,6 +558,21 @@ model LoraExample {
 
   @@unique([loraEntryId, artifactId])
   @@index([loraEntryId, sortOrder])
+}
+
+model ModelExample {
+  id             String   @id @default(uuid()) @db.VarChar(36)
+  modelVersionId String   @db.VarChar(36)
+  artifactId     String   @db.VarChar(36)
+  sortOrder      Int      @default(0)
+  prompt         String?  @db.LongText
+  createdAt      DateTime @default(now())
+
+  modelVersion ModelVersion @relation(fields: [modelVersionId], references: [id], onDelete: Cascade)
+  artifact     JobArtifact  @relation(fields: [artifactId], references: [id])
+
+  @@unique([modelVersionId, artifactId])
+  @@index([modelVersionId, sortOrder])
 }
 
 model LoraUploadSession {

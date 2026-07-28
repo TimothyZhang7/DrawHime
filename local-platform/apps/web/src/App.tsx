@@ -1,11 +1,12 @@
 /**
  * 本文件实现独立本地模型用户端，包含主站会话交换、真实生成表单、刷新可恢复任务和产物预览。
  */
-import type { InferenceJobView, InferenceLoraView, InferenceModelView, LocalPlatformSessionView, LoraLibraryEntryView } from "@drawhime/contracts";
+import type { InferenceJobView, InferenceLoraView, InferenceModelView, LocalPlatformSessionView, LoraLibraryEntryView, ModelLibraryEntryView } from "@drawhime/contracts";
 import { Activity, Bot, BrainCircuit, Clock3, Cpu, Eye, Folder, ImageIcon, Images, Layers3, Layout, LoaderCircle, LogIn, LogOut, MoreHorizontal, Paintbrush, ScanSearch, Sparkles, Trash2, Trophy, User, Wallet, WalletCards, Wrench, X, type LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { TrainingPage } from "./TrainingPage";
 import { LoraLibraryPage } from "./LoraLibraryPage";
+import { ModelLibraryPage } from "./ModelLibraryPage";
 
 const apiBase = import.meta.env.VITE_LOCAL_API_BASE || "/local-model-api";
 // 任务固化的 LoRA 没有用户封面或封面已失效时，统一回退到仓库默认封面。
@@ -43,8 +44,11 @@ interface MainWalletSummary { freeBalance: string; paidBalance: string; totalBal
 /** LoRA 仓库请求生成页选中版本时使用递增序号，重复选择同一版本也会触发表单同步。 */
 interface LoraUseRequest { loraVersionId: string; sequence: number }
 
+/** 模型仓库请求生成页选中底模时使用递增序号，确保重复选择也会同步表单。 */
+interface ModelUseRequest { modelVersionId: string; sequence: number }
+
 /** 本地平台页面内可切换的业务工作区。 */
-type LocalTab = "create" | "jobs" | "loras" | "training";
+type LocalTab = "create" | "jobs" | "models" | "loras" | "training";
 
 /** 主站全站导航项，独立平台只负责跳转，不复制主站路由状态。 */
 interface MainNavigationItem { href: string; label: string; Icon: LucideIcon }
@@ -78,6 +82,7 @@ const mobilePrimaryNavigation: MainNavigationItem[] = [
 const localTabs: Array<{ id: LocalTab; label: string; shortLabel: string; Icon: LucideIcon }> = [
   { id: "create", label: "本地绘图", shortLabel: "绘图", Icon: Sparkles },
   { id: "jobs", label: "任务记录", shortLabel: "任务", Icon: Clock3 },
+  { id: "models", label: "模型仓库", shortLabel: "模型", Icon: Cpu },
   { id: "loras", label: "LoRA 仓库", shortLabel: "LoRA", Icon: Layers3 },
   { id: "training", label: "LoRA 训练", shortLabel: "训练", Icon: BrainCircuit },
 ];
@@ -85,10 +90,10 @@ const localTabs: Array<{ id: LocalTab; label: string; shortLabel: string; Icon: 
 /** 从地址栏恢复独立平台二级页面，只接受当前真实存在的功能键。 */
 function readLocalTabFromLocation(): LocalTab {
   const value = new URLSearchParams(window.location.search).get("tab");
-  return value === "jobs" || value === "loras" || value === "training" ? value : "create";
+  return value === "jobs" || value === "models" || value === "loras" || value === "training" ? value : "create";
 }
 
-/** 统一渲染四个本地模型工作区入口，保证每个页面的结构、宽度与交互完全一致。 */
+/** 统一渲染本地模型工作区入口，保证每个页面的结构、宽度与交互完全一致。 */
 function LocalWorkspaceNavigation({ activeTab, onSelect }: { activeTab: LocalTab; onSelect: (tab: LocalTab) => void }) {
   return <nav className="local-section-nav local-workspace-nav" aria-label="本地模型功能导航">
     {localTabs.map(({ id, label, shortLabel, Icon }) => <button key={id} className={activeTab === id ? "active" : ""} onClick={() => onSelect(id)}><Icon size={15} /><span className="desktop-label">{label}</span><span className="mobile-label">{shortLabel}</span></button>)}
@@ -102,11 +107,13 @@ export function App() {
   const [loras, setLoras] = useState<InferenceLoraView[]>([]);
   const [jobs, setJobs] = useState<InferenceJobView[]>([]);
   const [libraryEntries, setLibraryEntries] = useState<LoraLibraryEntryView[]>([]);
+  const [modelLibraryEntries, setModelLibraryEntries] = useState<ModelLibraryEntryView[]>([]);
   const [wallet, setWallet] = useState<MainWalletSummary | null>(null);
   const [selectedJob, setSelectedJob] = useState<InferenceJobView | null>(null);
   const [activeTab, setActiveTab] = useState<LocalTab>(readLocalTabFromLocation);
   const [mountedTabs, setMountedTabs] = useState<Set<LocalTab>>(() => new Set([readLocalTabFromLocation()]));
   const [loraUseRequest, setLoraUseRequest] = useState<LoraUseRequest | null>(null);
+  const [modelUseRequest, setModelUseRequest] = useState<ModelUseRequest | null>(null);
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -124,20 +131,23 @@ export function App() {
         setLoras([]);
         setJobs([]);
         setLibraryEntries([]);
+        setModelLibraryEntries([]);
         setWallet(null);
         setError("请先在绘图姬主站登录，再打开本地模型页面");
         return;
       }
-      const [modelPayload, loraPayload, jobPayload, libraryPayload] = await Promise.all([
+      const [modelPayload, loraPayload, jobPayload, libraryPayload, modelLibraryPayload] = await Promise.all([
         authenticatedJson<{ models: InferenceModelView[] }>("/v1/models", localSession.sessionToken),
         authenticatedJson<{ loras: InferenceLoraView[] }>("/v1/loras", localSession.sessionToken),
         authenticatedJson<{ jobs: InferenceJobView[] }>("/v1/inference/jobs?limit=50", localSession.sessionToken),
         authenticatedJson<{ entries: LoraLibraryEntryView[] }>("/v1/lora-library", localSession.sessionToken),
+        authenticatedJson<{ entries: ModelLibraryEntryView[] }>("/v1/model-library", localSession.sessionToken),
       ]);
       setModels(modelPayload.models);
       setLoras(loraPayload.loras);
       setJobs(jobPayload.jobs);
       setLibraryEntries(libraryPayload.entries);
+      setModelLibraryEntries(modelLibraryPayload.entries);
       setWallet(await loadMainWallet());
       setError("");
     } catch (requestError) {
@@ -181,6 +191,17 @@ export function App() {
     setLoras(loraPayload.loras);
   }, [session]);
 
+  /** 同步模型仓库和生成页可选底模，管理员编辑后无需刷新浏览器。 */
+  const refreshModelViews = useCallback(async () => {
+    if (!session) return;
+    const [libraryPayload, modelPayload] = await Promise.all([
+      authenticatedJson<{ entries: ModelLibraryEntryView[] }>("/v1/model-library", session.sessionToken),
+      authenticatedJson<{ models: InferenceModelView[] }>("/v1/models", session.sessionToken),
+    ]);
+    setModelLibraryEntries(libraryPayload.entries);
+    setModels(modelPayload.models);
+  }, [session]);
+
   /** 切换本地工作区并收起手机端更多面板。 */
   const selectLocalTab = (tab: LocalTab) => {
     // 页面首次打开后保持挂载，仅通过 hidden 切换可见性，防止输入框、筛选和弹窗草稿丢失。
@@ -190,11 +211,13 @@ export function App() {
     const url = new URL(window.location.href);
     // 点击顶层业务标签始终回到该标签根页面，避免旧 LoRA 详情参数污染后续导航。
     url.searchParams.delete("lora");
+    url.searchParams.delete("model");
     if (tab === "create") url.searchParams.delete("tab");
     else url.searchParams.set("tab", tab);
     window.history.pushState({}, "", `${url.pathname}${url.search}${url.hash}`);
     // 训练任务完成后进入仓库时主动刷新，避免用户手动重载页面才看到新草稿。
     if (tab === "loras") void refreshLoraViews().catch(() => undefined);
+    if (tab === "models") void refreshModelViews().catch(() => undefined);
   };
   /** 从仓库详情带入 LoRA 后回到绘图页，生成表单会从持久化设置恢复该版本。 */
   const useLora = (loraVersionId: string) => {
@@ -205,11 +228,18 @@ export function App() {
     setLoraUseRequest({ loraVersionId, sequence: Date.now() });
     selectLocalTab("create");
   };
+  /** 从模型仓库带入底模后回到绘图页，生成表单立即切换为当前有效工作流。 */
+  const useModel = (modelVersionId: string) => {
+    const current = readGenerationSettings();
+    localStorage.setItem(generationSettingsKey, JSON.stringify({ ...current, modelId: modelVersionId }));
+    setModelUseRequest({ modelVersionId, sequence: Date.now() });
+    selectLocalTab("create");
+  };
   /** 撤销独立会话，不影响主站登录状态。 */
   const logout = async () => {
     if (session) await authenticatedJson("/v1/auth/session", session.sessionToken, { method: "DELETE" }).catch(() => undefined);
     localStorage.removeItem(sessionStorageKey);
-    setSession(null); setJobs([]); setModels([]); setLoras([]); setLibraryEntries([]); setWallet(null);
+    setSession(null); setJobs([]); setModels([]); setLoras([]); setLibraryEntries([]); setModelLibraryEntries([]); setWallet(null);
   };
 
   /** 取消可取消任务并立即刷新持久化状态。 */
@@ -253,13 +283,14 @@ export function App() {
               <LocalWorkspaceNavigation activeTab={activeTab} onSelect={selectLocalTab} />
               <div className="create-control-column">
                 {error && <div className="notice error">{error}</div>}
-                <GenerateForm session={session} wallet={wallet} models={models} loras={loras} loraUseRequest={loraUseRequest} disabled={loading} onCreated={async () => { setJobs(await loadJobs(session!.sessionToken)); }} />
+                <GenerateForm session={session} wallet={wallet} models={models} loras={loras} loraUseRequest={loraUseRequest} modelUseRequest={modelUseRequest} disabled={loading} onCreated={async () => { setJobs(await loadJobs(session!.sessionToken)); }} />
               </div>
             </div>
             <CurrentTask job={currentJob} sessionToken={session?.sessionToken ?? ""} onDetail={setSelectedJob} onCancel={(job) => void cancelJob(job)} onDelete={(job) => void deleteJob(job)} />
           </div>
         </div>}
         {mountedTabs.has("jobs") && <div hidden={activeTab !== "jobs"}><JobHistory jobs={jobs} sessionToken={session?.sessionToken ?? ""} loading={loading} onDetail={setSelectedJob} onCancel={(job) => void cancelJob(job)} onDelete={(job) => void deleteJob(job)} /></div>}
+        {mountedTabs.has("models") && <div hidden={activeTab !== "models"}><ModelLibraryPage session={session} entries={modelLibraryEntries} models={models} onChanged={refreshModelViews} onUseModel={useModel} /></div>}
         {mountedTabs.has("loras") && <div hidden={activeTab !== "loras"}><LoraLibraryPage session={session} entries={libraryEntries} modelFamilies={models.map((item) => item.family)} onChanged={refreshLoraViews} onUseLora={useLora} /></div>}
         {mountedTabs.has("training") && <div hidden={activeTab !== "training"}><TrainingPage token={session?.sessionToken ?? ""} models={models} /></div>}
       </main>
@@ -305,7 +336,7 @@ function LocalNavbarUserMenu({ session, logout }: { session: LocalPlatformSessio
 }
 
 /** 真实生成参数表单。 */
-function GenerateForm({ session, wallet, models, loras, loraUseRequest, disabled, onCreated }: { session: LocalPlatformSessionView | null; wallet: MainWalletSummary | null; models: InferenceModelView[]; loras: InferenceLoraView[]; loraUseRequest: LoraUseRequest | null; disabled: boolean; onCreated: () => Promise<void> }) {
+function GenerateForm({ session, wallet, models, loras, loraUseRequest, modelUseRequest, disabled, onCreated }: { session: LocalPlatformSessionView | null; wallet: MainWalletSummary | null; models: InferenceModelView[]; loras: InferenceLoraView[]; loraUseRequest: LoraUseRequest | null; modelUseRequest: ModelUseRequest | null; disabled: boolean; onCreated: () => Promise<void> }) {
   const saved = useMemo(readGenerationSettings, []);
   const [modelId, setModelId] = useState(saved.modelId);
   const [prompt, setPrompt] = useState("");
@@ -331,6 +362,10 @@ function GenerateForm({ session, wallet, models, loras, loraUseRequest, disabled
     });
   }, [compatibleLoras]);
   useEffect(() => { if (!modelId && models[0]) setModelId(models[0].modelVersionId); }, [modelId, models]);
+  useEffect(() => {
+    if (!modelUseRequest || !models.some((item) => item.modelVersionId === modelUseRequest.modelVersionId)) return;
+    setModelId(modelUseRequest.modelVersionId);
+  }, [modelUseRequest, models]);
   useEffect(() => {
     if (!loraUseRequest) return;
     setLoraVersionIds((current) => [...new Set([...current, loraUseRequest.loraVersionId])].slice(0, maximumSelectedLoras));

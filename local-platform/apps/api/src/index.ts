@@ -31,6 +31,7 @@ import { MainPlatformIntegrationError, releaseMainBilling, removeMainGallery, re
 import { createHash, randomBytes } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import { registerLoraLibraryRoutes } from "./lora-library.js";
+import { registerModelLibraryRoutes } from "./model-library.js";
 import { registerAdminRuntimeRoutes } from "./admin-runtime.js";
 import { registerBotRoutes } from "./bot-routes.js";
 import { registerTrainingRoutes } from "./training-routes.js";
@@ -93,6 +94,7 @@ startService({
   checks,
   registerRoutes(router, getReadiness) {
     registerLoraLibraryRoutes(router, findLocalSessionRecord);
+    registerModelLibraryRoutes(router, findLocalSessionRecord);
     registerAdminRuntimeRoutes(router, findLocalSessionRecord);
     registerBotRoutes(router, { listModels: listInferenceModels, createJob: createInferenceJob, handleError: sendInferenceError });
     registerTrainingRoutes(router, findLocalSessionRecord);
