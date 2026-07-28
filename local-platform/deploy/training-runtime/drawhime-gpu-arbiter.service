@@ -1,0 +1,18 @@
+# 本文件由独立平台部署脚本安装，负责共享 GPU 上推理优先、训练让行。
+[Unit]
+Description=DrawHime GPU Workload Arbiter
+After=network-online.target comfyui-anima.service drawhime-training-runtime.service
+
+[Service]
+Type=simple
+WorkingDirectory=/data/drawhime-training/runtime
+Environment=DRAWHIME_TRAINING_ROOT=/data/drawhime-training
+Environment=COMFYUI_QUEUE_URL=http://127.0.0.1:8189/queue
+Environment=GPU_ARBITER_POLL_SECONDS=1
+ExecStart=/usr/bin/python3 /data/drawhime-training/runtime/gpu_arbiter.py
+Restart=always
+RestartSec=2
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target

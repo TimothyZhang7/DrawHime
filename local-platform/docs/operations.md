@@ -56,6 +56,8 @@ node scripts/deploy-production.mjs --target web
 - 部署会重载 Worker 前，应优先等待正在执行的不可中断任务完成；等待必须设置总截止时间。
 - 生产已有用户队列时，不提交会插队的合成测试。使用真实任务审计、动态工作流构建测试和脱敏参数核验完成验收。
 - 必须执行生成实测时，测试任务进入正常调度和计费链路，或者在明确的维护窗口使用不抢占用户任务的测试队列。
+- ComfyUI 推理与 LoRA 训练当前共享物理 GPU 1；`drawhime-gpu-arbiter` 以 ComfyUI 真实队列为准，在推理运行或等待期间向训练 Runtime 登记的进程组发送 `SIGSTOP`，队列清空后发送 `SIGCONT`。仲裁器只读取 `/data/drawhime-training/jobs/*/state.json` 中的运行中 PID，不扫描或控制其他 GPU 程序；仲裁器退出前必须恢复训练，队列接口不可达时按空闲处理，避免训练永久冻结。
+- ComfyUI Anima 使用 `--cache-lru 50` 显式保留常用底模、文本编码器、VAE 与近期 LoRA 节点结果；GPU 主机具有足够系统内存，缓存用于减少底模切换时的冷加载波动，不改变采样输出。缓存变更只允许通过 `node scripts/deploy-training-runtime.mjs --comfy-cache-only` 在队列为空时重启 ComfyUI。
 
 ## 已发生错误与预防
 

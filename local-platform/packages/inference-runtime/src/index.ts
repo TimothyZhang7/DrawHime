@@ -23,7 +23,7 @@ export interface AnimaGenerationInput {
   height: number;
   seed?: number | null;
   clientId: string;
-  loras?: Array<{ fileName: string; strength: number }>;
+  loras?: Array<{ fileName: string; strength: number; byteSize?: number }>;
   /** 模型目录固化的采样步数。 */
   steps?: number;
   /** 模型目录固化的提示词引导强度。 */
@@ -46,6 +46,10 @@ export interface AnimaGenerationInput {
   samplingPixelBudget?: number;
   /** 宽高比每偏离正方形 1 倍时增加的像素预算，用于补偿宽幅 GPU 利用率差异。 */
   samplingPixelBudgetAspectSlope?: number;
+  /** 宽高比达到阈值时使用独立步数，补偿极端画幅与正方形的吞吐差异。 */
+  aspectStepThreshold?: number;
+  /** 极端横竖幅的采样步数；仅允许低于或等于模型基础步数。 */
+  aspectAdjustedSteps?: number;
   /** 工作流内部最终输出宽度；仅由 Runtime 在尺寸归一化后写入。 */
   outputWidth?: number;
   /** 工作流内部最终输出高度；仅由 Runtime 在尺寸归一化后写入。 */
@@ -69,8 +73,9 @@ export interface AnimaGenerationResult {
 export async function generateAnimaImage(input: AnimaGenerationInput): Promise<AnimaGenerationResult> {
   const baseUrl = input.baseUrl.replace(/\/$/, "");
   const [width, height] = fitSize(input.width, input.height);
-  const [samplingWidth, samplingHeight] = fitAnimaSamplingSize(width, height, normalizeSamplingMaxEdge(input.samplingMaxEdge), input.samplingPixelBudget, input.samplingPixelBudgetAspectSlope);
-  const prompt = buildAnimaWorkflow({ ...input, width: samplingWidth, height: samplingHeight, outputWidth: width, outputHeight: height });
+  const workload = resolveAnimaSamplingWorkload(input);
+  const [samplingWidth, samplingHeight] = fitAnimaSamplingSize(width, height, normalizeSamplingMaxEdge(input.samplingMaxEdge), workload.pixelBudget, workload.aspectSlope);
+  const prompt = buildAnimaWorkflow({ ...input, width: samplingWidth, height: samplingHeight, outputWidth: width, outputHeight: height, steps: workload.steps });
   // 独立平台已经完成钱包预留和 GPU 租约，进入 ComfyUI 时放到受控队列前部，避免旧直连链路积压使已计费任务长期停留在运行中。
   const requestJson = { prompt, client_id: input.clientId, front: true };
   const submitted = await fetchWithRetry(`${baseUrl}/prompt`, {
@@ -102,7 +107,7 @@ export async function generateAnimaImage(input: AnimaGenerationInput): Promise<A
         height,
         runtimeJobId: promptId,
         requestJson,
-        responseJson: { promptId, image, samplingWidth, samplingHeight, outputWidth: width, outputHeight: height },
+        responseJson: { promptId, image, samplingWidth, samplingHeight, outputWidth: width, outputHeight: height, workload },
       };
     }
     if (item.status?.status_str === "error") throw new Error("ComfyUI 工作流执行失败");
@@ -174,6 +179,22 @@ export function fitAnimaSamplingSize(width: number, height: number, maxEdge: num
   const targetPixels = Math.min(4_194_304, normalizedBudget + Math.min(1, aspect - 1) * slope);
   const scale = Math.min(maxEdge / Math.max(safeWidth, safeHeight), Math.sqrt(targetPixels / (safeWidth * safeHeight)));
   return [alignDimension(safeWidth * scale, maxEdge), alignDimension(safeHeight * scale, maxEdge)];
+}
+
+/** 固化模型级采样工作量；LoRA 只改变条件与权重，不降低质量参数来追求表面耗时一致。 */
+export function resolveAnimaSamplingWorkload(input: AnimaGenerationInput): { steps: number; pixelBudget?: number; aspectSlope?: number; loraBytes: number; computeScale: number; aspect: number } {
+  const normalizedModel = input.modelFileName.toLowerCase();
+  const baseSteps = normalizeSteps(input.steps, normalizedModel.includes("turbo") ? 10 : 8);
+  const basePixelBudget = normalizeSamplingPixelBudget(input.samplingPixelBudget) ?? undefined;
+  const baseAspectSlope = Number.isFinite(input.samplingPixelBudgetAspectSlope) ? Math.max(0, Math.min(1_000_000, Number(input.samplingPixelBudgetAspectSlope))) : undefined;
+  const safeWidth = Number.isFinite(input.width) && input.width > 0 ? input.width : ANIMA_MAX_EDGE;
+  const safeHeight = Number.isFinite(input.height) && input.height > 0 ? input.height : ANIMA_MAX_EDGE;
+  const aspect = Math.max(safeWidth, safeHeight) / Math.min(safeWidth, safeHeight);
+  const aspectThreshold = Number.isFinite(input.aspectStepThreshold) ? Math.max(1, Math.min(4, Number(input.aspectStepThreshold))) : Number.POSITIVE_INFINITY;
+  const adjustedSteps = Number.isSafeInteger(input.aspectAdjustedSteps) ? Math.max(1, Math.min(baseSteps, Number(input.aspectAdjustedSteps))) : baseSteps;
+  const steps = aspect >= aspectThreshold ? adjustedSteps : baseSteps;
+  const loraBytes = (input.loras ?? []).reduce((total, lora) => total + (Number.isSafeInteger(lora.byteSize) && Number(lora.byteSize) > 0 ? Number(lora.byteSize) : 0), 0);
+  return { steps, pixelBudget: basePixelBudget, aspectSlope: baseAspectSlope, loraBytes, computeScale: 1, aspect: Math.round(aspect * 1000) / 1000 };
 }
 
 /** 补齐官方质量标签且不重复用户已有标签。 */

@@ -129,6 +129,8 @@ async function processJob(jobId: string): Promise<void> {
       samplingMaxEdge: readBoundedInteger(modelDefaults.samplingMaxEdge, 512, 2048),
       samplingPixelBudget: readBoundedInteger(modelDefaults.samplingPixelBudget, 262_144, 4_194_304),
       samplingPixelBudgetAspectSlope: readBoundedInteger(modelDefaults.samplingPixelBudgetAspectSlope, 0, 1_000_000),
+      aspectStepThreshold: readBoundedNumber(modelDefaults.aspectStepThreshold, 1, 4),
+      aspectAdjustedSteps: readBoundedInteger(modelDefaults.aspectAdjustedSteps, 1, 50),
       onSubmitted: async (runtimeJobId, requestJson) => {
         await database.inferenceAttempt.update({ where: { id: attempt.id }, data: { runtimeJobId, requestJson: requestJson as Prisma.InputJsonObject } });
       },
@@ -451,11 +453,11 @@ function isRetryableRuntimeError(error: unknown): boolean {
 }
 
 /** 从独立对象存储解析任务 LoRA，并在提交工作流前按 SHA-256 同步到 ComfyUI。 */
-async function resolveTaskLoras(versionIds: string[], strengths: Record<string, number>, snapshots: Record<string, TaskLoraSnapshot>): Promise<Array<{ fileName: string; strength: number; triggerWords: string[] }>> {
+async function resolveTaskLoras(versionIds: string[], strengths: Record<string, number>, snapshots: Record<string, TaskLoraSnapshot>): Promise<Array<{ fileName: string; strength: number; triggerWords: string[]; byteSize: number }>> {
   if (versionIds.length === 0) return [];
   const versions = await database.loraVersion.findMany({ where: { id: { in: versionIds }, status: "ACTIVE", loraEntry: { status: "ACTIVE" } }, include: { loraEntry: { select: { type: true, triggerWords: true } } } });
   const map = new Map(versions.map((version) => [version.id, version]));
-  const result: Array<{ fileName: string; strength: number; triggerWords: string[] }> = [];
+  const result: Array<{ fileName: string; strength: number; triggerWords: string[]; byteSize: number }> = [];
   for (const versionId of versionIds) {
     const version = map.get(versionId);
     if (!version) throw new Error("任务 LoRA 文件版本已经不可用");
@@ -469,7 +471,7 @@ async function resolveTaskLoras(versionIds: string[], strengths: Record<string, 
       sha256: version.sha256,
       sizeBytes: Number(version.byteSize),
     });
-    result.push({ fileName: gpuFileName, strength: normalizeRuntimeLoraStrength(strengths[versionId], version.loraEntry.type), triggerWords: snapshots[versionId]?.triggerWords ?? readRuntimeTriggerWords(version.loraEntry.triggerWords) });
+    result.push({ fileName: gpuFileName, strength: normalizeRuntimeLoraStrength(strengths[versionId], version.loraEntry.type), triggerWords: snapshots[versionId]?.triggerWords ?? readRuntimeTriggerWords(version.loraEntry.triggerWords), byteSize: Number(version.byteSize) });
   }
   return result;
 }

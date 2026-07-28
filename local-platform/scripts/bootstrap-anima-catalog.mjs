@@ -13,13 +13,13 @@ const defaultTrainingPricingVersion = 3;
 const defaultTrainingPriceCny = "0.80";
 const sharedDefaults = { width: 1024, height: 1024, maxEdge: 1536, maxAttempts: 3, promptEnhancementEnabled: true, pricingVersion: defaultPricingVersion, priceCny: defaultPriceCny, trainingProductCode: defaultTrainingProductCode, trainingPricingVersion: defaultTrainingPricingVersion, trainingPriceCny: defaultTrainingPriceCny };
 const defaultNegativePrompt = "worst quality, low quality, score_1, score_2, score_3, artist name";
-// 完整微调底模共享同一采样工作量，约 968² 基础采样配合 25 步兼顾清晰度、收敛质量和 240～280 秒耗时。
-const balancedFullCheckpointSampling = { qualityProfile: "balanced-260s-v2", targetSeconds: 260, steps: 25, samplingMaxEdge: 1536, samplingPixelBudget: 930000, samplingPixelBudgetAspectSlope: 130000, systemTurboLoraEnabled: false, systemHighresLoraEnabled: false };
+// 正方形使用 37 步与约 1160² 潜空间，极端横竖幅按实测使用 34 步；LoRA 不降低质量参数，目标耗时为 240～280 秒。
+const balancedFullCheckpointSampling = { qualityProfile: "balanced-exclusive-260s-v6", targetSeconds: 260, steps: 37, aspectStepThreshold: 1.5, aspectAdjustedSteps: 34, samplingMaxEdge: 1536, samplingPixelBudget: 1350000, samplingPixelBudgetAspectSlope: 0, systemTurboLoraEnabled: false, systemHighresLoraEnabled: false };
 
 // 模型文件名、哈希、CFG 与采样器来自对应版本；像素预算按生产 P40 的横竖幅与正方形任务实测校准到约 260 秒。
 const modelCatalog = [
   {
-    workflowVersion: 12,
+    workflowVersion: 28,
     fileName: "anima-base-v1.0.safetensors",
     displayName: "Anima Base v1.0",
     description: "Anima Base v1.0 原生底模，仅加载用户主动选择的 LoRA。",
@@ -29,10 +29,10 @@ const modelCatalog = [
     sourceVersionId: null,
     sha256: null,
     byteSize: 4182218328,
-    parameters: { profileRevision: 7, ...balancedFullCheckpointSampling, cfg: 4, sampler: "er_sde", scheduler: "simple", qualityPrefix: "masterpiece, best quality, score_7", defaultNegativePrompt, systemTurboLoraEnabled: false, systemLoraSha256: [] },
+    parameters: { profileRevision: 11, ...balancedFullCheckpointSampling, cfg: 4, sampler: "er_sde", scheduler: "simple", qualityPrefix: "masterpiece, best quality, score_7", defaultNegativePrompt, systemTurboLoraEnabled: false, systemLoraSha256: [] },
   },
   {
-    workflowVersion: 8,
+    workflowVersion: 29,
     fileName: "animeBulldozer_anima.safetensors",
     displayName: "Anime Bulldozer Anima",
     description: "Anime/bulldozer Anima 完整微调底模，偏高完成度动漫插画。",
@@ -42,10 +42,10 @@ const modelCatalog = [
     sourceVersionId: 3047288,
     sha256: "8E279F111ED7E7EA214EA61850E002F700CCE55A8CD027675796773089B3C739",
     byteSize: 4182218504,
-    parameters: { profileRevision: 6, ...balancedFullCheckpointSampling, cfg: 4, sampler: "er_sde", scheduler: "simple", qualityPrefix: "masterpiece, best quality, score_7, very aesthetic", defaultNegativePrompt: `${defaultNegativePrompt}, blurry, jpeg artifacts, sepia, muscular female` },
+    parameters: { profileRevision: 10, ...balancedFullCheckpointSampling, cfg: 4, sampler: "er_sde", scheduler: "simple", qualityPrefix: "masterpiece, best quality, score_7, very aesthetic", defaultNegativePrompt: `${defaultNegativePrompt}, blurry, jpeg artifacts, sepia, muscular female` },
   },
   {
-    workflowVersion: 9,
+    workflowVersion: 30,
     fileName: "miaomiaoRealskin_anima11.safetensors",
     displayName: "MiaoMiao RealSkin Anima 1.1",
     description: "MiaoMiao RealSkin Anima 1.1 完整微调底模，面向写实皮肤与摄影质感。",
@@ -55,10 +55,10 @@ const modelCatalog = [
     sourceVersionId: 3071702,
     sha256: "D33247D48A9C15A872AEF963940FC87362F925E3E087365810AD747042FCC454",
     byteSize: 4182218328,
-    parameters: { profileRevision: 6, ...balancedFullCheckpointSampling, cfg: 4, sampler: "euler_ancestral", scheduler: "normal", qualityPrefix: "best quality, score_7, score_9, very aesthetic, ultra detailed, fair skin, high contrast, photorealistic, raw photo, photo background", defaultNegativePrompt },
+    parameters: { profileRevision: 10, ...balancedFullCheckpointSampling, cfg: 4, sampler: "euler_ancestral", scheduler: "normal", qualityPrefix: "best quality, score_7, score_9, very aesthetic, ultra detailed, fair skin, high contrast, photorealistic, raw photo, photo background", defaultNegativePrompt },
   },
   {
-    workflowVersion: 10,
+    workflowVersion: 31,
     fileName: "miaomiao3DHarem_animaLH3D10.safetensors",
     displayName: "MiaoMiao 3D Harem Anima LH3D 1.0",
     description: "MiaoMiao 3D Harem Anima LH3D 1.0 完整微调底模，面向精细三维动漫质感。",
@@ -68,10 +68,10 @@ const modelCatalog = [
     sourceVersionId: 3074791,
     sha256: "0707CBE8DEED6C858A6BA8DFBCFE2006E3A4FD44C099AAFD048400FDEC1866DD",
     byteSize: 4182218328,
-    parameters: { profileRevision: 6, ...balancedFullCheckpointSampling, cfg: 4, sampler: "euler_ancestral", scheduler: "normal", qualityPrefix: "best quality, score_7, score_9, very aesthetic, ultra detailed, high contrast", defaultNegativePrompt },
+    parameters: { profileRevision: 10, ...balancedFullCheckpointSampling, cfg: 4, sampler: "euler_ancestral", scheduler: "normal", qualityPrefix: "best quality, score_7, score_9, very aesthetic, ultra detailed, high contrast", defaultNegativePrompt },
   },
   {
-    workflowVersion: 11,
+    workflowVersion: 32,
     fileName: "waiANIMA_v10Base10.safetensors",
     displayName: "WAI Anima v1.0",
     description: "WAI Anima v1.0 完整微调底模，面向高质量二次元角色插画。",
@@ -81,7 +81,7 @@ const modelCatalog = [
     sourceVersionId: 2983680,
     sha256: "9D5A1E1393C2978D6A979FAB38FB0DEE00BC2A94E354196C9F3CF2F6F56D5FBF",
     byteSize: 4182233976,
-    parameters: { profileRevision: 3, ...balancedFullCheckpointSampling, cfg: 4.5, sampler: "euler_ancestral", scheduler: "normal", qualityPrefix: "masterpiece, best quality, score_7", defaultNegativePrompt: `${defaultNegativePrompt}, blurry, jpeg artifacts, lowres, censor` },
+    parameters: { profileRevision: 7, ...balancedFullCheckpointSampling, cfg: 4.5, sampler: "euler_ancestral", scheduler: "normal", qualityPrefix: "masterpiece, best quality, score_7", defaultNegativePrompt: `${defaultNegativePrompt}, blurry, jpeg artifacts, lowres, censor` },
   },
 ];
 
@@ -121,7 +121,7 @@ try {
       model: catalog.fileName,
       modelSha256: catalog.sha256,
       sourceVersionId: catalog.sourceVersionId,
-      sampling: { targetSeconds: effectiveDefaults.targetSeconds, steps: effectiveDefaults.steps, cfg: effectiveDefaults.cfg, sampler: effectiveDefaults.sampler, scheduler: effectiveDefaults.scheduler, maxEdge: effectiveDefaults.samplingMaxEdge, pixelBudget: effectiveDefaults.samplingPixelBudget, aspectSlope: effectiveDefaults.samplingPixelBudgetAspectSlope },
+      sampling: { targetSeconds: effectiveDefaults.targetSeconds, steps: effectiveDefaults.steps, aspectStepThreshold: effectiveDefaults.aspectStepThreshold, aspectAdjustedSteps: effectiveDefaults.aspectAdjustedSteps, cfg: effectiveDefaults.cfg, sampler: effectiveDefaults.sampler, scheduler: effectiveDefaults.scheduler, maxEdge: effectiveDefaults.samplingMaxEdge, pixelBudget: effectiveDefaults.samplingPixelBudget, aspectSlope: effectiveDefaults.samplingPixelBudgetAspectSlope },
       systemLoras: [
         ...(effectiveDefaults.systemTurboLoraEnabled === false ? [] : ["anima-turbo-lora-v0.2.safetensors"]),
         ...(effectiveDefaults.systemHighresLoraEnabled === false ? [] : ["anima-highres-aesthetic-boost.safetensors"]),

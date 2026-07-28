@@ -1,7 +1,7 @@
 /** 本文件验证 Anima 工作流始终把正面与负面提示词映射到独立 conditioning。 */
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildAnimaWorkflow, fitAnimaSamplingSize } from "./index.js";
+import { buildAnimaWorkflow, fitAnimaSamplingSize, resolveAnimaSamplingWorkload } from "./index.js";
 
 test("正面与负面提示词分别进入节点 6 和节点 7", () => {
   const workflow = buildAnimaWorkflow({
@@ -105,4 +105,23 @@ test("模型级像素预算按画幅统一采样工作量并允许内部超采�
   assert.deepEqual(fitAnimaSamplingSize(1024, 1024, 2048, 2359296, 0), [1536, 1536]);
   const baseSmall = buildAnimaWorkflow({ baseUrl: "http://runtime", modelFileName: "anima-base-v1.0.safetensors", prompt: "small", width: 1536, height: 1536, outputWidth: 1024, outputHeight: 1024, clientId: "small", steps: 12 }) as Record<string, { inputs?: Record<string, unknown> }>;
   assert.deepEqual(baseSmall["90"]?.inputs, { image: ["10", 0], upscale_method: "lanczos", width: 1024, height: 1024, crop: "disabled" });
+});
+
+test("不同 LoRA 文件参数量保持相同模型级采样质量", () => {
+  const base = {
+    baseUrl: "http://runtime",
+    modelFileName: "anima-base-v1.0.safetensors",
+    prompt: "subject",
+    width: 1536,
+    height: 1536,
+    clientId: "adaptive-workload-test",
+    steps: 37,
+    aspectStepThreshold: 1.5,
+    aspectAdjustedSteps: 34,
+    samplingPixelBudget: 1_350_000,
+    samplingPixelBudgetAspectSlope: 0,
+  };
+  assert.deepEqual(resolveAnimaSamplingWorkload(base), { steps: 37, pixelBudget: 1_350_000, aspectSlope: 0, loraBytes: 0, computeScale: 1, aspect: 1 });
+  assert.deepEqual(resolveAnimaSamplingWorkload({ ...base, width: 1536, height: 864, loras: [{ fileName: "rank64.safetensors", strength: 1, byteSize: 183_600_000 }] }), { steps: 34, pixelBudget: 1_350_000, aspectSlope: 0, loraBytes: 183_600_000, computeScale: 1, aspect: 1.778 });
+  assert.deepEqual(resolveAnimaSamplingWorkload({ ...base, loras: [{ fileName: "first.safetensors", strength: 1, byteSize: 183_600_000 }, { fileName: "second.safetensors", strength: 0.8, byteSize: 183_600_000 }] }), { steps: 37, pixelBudget: 1_350_000, aspectSlope: 0, loraBytes: 367_200_000, computeScale: 1, aspect: 1 });
 });

@@ -28,7 +28,7 @@
 | `POST /v1/auth/session/exchange` | web/admin | api | 主站 Bearer JWT 换取 `LocalPlatformSessionView` |
 | `GET /v1/auth/me` | web/admin | api | `LocalPlatformSessionView` |
 | `DELETE /v1/auth/session` | web/admin | api | 撤销当前独立平台会话 |
-| `GET /v1/models` | web/admin | api | 当前可用本地模型、工作流、模型独立的采样器/调度器/步数/CFG/质量前缀、采样最长边、画幅补偿像素预算、最终输出最大尺寸和主站价格版本；完整微调底模不得套用 Anima Base 的 Turbo 参数 |
+| `GET /v1/models` | web/admin | api | 当前可用本地模型、工作流、模型独立的采样器/调度器/步数/CFG/质量前缀、采样最长边、画幅补偿像素预算、最终输出最大尺寸和主站价格版本；完整微调底模不得套用 Anima Base 的 Turbo 参数。全部 LoRA 组合使用同一模型级采样质量参数，不通过降低步数或像素预算伪造耗时一致 |
 | `POST /v1/training/tag-translations` | web/main-web | api | 登录用户批量解析英文 LoRA 训练标签；优先读取持久化翻译集，缺失项由真实 AI 翻译后入库，返回简体中文、来源和每个标签稳定唯一色，不改写训练 Caption |
 | `POST /v1/training/datasets/:id/assets/:assetId/caption-jobs` | main-web/web | api/training-worker | 为单张训练图片创建持久化自动打标任务；只替换该图 Caption，完成后使既有全量确认回到待确认，不重跑其他图片 |
 | `GET /v1/model-library[/:id]` | web/admin | api | 浏览当前底模仓库和详情；返回格式、采样配置、来源、使用说明、示例图片以及引用该底模的公开任务 |

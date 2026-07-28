@@ -19,9 +19,38 @@ const ssh = ["-i", key, "-o", "BatchMode=yes", "-o", "ConnectTimeout=20"];
 // 平台凭证读取可经受控跳板，GPU 文件部署继续保持直连，避免形成错误的双重跳转。
 const platformSsh = [...ssh, ...(platformProxyJump ? ["-J", platformProxyJump] : [])];
 const dryRun = process.argv.includes("--dry-run");
+const arbiterOnly = process.argv.includes("--arbiter-only");
+const comfyCacheOnly = process.argv.includes("--comfy-cache-only");
+if (arbiterOnly && comfyCacheOnly) throw new Error("GPU 仲裁器与 ComfyUI 缓存模式不能同时指定");
 
 if (dryRun) {
-  process.stdout.write(`GPU 主机：${gpuHost}\nsd-scripts：${revision}\nRuntime 端口：7120（仅 ${platformIp}）\n`);
+  process.stdout.write(`GPU 主机：${gpuHost}\n模式：${arbiterOnly ? "仅 GPU 负载仲裁器" : comfyCacheOnly ? "仅 ComfyUI 模型缓存" : "训练 Runtime 与 GPU 负载仲裁器"}\nsd-scripts：${revision}\nRuntime 端口：7120（仅 ${platformIp}）\n`);
+  process.exit(0);
+}
+
+if (comfyCacheOnly) {
+  // 缓存参数只在 ComfyUI 队列为空时生效，拒绝中断已经开始的用户推理任务。
+  run("ssh", [...ssh, gpuHost, "mkdir -p /etc/systemd/system/comfyui-anima.service.d"]);
+  run("scp", [...ssh, resolve(root, "deploy/comfyui-anima/10-model-cache.conf"), `${gpuHost}:/etc/systemd/system/comfyui-anima.service.d/10-model-cache.conf`]);
+  const setupCache = `set -euo pipefail
+counts=$(curl -fsS http://127.0.0.1:8189/queue | python3 -c 'import json,sys; q=json.load(sys.stdin); print(str(len(q.get("queue_running", [])))+" "+str(len(q.get("queue_pending", []))))')
+test "$counts" = "0 0"
+systemctl daemon-reload
+systemctl restart comfyui-anima.service
+for attempt in $(seq 1 60); do curl -fsS http://127.0.0.1:8189/system_stats >/dev/null && break; sleep 2; done
+curl -fsS http://127.0.0.1:8189/system_stats >/dev/null
+systemctl show comfyui-anima.service -p ExecStart --value | grep -q -- '--cache-lru 50'
+`;
+  run("ssh", [...ssh, gpuHost, "bash", "-s"], setupCache);
+  process.exit(0);
+}
+
+if (arbiterOnly) {
+  // 仲裁器可独立热部署，不重启正在执行用户任务的训练 Runtime。
+  run("ssh", [...ssh, gpuHost, "mkdir -p /data/drawhime-training/runtime"]);
+  run("scp", [...ssh, resolve(root, "deploy/training-runtime/gpu_arbiter.py"), `${gpuHost}:/data/drawhime-training/runtime/gpu_arbiter.py`]);
+  run("scp", [...ssh, resolve(root, "deploy/training-runtime/drawhime-gpu-arbiter.service"), `${gpuHost}:/etc/systemd/system/drawhime-gpu-arbiter.service`]);
+  run("ssh", [...ssh, gpuHost, "systemctl daemon-reload && systemctl enable --now drawhime-gpu-arbiter.service && systemctl is-active --quiet drawhime-gpu-arbiter.service"]);
   process.exit(0);
 }
 
@@ -31,6 +60,8 @@ if (!/^[a-f0-9]{64}$/i.test(token)) throw new Error("生产平台 TRAINING_RUNTI
 run("ssh", [...ssh, gpuHost, "mkdir -p /data/drawhime-training/runtime"]);
 run("scp", [...ssh, resolve(root, "deploy/training-runtime/server.py"), `${gpuHost}:/data/drawhime-training/runtime/server.py`]);
 run("scp", [...ssh, resolve(root, "deploy/training-runtime/drawhime-training-runtime.service"), `${gpuHost}:/etc/systemd/system/drawhime-training-runtime.service`]);
+run("scp", [...ssh, resolve(root, "deploy/training-runtime/gpu_arbiter.py"), `${gpuHost}:/data/drawhime-training/runtime/gpu_arbiter.py`]);
+run("scp", [...ssh, resolve(root, "deploy/training-runtime/drawhime-gpu-arbiter.service"), `${gpuHost}:/etc/systemd/system/drawhime-gpu-arbiter.service`]);
 
 const setup = `set -euo pipefail
 ROOT=/data/drawhime-training
@@ -64,8 +95,11 @@ ufw allow from ${platformIp} to any port 7120 proto tcp comment 'DrawHime traini
 systemctl daemon-reload
 systemctl enable drawhime-training-runtime
 systemctl restart drawhime-training-runtime
+systemctl enable drawhime-gpu-arbiter.service
+systemctl restart drawhime-gpu-arbiter.service
 for attempt in $(seq 1 30); do curl -fsS http://127.0.0.1:7120/health >/dev/null && break; sleep 2; done
 curl -fsS http://127.0.0.1:7120/health
+systemctl is-active --quiet drawhime-gpu-arbiter.service
 `;
 run("ssh", [...ssh, gpuHost, "bash", "-s"], setup);
 
