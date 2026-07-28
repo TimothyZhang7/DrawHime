@@ -14,22 +14,22 @@ const defaultTrainingPriceCny = "0.80";
 const sharedDefaults = { width: 1024, height: 1024, maxEdge: 1536, maxAttempts: 3, promptEnhancementEnabled: true, pricingVersion: defaultPricingVersion, priceCny: defaultPriceCny, trainingProductCode: defaultTrainingProductCode, trainingPricingVersion: defaultTrainingPricingVersion, trainingPriceCny: defaultTrainingPriceCny };
 const defaultNegativePrompt = "worst quality, low quality, score_1, score_2, score_3, artist name";
 // 完整微调底模共享同一采样工作量，约 968² 基础采样配合 25 步兼顾清晰度、收敛质量和 240～280 秒耗时。
-const balancedFullCheckpointSampling = { qualityProfile: "balanced-260s-v2", targetSeconds: 260, steps: 25, samplingMaxEdge: 1536, samplingPixelBudget: 930000, samplingPixelBudgetAspectSlope: 130000, systemHighresLoraEnabled: false };
+const balancedFullCheckpointSampling = { qualityProfile: "balanced-260s-v2", targetSeconds: 260, steps: 25, samplingMaxEdge: 1536, samplingPixelBudget: 930000, samplingPixelBudgetAspectSlope: 130000, systemTurboLoraEnabled: false, systemHighresLoraEnabled: false };
 
 // 模型文件名、哈希、CFG 与采样器来自对应版本；像素预算按生产 P40 的横竖幅与正方形任务实测校准到约 260 秒。
 const modelCatalog = [
   {
-    workflowVersion: 1,
+    workflowVersion: 12,
     fileName: "anima-base-v1.0.safetensors",
     displayName: "Anima Base v1.0",
-    description: "Anima Base v1.0，叠加平台 Anima Turbo 与 Highres/Aesthetic Boost。",
+    description: "Anima Base v1.0 原生底模，仅加载用户主动选择的 LoRA。",
     runtimeSlug: "comfyui-anima-production-v1",
     productCode: "local.anima-base-v1.image",
     sourceUrl: "https://huggingface.co/circlestone-labs/Anima/",
     sourceVersionId: null,
     sha256: null,
     byteSize: 4182218328,
-    parameters: { profileRevision: 6, qualityProfile: "balanced-260s-v2", targetSeconds: 260, steps: 13, cfg: 1, sampler: "er_sde", scheduler: "simple", samplingMaxEdge: 2048, samplingPixelBudget: 2350000, samplingPixelBudgetAspectSlope: 0, qualityPrefix: "masterpiece, best quality, score_7", defaultNegativePrompt, systemHighresLoraEnabled: true, systemLoraSha256: ["1b55e40bdb1d0e5a78cb498f245fccfdaae97823265db957d2aabdcf4cd3caf1", "db5b2dcc4e1afa215058b7a85fb9377124c2e9aabd48c25e595af7199207c299"] },
+    parameters: { profileRevision: 7, ...balancedFullCheckpointSampling, cfg: 4, sampler: "er_sde", scheduler: "simple", qualityPrefix: "masterpiece, best quality, score_7", defaultNegativePrompt, systemTurboLoraEnabled: false, systemLoraSha256: [] },
   },
   {
     workflowVersion: 8,
@@ -106,7 +106,11 @@ try {
     // 性能配置按版本只迁移一次；价格、尝试次数和管理员维护的非采样字段继续保持不变。
     const profilePatch = desiredProfileRevision > storedProfileRevision ? catalog.parameters : {};
     const nextModelDefaults = { ...modelDefaults, ...missingDefaults, ...profilePatch };
-    if (Object.keys(missingDefaults).length > 0 || Object.keys(profilePatch).length > 0) await database.modelVersion.update({ where: { id: model.id }, data: { defaultParameters: nextModelDefaults } });
+    const descriptionChanged = model.description !== catalog.description;
+    if (Object.keys(missingDefaults).length > 0 || Object.keys(profilePatch).length > 0 || descriptionChanged) {
+      // 模型能力说明随目录更新；历史工作流仍由独立版本保留，不改写已经被任务引用的快照。
+      await database.modelVersion.update({ where: { id: model.id }, data: { defaultParameters: nextModelDefaults, description: catalog.description } });
+    }
     const effectiveDefaults = { ...defaults, ...nextModelDefaults };
     const runtime = await database.runtimeDefinition.findUnique({ where: { slug: catalog.runtimeSlug } }) ?? await database.runtimeDefinition.create({
       data: { modelVersionId: model.id, slug: catalog.runtimeSlug, runtimeType: "comfyui", healthPath: "/system_stats", status: "ACTIVE" },
@@ -118,7 +122,10 @@ try {
       modelSha256: catalog.sha256,
       sourceVersionId: catalog.sourceVersionId,
       sampling: { targetSeconds: effectiveDefaults.targetSeconds, steps: effectiveDefaults.steps, cfg: effectiveDefaults.cfg, sampler: effectiveDefaults.sampler, scheduler: effectiveDefaults.scheduler, maxEdge: effectiveDefaults.samplingMaxEdge, pixelBudget: effectiveDefaults.samplingPixelBudget, aspectSlope: effectiveDefaults.samplingPixelBudgetAspectSlope },
-      systemLoras: effectiveDefaults.systemHighresLoraEnabled === false ? [] : ["anima-turbo-lora-v0.2.safetensors", "anima-highres-aesthetic-boost.safetensors"],
+      systemLoras: [
+        ...(effectiveDefaults.systemTurboLoraEnabled === false ? [] : ["anima-turbo-lora-v0.2.safetensors"]),
+        ...(effectiveDefaults.systemHighresLoraEnabled === false ? [] : ["anima-highres-aesthetic-boost.safetensors"]),
+      ],
       clip: "qwen_3_06b_base.safetensors",
       vae: "qwen_image_vae.safetensors",
       output: { format: "WEBP", quality: 100, maxEdge: effectiveDefaults.maxEdge, upscaleMethod: "lanczos" },

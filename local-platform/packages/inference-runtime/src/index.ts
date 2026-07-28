@@ -36,6 +36,8 @@ export interface AnimaGenerationInput {
   qualityPrefix?: string;
   /** 用户未填写负面提示词时使用的底模默认值。 */
   defaultNegativePrompt?: string;
+  /** 是否给原生 Anima Base 叠加平台 Turbo LoRA。 */
+  systemTurboLoraEnabled?: boolean;
   /** 是否叠加平台高分辨率美学 LoRA；完整微调底模默认关闭以保留自身风格。 */
   systemHighresLoraEnabled?: boolean;
   /** 扩散采样最长边；可低于最终输出边长以控制单图耗时。 */
@@ -107,13 +109,14 @@ export async function generateAnimaImage(input: AnimaGenerationInput): Promise<A
   }
 }
 
-/** 构建 Anima Base + Turbo LoRA + 高分辨率美学 LoRA 的生产工作流。 */
+/** 构建支持可选系统 LoRA 与用户 LoRA 串联的 Anima 生产工作流。 */
 export function buildAnimaWorkflow(input: AnimaGenerationInput): Record<string, unknown> {
   const normalizedModel = input.modelFileName.toLowerCase();
   const isBaseModel = BASE_MODELS.has(normalizedModel);
   const isPremergedTurbo = normalizedModel.includes("turbo");
-  const modelInput: [string, number] = isBaseModel ? ["4", 0] : ["1", 0];
-  const clipInput: [string, number] = isBaseModel ? ["4", 1] : ["2", 0];
+  const systemTurboLoraEnabled = isBaseModel && input.systemTurboLoraEnabled !== false;
+  const modelInput: [string, number] = systemTurboLoraEnabled ? ["4", 0] : ["1", 0];
+  const clipInput: [string, number] = systemTurboLoraEnabled ? ["4", 1] : ["2", 0];
   const systemHighresLoraEnabled = input.systemHighresLoraEnabled !== false;
   let activeModelInput: [string, number] = systemHighresLoraEnabled ? ["5", 0] : modelInput;
   let activeClipInput: [string, number] = systemHighresLoraEnabled ? ["5", 1] : clipInput;
@@ -133,7 +136,7 @@ export function buildAnimaWorkflow(input: AnimaGenerationInput): Record<string, 
   };
   // 完整微调底模在较小潜空间采样后使用 Lanczos 恢复用户选择的输出尺寸，避免高分辨率采样阻塞队列十余分钟。
   if (shouldScaleOutput) prompt["90"] = { class_type: "ImageScale", inputs: { image: ["10", 0], upscale_method: "lanczos", width: outputWidth, height: outputHeight, crop: "disabled" } };
-  if (isBaseModel) prompt["4"] = { class_type: "LoraLoader", inputs: { model: ["1", 0], clip: ["2", 0], lora_name: TURBO_LORA, strength_model: 1, strength_clip: 1 } };
+  if (systemTurboLoraEnabled) prompt["4"] = { class_type: "LoraLoader", inputs: { model: ["1", 0], clip: ["2", 0], lora_name: TURBO_LORA, strength_model: 1, strength_clip: 1 } };
   if (systemHighresLoraEnabled) prompt["5"] = { class_type: "LoraLoader", inputs: { model: modelInput, clip: clipInput, lora_name: HIGHRES_LORA, strength_model: HIGHRES_STRENGTH, strength_clip: HIGHRES_STRENGTH } };
   for (const [index, lora] of (input.loras ?? []).entries()) {
     const nodeId = String(12 + index);

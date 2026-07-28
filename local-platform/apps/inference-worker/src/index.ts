@@ -124,6 +124,7 @@ async function processJob(jobId: string): Promise<void> {
       scheduler: readOptionalString(modelDefaults.scheduler),
       qualityPrefix: readOptionalString(modelDefaults.qualityPrefix),
       defaultNegativePrompt: readOptionalString(modelDefaults.defaultNegativePrompt),
+      systemTurboLoraEnabled: modelDefaults.systemTurboLoraEnabled !== false,
       systemHighresLoraEnabled: modelDefaults.systemHighresLoraEnabled !== false,
       samplingMaxEdge: readBoundedInteger(modelDefaults.samplingMaxEdge, 512, 2048),
       samplingPixelBudget: readBoundedInteger(modelDefaults.samplingPixelBudget, 262_144, 4_194_304),

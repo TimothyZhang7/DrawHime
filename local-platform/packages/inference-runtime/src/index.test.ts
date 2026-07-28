@@ -79,6 +79,26 @@ test("完整微调底模按顺序应用用户 LoRA 并恢复最终输出尺寸",
   assert.deepEqual(workflow["11"]?.inputs?.["🖼️ 图像"] as [string, number], ["90", 0]);
 });
 
+test("Anima Base 关闭系统 LoRA 后只串联用户选择的 LoRA", () => {
+  const workflow = buildAnimaWorkflow({
+    baseUrl: "http://127.0.0.1:8188",
+    modelFileName: "anima-base-v1.0.safetensors",
+    prompt: "base_user_lora_token",
+    width: 1024,
+    height: 1024,
+    clientId: "base-user-lora-only-test",
+    systemTurboLoraEnabled: false,
+    systemHighresLoraEnabled: false,
+    loras: [{ fileName: "user-selected.safetensors", strength: 0.9 }],
+  }) as Record<string, { class_type?: string; inputs?: Record<string, unknown> }>;
+  assert.equal(workflow["4"], undefined);
+  assert.equal(workflow["5"], undefined);
+  assert.deepEqual(workflow["12"]?.inputs?.model as [string, number], ["1", 0]);
+  assert.deepEqual(workflow["12"]?.inputs?.clip as [string, number], ["2", 0]);
+  assert.equal(workflow["12"]?.inputs?.lora_name, "user-selected.safetensors");
+  assert.deepEqual(workflow["9"]?.inputs?.model as [string, number], ["12", 0]);
+});
+
 test("模型级像素预算按画幅统一采样工作量并允许内部超采样", () => {
   assert.deepEqual(fitAnimaSamplingSize(1536, 1536, 1536, 900000, 130000), [952, 952]);
   assert.deepEqual(fitAnimaSamplingSize(1536, 864, 1536, 900000, 130000), [1336, 752]);
