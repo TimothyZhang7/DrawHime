@@ -68,6 +68,19 @@ const modelCatalog = [
     byteSize: 4182218328,
     parameters: { profileRevision: 4, targetSeconds: 240, steps: 24, cfg: 4, sampler: "euler_ancestral", scheduler: "normal", samplingMaxEdge: 1536, samplingPixelBudget: 900000, samplingPixelBudgetAspectSlope: 130000, qualityPrefix: "best quality, score_7, score_9, very aesthetic, ultra detailed, high contrast", defaultNegativePrompt, systemHighresLoraEnabled: false },
   },
+  {
+    workflowVersion: 11,
+    fileName: "waiANIMA_v10Base10.safetensors",
+    displayName: "WAI Anima v1.0",
+    description: "WAI Anima v1.0 完整微调底模，面向高质量二次元角色插画。",
+    runtimeSlug: "comfyui-wai-anima-v10-base10",
+    productCode: "local.wai-anima-v10.image",
+    sourceUrl: "https://civitai.com/models/2544636/wai-anima?modelVersionId=2983680",
+    sourceVersionId: 2983680,
+    sha256: "9D5A1E1393C2978D6A979FAB38FB0DEE00BC2A94E354196C9F3CF2F6F56D5FBF",
+    byteSize: 4182233976,
+    parameters: { profileRevision: 1, targetSeconds: 240, steps: 24, cfg: 4.5, sampler: "euler_ancestral", scheduler: "normal", samplingMaxEdge: 1536, samplingPixelBudget: 900000, samplingPixelBudgetAspectSlope: 130000, qualityPrefix: "masterpiece, best quality, score_7", defaultNegativePrompt: `${defaultNegativePrompt}, blurry, jpeg artifacts, lowres, censor`, systemHighresLoraEnabled: false },
+  },
 ];
 
 try {

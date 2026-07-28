@@ -18,6 +18,14 @@ const models = [
   { versionId: 3047288, fileName: "animeBulldozer_anima.safetensors", sha256: "8e279f111ed7e7ea214ea61850e002f700cce55a8cd027675796773089b3c739", byteSize: 4182218504 },
   { versionId: 3071702, fileName: "miaomiaoRealskin_anima11.safetensors", sha256: "d33247d48a9c15a872aef963940fc87362f925e3e087365810ad747042fcc454", byteSize: 4182218328 },
   { versionId: 3074791, fileName: "miaomiao3DHarem_animaLH3D10.safetensors", sha256: "0707cbe8deed6c858a6ba8dfbcfe2006e3a4fd44c099aafd048400fdec1866dd", byteSize: 4182218328 },
+  {
+    versionId: 2983680,
+    fileName: "waiANIMA_v10Base10.safetensors",
+    sha256: "9d5a1e1393c2978d6a979fab38fb0dee00bc2a94e354196c9f3cf2f6f56d5fbf",
+    byteSize: 4182233976,
+    // 该公开镜像的 LFS OID 与 Civitai 官方 SHA-256 完全一致，供未配置登录令牌的 GPU 使用。
+    fallbackUrl: "https://huggingface.co/diffusionmodels1254ani/waiANIMA/resolve/main/waiANIMA_v10Base10.safetensors",
+  },
 ];
 
 const remoteScript = buildRemoteScript();
@@ -45,14 +53,14 @@ function readCivitaiToken() {
 
 /** 生成远端原子下载和校验脚本；令牌只在本次加密 SSH 标准输入内存在。 */
 function buildRemoteScript() {
-  const rows = models.map((model) => `${model.versionId}|${model.fileName}|${model.sha256}|${model.byteSize}`).join("\n");
+  const rows = models.map((model) => `${model.versionId}|${model.fileName}|${model.sha256}|${model.byteSize}|${model.fallbackUrl || ""}`).join("\n");
   return `set -euo pipefail
 MODEL_ROOT=/data/ComfyUI-master/models/diffusion_models
 COMFY_URL=\${GPU_COMFYUI_URL:-http://127.0.0.1:8189}
 CHECK_ONLY=${checkOnly ? "1" : "0"}
 CIVITAI_API_TOKEN=${shellQuote(token)}
 mkdir -p "$MODEL_ROOT"
-while IFS='|' read -r VERSION_ID FILE_NAME EXPECTED_SHA EXPECTED_SIZE; do
+while IFS='|' read -r VERSION_ID FILE_NAME EXPECTED_SHA EXPECTED_SIZE FALLBACK_URL; do
   [ -n "$VERSION_ID" ] || continue
   TARGET="$MODEL_ROOT/$FILE_NAME"
   VALID=0
@@ -71,15 +79,20 @@ while IFS='|' read -r VERSION_ID FILE_NAME EXPECTED_SHA EXPECTED_SIZE; do
     echo "[model-sync] missing-or-invalid $FILE_NAME" >&2
     exit 2
   fi
-  if [ -z "$CIVITAI_API_TOKEN" ]; then
-    echo "[model-sync] Civitai 登录令牌未配置，缺失文件：$FILE_NAME" >&2
+  if [ -z "$CIVITAI_API_TOKEN" ] && [ -z "$FALLBACK_URL" ]; then
+    echo "[model-sync] Civitai 登录令牌未配置，且该文件没有已校验的公开镜像：$FILE_NAME" >&2
     exit 3
   fi
   if [ -f "$TARGET" ]; then mv "$TARGET" "$TARGET.invalid.$(date +%Y%m%d%H%M%S)"; fi
   PART="$TARGET.part"
-  curl --fail --location --retry 12 --retry-delay 5 --retry-all-errors --continue-at - \
-    --header "Authorization: Bearer $CIVITAI_API_TOKEN" \
-    --output "$PART" "https://civitai.com/api/download/models/$VERSION_ID"
+  if [ -n "$CIVITAI_API_TOKEN" ]; then
+    DOWNLOAD_URL="https://civitai.com/api/download/models/$VERSION_ID"
+    curl --fail --location --retry 12 --retry-delay 5 --retry-all-errors --continue-at - \
+      --header "Authorization: Bearer $CIVITAI_API_TOKEN" --output "$PART" "$DOWNLOAD_URL"
+  else
+    curl --fail --location --retry 12 --retry-delay 5 --retry-all-errors --continue-at - \
+      --output "$PART" "$FALLBACK_URL"
+  fi
   ACTUAL_SIZE=$(stat -c %s "$PART")
   [ "$ACTUAL_SIZE" = "$EXPECTED_SIZE" ] || { echo "[model-sync] size mismatch $FILE_NAME expected=$EXPECTED_SIZE actual=$ACTUAL_SIZE" >&2; exit 4; }
   ACTUAL_SHA=$(sha256sum "$PART" | awk '{print $1}')
@@ -91,7 +104,7 @@ done <<'MODEL_ROWS'
 ${rows}
 MODEL_ROWS
 OBJECT_INFO=$(curl --fail --silent --show-error "$COMFY_URL/object_info/UNETLoader")
-while IFS='|' read -r _ FILE_NAME _ _; do
+while IFS='|' read -r _ FILE_NAME _ _ _; do
   [ -z "$FILE_NAME" ] || grep -Fq "$FILE_NAME" <<<"$OBJECT_INFO" || { echo "[model-sync] ComfyUI 未识别 $FILE_NAME" >&2; exit 6; }
 done <<'MODEL_ROWS'
 ${rows}
