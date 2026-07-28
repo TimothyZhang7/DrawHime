@@ -81,3 +81,6 @@ export interface LocalCaptioningTagTranslationView {
 export interface LocalCaptioningTranslationListView {
   translations: LocalCaptioningTagTranslationView[];
 }
+
+/** 独立平台训练集图片与同名标签压缩包的固定响应类型。 */
+export const localCaptioningArchiveMimeType = 'application/zip' as const;

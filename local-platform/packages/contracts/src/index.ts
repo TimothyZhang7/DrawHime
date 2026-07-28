@@ -580,6 +580,9 @@ export const trainingDatasetViewSchema = z.object({
 /** 训练数据集 Caption 更新请求。 */
 export const trainingDatasetAssetUpdateRequestSchema = z.object({ caption: z.string().trim().max(10000).nullable() });
 
+/** 训练集图片与同名标签压缩包的固定响应类型。 */
+export const trainingDatasetArchiveMimeType = "application/zip" as const;
+
 /** LoRA 打标工具批量翻译英文标签的请求。 */
 export const trainingTagTranslationRequestSchema = z.object({
   tags: z.array(z.string().trim().min(1).max(200)).min(1).max(200),

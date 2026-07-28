@@ -3,6 +3,7 @@
  */
 import {
   trainingDatasetAssetUpdateRequestSchema,
+  trainingDatasetArchiveMimeType,
   trainingCaptionJobCreateRequestSchema,
   trainingDatasetCreateRequestSchema,
   trainingTagTranslationRequestSchema,
@@ -22,6 +23,7 @@ import sharp from "sharp";
 import { Prisma } from "@prisma/client";
 import { calculateTrainingPrice } from "./training-pricing.js";
 import { translateTrainingTags } from "./training-tag-translation.js";
+import { streamTrainingDatasetArchive, trainingDatasetArchiveContentDisposition } from "./training-dataset-archive.js";
 
 const trainingQueue = new TrainingQueue();
 const maximumDatasetImageBytes = 25 * 1024 * 1024;
@@ -145,6 +147,29 @@ export function registerTrainingRoutes(router: ServiceRouter, findSession: (toke
     if (!asset || (!admin && asset.dataset.ownerIdentityId !== session.externalIdentity.id)) return sendError(response, 404, "dataset_asset_not_found", "数据集图片不存在");
     const object = await getObjectBuffer(asset.artifact.objectKey);
     response.writeHead(200, { "content-type": asset.artifact.mimeType, "content-length": String(object.body.length), "cache-control": "private, max-age=300" }); response.end(object.body);
+  });
+
+  router.get("/v1/training/datasets/:id/archive", async ({ request, response, params }) => {
+    const session = await requireSession(request, response, findSession); if (!session) return;
+    const dataset = await database.trainingDataset.findFirst({
+      where: { id: params.id, status: { not: "ARCHIVED" } },
+      include: { assets: { include: { artifact: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] } },
+    });
+    const admin = readRoles(session.externalIdentity.roles).includes("admin");
+    if (!dataset || (!admin && dataset.ownerIdentityId !== session.externalIdentity.id)) return sendError(response, 404, "dataset_not_found", "训练数据集不存在");
+    if (dataset.assets.length === 0) return sendError(response, 400, "dataset_archive_empty", "当前训练集还没有图片");
+    response.writeHead(200, {
+      "content-type": trainingDatasetArchiveMimeType,
+      "content-disposition": trainingDatasetArchiveContentDisposition(dataset),
+      "cache-control": "private, no-store",
+      "x-content-type-options": "nosniff",
+    });
+    try {
+      // ZIP 写入后不再发送 JSON；任一对象异常都主动断开响应，避免交付缺图但看似成功的压缩包。
+      await streamTrainingDatasetArchive(response, dataset);
+    } catch (error) {
+      if (!response.destroyed) response.destroy(error instanceof Error ? error : new Error("训练集打包失败"));
+    }
   });
 
   router.post("/v1/training/datasets/:id/assets/:assetId/caption-jobs", async ({ request, response, params }) => {
