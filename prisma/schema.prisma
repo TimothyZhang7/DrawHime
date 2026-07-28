@@ -1,0 +1,738 @@
+// 本文件定义本地模型平台独立数据库，不包含主站密码、余额或正式图库权威数据。
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum RecordStatus {
+  ACTIVE
+  DISABLED
+  ARCHIVED
+}
+
+enum JobStatus {
+  QUEUED
+  RESERVING
+  READY
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+enum AttemptStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+enum LeaseStatus {
+  OFFERED
+  ACCEPTED
+  RUNNING
+  RELEASED
+  EXPIRED
+}
+
+enum BillingReservationStatus {
+  PENDING
+  RESERVED
+  COMMITTED
+  RELEASED
+  FAILED
+}
+
+enum PublicationStatus {
+  PENDING
+  PUBLISHING
+  PUBLISHED
+  FAILED
+}
+
+enum TrainingStatus {
+  QUEUED
+  RESERVING
+  READY
+  RUNNING
+  EVALUATING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+enum LoraType {
+  STYLE
+  CHARACTER
+  CONCEPT
+  CLOTHING
+  POSE
+  OTHER
+}
+
+enum ArtifactKind {
+  SOURCE_IMAGE
+  GENERATED_IMAGE
+  PREVIEW_IMAGE
+  MODEL_FILE
+  LORA_FILE
+  DATASET_ASSET
+  TRAINING_SAMPLE
+  TRAINING_LOG
+}
+
+model ExternalIdentity {
+  id                  String   @id @default(uuid()) @db.VarChar(36)
+  issuer              String   @db.VarChar(500)
+  subject             String   @db.VarChar(191)
+  displayName         String   @db.VarChar(191)
+  avatarUrl           String?  @db.VarChar(1000)
+  roles               Json
+  emailVerified       Boolean  @default(false)
+  lastAuthenticatedAt DateTime
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  inferenceJobs  InferenceJob[]
+  loraEntries    LoraEntry[]
+  trainingDatasets TrainingDataset[]
+  trainingJobs   TrainingJob[]
+  sessions       PlatformSession[]
+
+  @@unique([issuer, subject])
+  @@index([lastAuthenticatedAt])
+}
+
+model PlatformSession {
+  id                 String   @id @default(uuid()) @db.VarChar(36)
+  externalIdentityId String   @db.VarChar(36)
+  tokenHash          String   @unique @db.Char(64)
+  expiresAt          DateTime
+  lastSeenAt         DateTime @default(now())
+  revokedAt          DateTime?
+  createdAt          DateTime @default(now())
+
+  externalIdentity ExternalIdentity @relation(fields: [externalIdentityId], references: [id], onDelete: Cascade)
+
+  @@index([externalIdentityId, expiresAt])
+  @@index([expiresAt, revokedAt])
+}
+
+model ModelFamily {
+  id          String       @id @default(uuid()) @db.VarChar(36)
+  slug        String       @unique @db.VarChar(100)
+  name        String       @db.VarChar(191)
+  description String?      @db.Text
+  status      RecordStatus @default(ACTIVE)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  versions ModelVersion[]
+  loraEntries LoraEntry[]
+}
+
+model ModelVersion {
+  id                String       @id @default(uuid()) @db.VarChar(36)
+  familyId          String       @db.VarChar(36)
+  version           String       @db.VarChar(191)
+  displayName       String       @db.VarChar(191)
+  description       String?      @db.Text
+  status            RecordStatus @default(ACTIVE)
+  runtimeFormat     String       @db.VarChar(100)
+  defaultParameters Json
+  minimumVramBytes  BigInt?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  family            ModelFamily         @relation(fields: [familyId], references: [id])
+  files             ModelFile[]
+  runtimeDefinitions RuntimeDefinition[]
+  workflowVersions  WorkflowVersion[]
+  inferenceJobs     InferenceJob[]
+  baseTrainingJobs  TrainingJob[]
+
+  @@unique([familyId, version])
+  @@index([status])
+}
+
+model ModelFile {
+  id             String       @id @default(uuid()) @db.VarChar(36)
+  modelVersionId String       @db.VarChar(36)
+  role           String       @db.VarChar(100)
+  objectKey      String       @unique @db.VarChar(500)
+  fileName       String       @db.VarChar(255)
+  sha256         String       @db.Char(64)
+  byteSize       BigInt
+  status         RecordStatus @default(ACTIVE)
+  createdAt      DateTime     @default(now())
+
+  modelVersion ModelVersion       @relation(fields: [modelVersionId], references: [id])
+  distributions ModelDistribution[]
+
+  @@index([modelVersionId, role])
+  @@index([sha256])
+}
+
+model RuntimeDefinition {
+  id             String       @id @default(uuid()) @db.VarChar(36)
+  modelVersionId String       @db.VarChar(36)
+  slug           String       @unique @db.VarChar(120)
+  runtimeType    String       @db.VarChar(100)
+  imageReference String?      @db.VarChar(500)
+  command        Json?
+  environment    Json?
+  healthPath     String?      @db.VarChar(255)
+  status         RecordStatus @default(ACTIVE)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  modelVersion ModelVersion @relation(fields: [modelVersionId], references: [id])
+  workflowVersions WorkflowVersion[]
+  inferenceJobs InferenceJob[]
+}
+
+model WorkflowTemplate {
+  id          String       @id @default(uuid()) @db.VarChar(36)
+  slug        String       @unique @db.VarChar(120)
+  name        String       @db.VarChar(191)
+  description String?      @db.Text
+  status      RecordStatus @default(ACTIVE)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  versions WorkflowVersion[]
+}
+
+model WorkflowVersion {
+  id                  String       @id @default(uuid()) @db.VarChar(36)
+  workflowTemplateId  String       @db.VarChar(36)
+  modelVersionId      String       @db.VarChar(36)
+  runtimeDefinitionId String       @db.VarChar(36)
+  version             Int
+  workflowJson        Json
+  inputMapping        Json
+  outputMapping       Json
+  sha256              String       @db.Char(64)
+  status              RecordStatus @default(ACTIVE)
+  createdAt           DateTime     @default(now())
+
+  workflowTemplate  WorkflowTemplate  @relation(fields: [workflowTemplateId], references: [id])
+  modelVersion      ModelVersion      @relation(fields: [modelVersionId], references: [id])
+  runtimeDefinition RuntimeDefinition @relation(fields: [runtimeDefinitionId], references: [id])
+  inferenceJobs     InferenceJob[]
+
+  @@unique([workflowTemplateId, version])
+  @@index([modelVersionId, status])
+}
+
+model GpuHost {
+  id              String       @id @default(uuid()) @db.VarChar(36)
+  agentKey         String       @unique @db.VarChar(191)
+  displayName      String       @db.VarChar(191)
+  address          String?      @db.VarChar(500)
+  agentVersion     String?      @db.VarChar(100)
+  status           RecordStatus @default(ACTIVE)
+  labels           Json?
+  lastHeartbeatAt  DateTime?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  devices GpuDevice[]
+  distributions ModelDistribution[]
+}
+
+model GpuDevice {
+  id                 String       @id @default(uuid()) @db.VarChar(36)
+  hostId             String       @db.VarChar(36)
+  deviceKey          String       @db.VarChar(100)
+  name               String       @db.VarChar(191)
+  totalVramBytes     BigInt
+  freeVramBytes      BigInt?
+  utilizationPercent Decimal?     @db.Decimal(5, 2)
+  temperatureCelsius Decimal?     @db.Decimal(5, 2)
+  status             RecordStatus @default(ACTIVE)
+  lastHeartbeatAt    DateTime?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  host   GpuHost    @relation(fields: [hostId], references: [id])
+  leases GpuLease[]
+  trainingLeases TrainingGpuLease[]
+
+  @@unique([hostId, deviceKey])
+  @@index([status, lastHeartbeatAt])
+}
+
+model GpuLease {
+  id          String      @id @default(uuid()) @db.VarChar(36)
+  gpuDeviceId String      @db.VarChar(36)
+  jobId       String      @db.VarChar(36)
+  leaseTokenHash String   @unique @db.Char(64)
+  status      LeaseStatus @default(OFFERED)
+  offeredAt   DateTime    @default(now())
+  acceptedAt  DateTime?
+  expiresAt   DateTime
+  releasedAt  DateTime?
+
+  gpuDevice GpuDevice    @relation(fields: [gpuDeviceId], references: [id])
+  job       InferenceJob @relation(fields: [jobId], references: [id])
+
+  @@index([gpuDeviceId, status, expiresAt])
+  @@index([jobId])
+}
+
+model InferenceJob {
+  id                  String    @id @default(uuid()) @db.VarChar(36)
+  externalIdentityId  String    @db.VarChar(36)
+  modelVersionId      String    @db.VarChar(36)
+  runtimeDefinitionId String    @db.VarChar(36)
+  workflowVersionId   String    @db.VarChar(36)
+  idempotencyKey      String    @unique @db.VarChar(191)
+  source              String    @db.VarChar(50)
+  status              JobStatus @default(QUEUED)
+  progress            Decimal   @default(0) @db.Decimal(5, 2)
+  requestedPrompt     String    @db.LongText
+  effectivePrompt     String?   @db.LongText
+  negativePrompt      String?   @db.LongText
+  parameters          Json
+  errorCode           String?   @db.VarChar(100)
+  errorMessage        String?   @db.Text
+  queuedAt            DateTime  @default(now())
+  startedAt           DateTime?
+  completedAt         DateTime?
+  deletedAt           DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  externalIdentity  ExternalIdentity  @relation(fields: [externalIdentityId], references: [id])
+  modelVersion      ModelVersion      @relation(fields: [modelVersionId], references: [id])
+  runtimeDefinition RuntimeDefinition @relation(fields: [runtimeDefinitionId], references: [id])
+  workflowVersion   WorkflowVersion   @relation(fields: [workflowVersionId], references: [id])
+  attempts          InferenceAttempt[]
+  stages            JobStage[]
+  artifacts         JobArtifact[]
+  leases            GpuLease[]
+  billingReservation BillingReservationMirror?
+  galleryPublication GalleryPublicationMirror?
+
+  @@index([externalIdentityId, deletedAt, createdAt])
+  @@index([status, queuedAt])
+  @@index([modelVersionId, status])
+}
+
+model InferenceAttempt {
+  id            String        @id @default(uuid()) @db.VarChar(36)
+  jobId         String        @db.VarChar(36)
+  attemptNumber Int
+  status        AttemptStatus @default(PENDING)
+  gpuHostId     String?       @db.VarChar(36)
+  runtimeJobId  String?       @db.VarChar(191)
+  requestJson   Json?
+  responseJson  Json?
+  errorCode     String?       @db.VarChar(100)
+  errorMessage  String?       @db.Text
+  startedAt     DateTime?
+  completedAt   DateTime?
+  createdAt     DateTime      @default(now())
+
+  job InferenceJob @relation(fields: [jobId], references: [id])
+
+  @@unique([jobId, attemptNumber])
+  @@index([status, createdAt])
+}
+
+model JobStage {
+  id           String        @id @default(uuid()) @db.VarChar(36)
+  jobId        String        @db.VarChar(36)
+  sequence     Int
+  stageType    String        @db.VarChar(100)
+  status       AttemptStatus @default(PENDING)
+  inputJson    Json?
+  outputJson   Json?
+  errorMessage String?       @db.Text
+  startedAt    DateTime?
+  completedAt  DateTime?
+  createdAt    DateTime      @default(now())
+
+  job InferenceJob @relation(fields: [jobId], references: [id])
+
+  @@unique([jobId, sequence])
+  @@index([jobId, stageType])
+}
+
+model JobArtifact {
+  id          String       @id @default(uuid()) @db.VarChar(36)
+  jobId       String?      @db.VarChar(36)
+  kind        ArtifactKind
+  objectKey   String       @unique @db.VarChar(500)
+  fileName    String       @db.VarChar(255)
+  mimeType    String       @db.VarChar(191)
+  sha256      String       @db.Char(64)
+  byteSize    BigInt
+  width       Int?
+  height      Int?
+  metadata    Json?
+  createdAt   DateTime     @default(now())
+
+  job             InferenceJob?      @relation(fields: [jobId], references: [id])
+  galleryPublication GalleryPublicationMirror?
+  loraExamples    LoraExample[]
+  datasetAssets   DatasetAsset[]
+
+  @@index([jobId, kind])
+  @@index([sha256])
+}
+
+model BillingReservationMirror {
+  id                    String                   @id @default(uuid()) @db.VarChar(36)
+  jobId                 String                   @unique @db.VarChar(36)
+  mainReservationId     String?                  @unique @db.VarChar(191)
+  idempotencyKey        String                   @unique @db.VarChar(191)
+  priceVersion          String                   @db.VarChar(100)
+  amountMinor           BigInt
+  currency              String                   @db.Char(3)
+  status                BillingReservationStatus @default(PENDING)
+  expiresAt             DateTime?
+  lastSynchronizedAt    DateTime?
+  errorMessage          String?                  @db.Text
+  createdAt             DateTime                 @default(now())
+  updatedAt             DateTime                 @updatedAt
+
+  job InferenceJob @relation(fields: [jobId], references: [id])
+
+  @@index([status, expiresAt])
+}
+
+model GalleryPublicationMirror {
+  id                String            @id @default(uuid()) @db.VarChar(36)
+  jobId             String            @unique @db.VarChar(36)
+  artifactId        String            @unique @db.VarChar(36)
+  idempotencyKey    String            @unique @db.VarChar(191)
+  mainPublicationId String?           @unique @db.VarChar(191)
+  mainGalleryItemId String?           @unique @db.VarChar(191)
+  mediaUrl          String?           @db.VarChar(1000)
+  status            PublicationStatus @default(PENDING)
+  lastSynchronizedAt DateTime?
+  errorMessage      String?           @db.Text
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  job      InferenceJob @relation(fields: [jobId], references: [id])
+  artifact JobArtifact  @relation(fields: [artifactId], references: [id])
+
+  @@index([status, createdAt])
+}
+
+model InboxEvent {
+  id              String   @id @default(uuid()) @db.VarChar(36)
+  source          String   @db.VarChar(100)
+  eventId         String   @db.VarChar(191)
+  eventType       String   @db.VarChar(191)
+  payload         Json
+  occurredAt      DateTime
+  processedAt     DateTime?
+  processingError String?  @db.Text
+  createdAt       DateTime @default(now())
+
+  @@unique([source, eventId])
+  @@index([processedAt, createdAt])
+}
+
+model OutboxEvent {
+  id            String   @id @default(uuid()) @db.VarChar(36)
+  aggregateType String   @db.VarChar(100)
+  aggregateId   String   @db.VarChar(191)
+  eventType     String   @db.VarChar(191)
+  payload       Json
+  attemptCount  Int      @default(0)
+  availableAt   DateTime @default(now())
+  publishedAt   DateTime?
+  lastError     String?  @db.Text
+  createdAt     DateTime @default(now())
+
+  @@index([publishedAt, availableAt])
+  @@index([aggregateType, aggregateId])
+}
+
+model IdempotencyRecord {
+  id          String   @id @default(uuid()) @db.VarChar(36)
+  scope       String   @db.VarChar(100)
+  key         String   @db.VarChar(191)
+  requestHash String   @db.Char(64)
+  statusCode  Int?
+  responseJson Json?
+  lockedUntil DateTime?
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([scope, key])
+  @@index([expiresAt])
+}
+
+model LoraEntry {
+  id                 String       @id @default(uuid()) @db.VarChar(36)
+  ownerIdentityId    String       @db.VarChar(36)
+  modelFamilyId      String       @db.VarChar(36)
+  slug               String       @unique @db.VarChar(160)
+  title              String       @db.VarChar(191)
+  description        String       @db.Text
+  type               LoraType
+  triggerWords       Json
+  /// 仅控制仓库与生成选择的外显范围，不改变发布状态和历史任务引用。
+  isPrivate          Boolean      @default(false)
+  status             RecordStatus @default(ACTIVE)
+  /// 作者删除后的软删除标记；保留训练输出和历史任务引用，但不再外显或可选。
+  deletedAt          DateTime?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  owner       ExternalIdentity @relation(fields: [ownerIdentityId], references: [id])
+  modelFamily ModelFamily      @relation(fields: [modelFamilyId], references: [id])
+  versions    LoraVersion[]
+  examples    LoraExample[]
+  uploadSessions LoraUploadSession[]
+
+  @@index([modelFamilyId, type, status])
+  @@index([status, isPrivate, updatedAt])
+  @@index([deletedAt, status, updatedAt])
+  @@index([ownerIdentityId, createdAt])
+}
+
+model LoraVersion {
+  id           String       @id @default(uuid()) @db.VarChar(36)
+  loraEntryId  String       @db.VarChar(36)
+  version      String       @db.VarChar(100)
+  objectKey    String       @unique @db.VarChar(500)
+  fileName     String       @db.VarChar(255)
+  sha256       String       @db.Char(64)
+  byteSize     BigInt
+  metadata     Json?
+  status       RecordStatus @default(ACTIVE)
+  createdAt    DateTime     @default(now())
+
+  loraEntry LoraEntry @relation(fields: [loraEntryId], references: [id])
+  trainingOutputs TrainingJob[]
+
+  @@unique([loraEntryId, version])
+  @@index([sha256])
+}
+
+model LoraExample {
+  id         String   @id @default(uuid()) @db.VarChar(36)
+  loraEntryId String  @db.VarChar(36)
+  artifactId String   @db.VarChar(36)
+  sortOrder  Int      @default(0)
+  prompt     String?  @db.LongText
+  createdAt  DateTime @default(now())
+
+  loraEntry LoraEntry  @relation(fields: [loraEntryId], references: [id])
+  artifact  JobArtifact @relation(fields: [artifactId], references: [id])
+
+  @@unique([loraEntryId, artifactId])
+  @@index([loraEntryId, sortOrder])
+}
+
+model LoraUploadSession {
+  id                String   @id @default(uuid()) @db.VarChar(36)
+  loraEntryId       String   @db.VarChar(36)
+  fileName          String   @db.VarChar(255)
+  temporaryFileName String   @unique @db.VarChar(96)
+  totalBytes        BigInt
+  receivedBytes     BigInt   @default(0)
+  status            String   @default("UPLOADING") @db.VarChar(16)
+  expiresAt         DateTime
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  loraEntry LoraEntry @relation(fields: [loraEntryId], references: [id], onDelete: Cascade)
+
+  @@index([loraEntryId, status])
+  @@index([status, expiresAt])
+}
+
+model TrainingDataset {
+  id              String       @id @default(uuid()) @db.VarChar(36)
+  ownerIdentityId String       @db.VarChar(36)
+  title           String       @db.VarChar(191)
+  description     String?      @db.Text
+  status          RecordStatus @default(ACTIVE)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  owner    ExternalIdentity @relation(fields: [ownerIdentityId], references: [id])
+  assets   DatasetAsset[]
+  captionJobs TrainingCaptionJob[]
+  trainingJobs TrainingJob[]
+
+  @@index([ownerIdentityId, createdAt])
+}
+
+/// 训练图片自动打标任务，持久化图片快照、处理进度与用户确认状态。
+model TrainingCaptionJob {
+  id              String   @id @default(uuid()) @db.VarChar(36)
+  datasetId       String   @db.VarChar(36)
+  mode            String   @db.VarChar(16)
+  status          String   @default("QUEUED") @db.VarChar(32)
+  progress        Decimal  @default(0) @db.Decimal(5, 2)
+  assetSnapshot   Json
+  totalAssets     Int
+  completedAssets Int      @default(0)
+  errorMessage    String?  @db.Text
+  startedAt       DateTime?
+  completedAt     DateTime?
+  confirmedAt     DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  dataset TrainingDataset @relation(fields: [datasetId], references: [id], onDelete: Restrict)
+
+  @@index([datasetId, createdAt])
+  @@index([status, createdAt])
+}
+
+model DatasetAsset {
+  id         String   @id @default(uuid()) @db.VarChar(36)
+  datasetId  String   @db.VarChar(36)
+  artifactId String   @db.VarChar(36)
+  caption    String?  @db.LongText
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  dataset  TrainingDataset @relation(fields: [datasetId], references: [id])
+  artifact JobArtifact     @relation(fields: [artifactId], references: [id])
+
+  @@unique([datasetId, artifactId])
+}
+
+model TrainingJob {
+  id                   String         @id @default(uuid()) @db.VarChar(36)
+  externalIdentityId   String         @db.VarChar(36)
+  datasetId            String         @db.VarChar(36)
+  baseModelVersionId   String         @db.VarChar(36)
+  outputLoraVersionId  String?        @db.VarChar(36)
+  idempotencyKey       String         @unique @db.VarChar(191)
+  title                String         @db.VarChar(191)
+  status               TrainingStatus @default(QUEUED)
+  progress             Decimal        @default(0) @db.Decimal(5, 2)
+  parameters           Json
+  errorCode            String?        @db.VarChar(100)
+  errorMessage         String?        @db.Text
+  queuedAt             DateTime       @default(now())
+  startedAt            DateTime?
+  completedAt          DateTime?
+  deletedAt            DateTime?
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+
+  externalIdentity ExternalIdentity @relation(fields: [externalIdentityId], references: [id])
+  dataset          TrainingDataset  @relation(fields: [datasetId], references: [id])
+  baseModelVersion ModelVersion     @relation(fields: [baseModelVersionId], references: [id])
+  outputLoraVersion LoraVersion?    @relation(fields: [outputLoraVersionId], references: [id])
+  attempts         TrainingAttempt[]
+  evaluations      EvaluationRun[]
+  billingReservation TrainingBillingReservationMirror?
+  leases           TrainingGpuLease[]
+
+  @@index([externalIdentityId, deletedAt, createdAt])
+  @@index([status, queuedAt])
+}
+
+model TrainingGpuLease {
+  id            String      @id @default(uuid()) @db.VarChar(36)
+  gpuDeviceId   String      @db.VarChar(36)
+  trainingJobId String      @db.VarChar(36)
+  leaseTokenHash String     @unique @db.Char(64)
+  status        LeaseStatus @default(OFFERED)
+  offeredAt     DateTime    @default(now())
+  acceptedAt    DateTime?
+  expiresAt     DateTime
+  releasedAt    DateTime?
+
+  gpuDevice  GpuDevice  @relation(fields: [gpuDeviceId], references: [id])
+  trainingJob TrainingJob @relation(fields: [trainingJobId], references: [id])
+
+  @@index([gpuDeviceId, status, expiresAt])
+  @@index([trainingJobId])
+}
+
+model TrainingBillingReservationMirror {
+  id                    String                   @id @default(uuid()) @db.VarChar(36)
+  trainingJobId         String                   @unique @db.VarChar(36)
+  mainReservationId     String?                  @unique @db.VarChar(191)
+  idempotencyKey        String                   @unique @db.VarChar(191)
+  priceVersion          String                   @db.VarChar(100)
+  amountMinor           BigInt
+  currency              String                   @db.Char(3)
+  status                BillingReservationStatus @default(PENDING)
+  expiresAt             DateTime?
+  lastSynchronizedAt    DateTime?
+  errorMessage          String?                  @db.Text
+  createdAt             DateTime                 @default(now())
+  updatedAt             DateTime                 @updatedAt
+
+  trainingJob TrainingJob @relation(fields: [trainingJobId], references: [id])
+
+  @@index([status, expiresAt])
+}
+
+model TrainingAttempt {
+  id             String        @id @default(uuid()) @db.VarChar(36)
+  trainingJobId  String        @db.VarChar(36)
+  attemptNumber  Int
+  status         AttemptStatus @default(PENDING)
+  gpuHostId      String?       @db.VarChar(36)
+  runtimeJobId   String?       @db.VarChar(191)
+  metrics        Json?
+  errorMessage   String?       @db.Text
+  startedAt      DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime      @default(now())
+
+  trainingJob TrainingJob @relation(fields: [trainingJobId], references: [id])
+
+  @@unique([trainingJobId, attemptNumber])
+  @@index([status, createdAt])
+}
+
+model EvaluationRun {
+  id            String        @id @default(uuid()) @db.VarChar(36)
+  trainingJobId String        @db.VarChar(36)
+  status        AttemptStatus @default(PENDING)
+  parameters    Json
+  metrics       Json?
+  artifactIds   Json?
+  errorMessage  String?       @db.Text
+  startedAt     DateTime?
+  completedAt   DateTime?
+  createdAt     DateTime      @default(now())
+
+  trainingJob TrainingJob @relation(fields: [trainingJobId], references: [id])
+
+  @@index([trainingJobId, createdAt])
+}
+
+model ModelDistribution {
+  id          String        @id @default(uuid()) @db.VarChar(36)
+  modelFileId String        @db.VarChar(36)
+  gpuHostId   String        @db.VarChar(36)
+  status      AttemptStatus @default(PENDING)
+  localPath   String?       @db.VarChar(1000)
+  verifiedSha256 String?    @db.Char(64)
+  errorMessage String?      @db.Text
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  modelFile ModelFile @relation(fields: [modelFileId], references: [id])
+  gpuHost   GpuHost   @relation(fields: [gpuHostId], references: [id])
+
+  @@unique([modelFileId, gpuHostId])
+  @@index([gpuHostId, status])
+}

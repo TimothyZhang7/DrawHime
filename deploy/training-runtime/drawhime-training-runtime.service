@@ -1,0 +1,16 @@
+# 本文件由独立平台部署脚本安装到 GPU 主机，令牌只从私有环境文件读取。
+[Unit]
+Description=DrawHime Anima Training Runtime
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/data/drawhime-training/runtime
+EnvironmentFile=/data/drawhime-training/runtime.env
+ExecStart=/usr/bin/python3 /data/drawhime-training/runtime/server.py
+Restart=always
+RestartSec=3
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

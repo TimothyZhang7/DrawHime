@@ -1,0 +1,52 @@
+<!-- 本文件提供 LoRA 仓库在缺少示例图时使用的统一默认封面。 -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1500" role="img" aria-labelledby="title description">
+  <title id="title">LoRA 默认封面</title>
+  <description id="description">深色资产档案风格的 LoRA 模型默认封面</description>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#111827"/>
+      <stop offset="0.58" stop-color="#1c2435"/>
+      <stop offset="1" stop-color="#27304a"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#a5b4fc"/>
+      <stop offset="1" stop-color="#6366f1"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="38%" r="55%">
+      <stop offset="0" stop-color="#818cf8" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#818cf8" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="grid" width="60" height="60" patternUnits="userSpaceOnUse">
+      <path d="M60 0H0V60" fill="none" stroke="#c7d2fe" stroke-opacity="0.055" stroke-width="2"/>
+    </pattern>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="28" stdDeviation="28" flood-color="#020617" flood-opacity="0.45"/>
+    </filter>
+  </defs>
+  <rect width="1200" height="1500" fill="url(#background)"/>
+  <rect width="1200" height="1500" fill="url(#grid)"/>
+  <rect width="1200" height="1100" fill="url(#glow)"/>
+  <path d="M0 330C220 260 360 390 590 320S950 180 1200 280" fill="none" stroke="#a5b4fc" stroke-opacity="0.08" stroke-width="3"/>
+  <path d="M0 390C220 320 390 445 620 375S980 240 1200 335" fill="none" stroke="#a5b4fc" stroke-opacity="0.05" stroke-width="2"/>
+  <g transform="translate(600 620)" filter="url(#shadow)">
+    <path d="M-260-108 0-238l260 130L0 22Z" fill="#161e30" stroke="#a5b4fc" stroke-width="10"/>
+    <path d="M-260 4 0 134 260 4" fill="none" stroke="#818cf8" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M-260 112 0 242l260-130" fill="none" stroke="url(#accent)" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M-172-104 0-190l172 86L0-18Z" fill="url(#accent)" opacity="0.18"/>
+    <circle cx="0" cy="-105" r="36" fill="#111827" stroke="#c7d2fe" stroke-width="8"/>
+    <circle cx="0" cy="-105" r="10" fill="#818cf8"/>
+  </g>
+  <g fill="none" stroke="#a5b4fc" stroke-opacity="0.3" stroke-width="3">
+    <path d="M138 920h180"/>
+    <path d="M882 920h180"/>
+  </g>
+  <g font-family="Microsoft YaHei, PingFang SC, sans-serif" text-anchor="middle">
+    <text x="600" y="1030" fill="#f8fafc" font-size="112" font-weight="800" letter-spacing="10">LoRA</text>
+    <text x="600" y="1090" fill="#a5b4fc" font-size="25" font-weight="700" letter-spacing="13">MODEL ASSET</text>
+  </g>
+  <g transform="translate(120 1300)">
+    <rect width="960" height="1" fill="#c7d2fe" opacity="0.18"/>
+    <text x="0" y="70" fill="#94a3b8" font-family="Microsoft YaHei, PingFang SC, sans-serif" font-size="23" font-weight="700" letter-spacing="5">DRAW HIME · LOCAL MODEL LIBRARY</text>
+    <circle cx="936" cy="61" r="10" fill="#818cf8"/>
+  </g>
+</svg>

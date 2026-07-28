@@ -1,0 +1,37 @@
+{
+  "name": "drawhime-local-platform",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.14.0",
+  "scripts": {
+    "build:packages": "pnpm --filter @drawhime/contracts --filter @drawhime/database --filter @drawhime/service-runtime --filter @drawhime/inference-runtime --filter @drawhime/main-platform-client run build",
+    "build:services": "pnpm --filter @drawhime/api --filter @drawhime/scheduler --filter @drawhime/inference-worker --filter @drawhime/training-worker --filter @drawhime/artifact-service --filter @drawhime/gpu-agent run build",
+    "build:frontends": "pnpm --filter @drawhime/web --filter @drawhime/admin run build",
+    "build": "pnpm run build:packages && pnpm run build:services && pnpm run build:frontends",
+    "type-check": "pnpm run build:packages && pnpm -r run type-check",
+    "test": "pnpm run build:packages && pnpm --filter @drawhime/service-runtime --filter @drawhime/inference-runtime run test",
+    "dev": "node scripts/dev.mjs",
+    "deploy:production": "node scripts/deploy-production.mjs",
+    "db:generate": "prisma generate",
+    "db:migrate:dev": "prisma migrate dev",
+    "db:migrate:diff": "prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma --script",
+    "db:migrate:deploy": "prisma migrate deploy",
+    "db:validate": "prisma validate",
+    "bootstrap:anima": "node scripts/bootstrap-anima-catalog.mjs",
+    "sync:anima-models": "node scripts/sync-anima-base-models.mjs",
+    "migrate:main-loras": "node scripts/migrate-main-loras.mjs",
+    "deploy:training-runtime": "node scripts/deploy-training-runtime.mjs",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "prettier": "^3.6.2",
+    "prisma": "^5.22.0",
+    "tsx": "^4.20.3",
+    "typescript": "^5.9.2"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.22.0",
+    "zod": "^3.25.76"
+  }
+}

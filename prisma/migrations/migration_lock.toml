@@ -1,0 +1,2 @@
+# 本文件固定 Prisma 迁移使用的数据库提供程序。
+provider = "mysql"

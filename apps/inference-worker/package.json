@@ -1,0 +1,19 @@
+{
+  "name": "@drawhime/inference-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch --env-file-if-exists=../../.env src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "type-check": "tsc -p tsconfig.json --noEmit",
+    "start": "node --env-file-if-exists=../../.env dist/index.js"
+  },
+  "dependencies": {
+    "@drawhime/database": "workspace:*",
+    "@drawhime/inference-runtime": "workspace:*",
+    "@drawhime/main-platform-client": "workspace:*",
+    "@drawhime/service-runtime": "workspace:*"
+  },
+  "devDependencies": { "@types/node": "^22.10.0", "tsx": "^4.20.3", "typescript": "^5.9.2" }
+}
