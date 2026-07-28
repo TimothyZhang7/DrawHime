@@ -681,6 +681,7 @@ export const desktopResourceManifestItemSchema = z.object({
   arch: z.enum(["x86_64", "aarch64"]),
   fileName: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]{1,254}$/),
   byteSize: z.number().int().positive(),
+  installedSize: z.number().int().positive(),
   sha256: z.string().regex(/^[a-f0-9]{64}$/),
   archive: z.enum(["raw", "zip"]),
   required: z.boolean(),
@@ -716,9 +717,12 @@ export const desktopResourceCatalogViewSchema = z.object({
     version: z.string(),
     fileName: z.string(),
     byteSize: z.number().int().positive(),
+    installedSize: z.number().int().positive(),
     sha256: z.string(),
     required: z.boolean(),
     downloaded: z.boolean(),
+    installed: z.boolean(),
+    installPath: z.string().nullable(),
     sourceKinds: z.array(desktopResourceSourceSchema.shape.kind),
   })),
 });
@@ -732,6 +736,16 @@ export const desktopResourceDownloadViewSchema = z.object({
   totalBytes: z.number().int().positive(),
   bytesPerSecond: z.number().int().nonnegative(),
   targetPath: z.string().nullable(),
+  error: z.string().nullable(),
+});
+
+/** 桌面端资源从已验证缓存到正式目录的安装状态。 */
+export const desktopResourceInstallViewSchema = z.object({
+  resourceId: z.string(),
+  status: z.enum(["verifying", "installing", "switching", "installed", "rolled_back", "failed"]),
+  progress: z.number().min(0).max(100),
+  installPath: z.string().nullable(),
+  rollbackPath: z.string().nullable(),
   error: z.string().nullable(),
 });
 
@@ -924,6 +938,7 @@ export type DesktopResourceManifestPayload = z.infer<typeof desktopResourceManif
 export type DesktopResourceManifestEnvelope = z.infer<typeof desktopResourceManifestEnvelopeSchema>;
 export type DesktopResourceCatalogView = z.infer<typeof desktopResourceCatalogViewSchema>;
 export type DesktopResourceDownloadView = z.infer<typeof desktopResourceDownloadViewSchema>;
+export type DesktopResourceInstallView = z.infer<typeof desktopResourceInstallViewSchema>;
 export type DesktopGallerySyncItem = z.infer<typeof desktopGallerySyncItemSchema>;
 export type DesktopBootstrapView = z.infer<typeof desktopBootstrapViewSchema>;
 export type AdminModelUpdateRequest = z.infer<typeof adminModelUpdateRequestSchema>;

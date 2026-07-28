@@ -1,11 +1,11 @@
 /**
  * 本文件实现桌面端首个可运行工作区：真实环境检测、持续 GPU 阻断提示、本地设置和图库同步队列查看。
  */
-import type { DesktopBootstrapView, DesktopEnvironmentReport, DesktopGallerySyncItem, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopSettings } from "@drawhime/contracts";
-import { AlertTriangle, CheckCircle2, Cpu, Database, Download, FolderCog, Gauge, HardDrive, Image, LoaderCircle, MemoryStick, Monitor, Moon, PackageOpen, RefreshCw, Settings2, ShieldCheck, Sun, UploadCloud } from "lucide-react";
+import type { DesktopBootstrapView, DesktopEnvironmentReport, DesktopGallerySyncItem, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopSettings } from "@drawhime/contracts";
+import { AlertTriangle, CheckCircle2, Cpu, Database, Download, FolderCog, Gauge, HardDrive, Image, LoaderCircle, MemoryStick, Monitor, Moon, PackageCheck, PackageOpen, RefreshCw, Settings2, ShieldCheck, Sun, UploadCloud } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { downloadDesktopResource, inspectDesktopEnvironment, listDesktopGallerySyncQueue, listenDesktopResourceProgress, loadDesktopBootstrap, loadDesktopResourceCatalog, saveDesktopSettings } from "./desktop-api";
+import { downloadDesktopResource, inspectDesktopEnvironment, installDesktopResource, listDesktopGallerySyncQueue, listenDesktopResourceInstallProgress, listenDesktopResourceProgress, loadDesktopBootstrap, loadDesktopResourceCatalog, saveDesktopSettings } from "./desktop-api";
 
 type DesktopPage = "overview" | "environment" | "resources" | "sync" | "settings";
 
@@ -24,6 +24,7 @@ export function App() {
   const [queue, setQueue] = useState<DesktopGallerySyncItem[]>([]);
   const [resourceCatalog, setResourceCatalog] = useState<DesktopResourceCatalogView | null>(null);
   const [resourceProgress, setResourceProgress] = useState<Record<string, DesktopResourceDownloadView>>({});
+  const [installProgress, setInstallProgress] = useState<Record<string, DesktopResourceInstallView>>({});
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [checking, setChecking] = useState(false);
@@ -37,6 +38,11 @@ export function App() {
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     void listenDesktopResourceProgress((progress) => setResourceProgress((current) => ({ ...current, [progress.resourceId]: progress }))).then((dispose) => { unlisten = dispose; }).catch((error) => setMessage(errorMessage(error)));
+    return () => unlisten?.();
+  }, []);
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    void listenDesktopResourceInstallProgress((progress) => setInstallProgress((current) => ({ ...current, [progress.resourceId]: progress }))).then((dispose) => { unlisten = dispose; }).catch((error) => setMessage(errorMessage(error)));
     return () => unlisten?.();
   }, []);
   useEffect(() => {
@@ -102,6 +108,13 @@ export function App() {
     catch (error) { const message = errorMessage(error); setResourceProgress((current) => ({ ...current, [resourceId]: { resourceId, status: "failed", sourceKind: null, downloadedBytes: current[resourceId]?.downloadedBytes || 0, totalBytes, bytesPerSecond: 0, targetPath: null, error: message } })); setMessage(message); }
   };
 
+  /** 安装使用已验证缓存；完成后同步刷新资源状态与 Runtime 环境门禁。 */
+  const installResource = async (resourceId: string) => {
+    setInstallProgress((current) => ({ ...current, [resourceId]: { resourceId, status: "verifying", progress: 0, installPath: null, rollbackPath: null, error: null } }));
+    try { const progress = await installDesktopResource(resourceId); setInstallProgress((current) => ({ ...current, [resourceId]: progress })); await Promise.all([reloadResourceCatalog(), recheck(true)]); }
+    catch (error) { const message = errorMessage(error); setInstallProgress((current) => ({ ...current, [resourceId]: { resourceId, status: "failed", progress: current[resourceId]?.progress || 0, installPath: null, rollbackPath: null, error: message } })); setMessage(message); }
+  };
+
   if (loading || !bootstrap) return <div className="desktop-loading"><LoaderCircle className="spin" /><strong>正在建立本地工作区</strong><span>{message || "读取硬件、磁盘与本地数据库"}</span></div>;
   const critical = bootstrap.environment.issues.find((issue) => issue.severity === "critical") || bootstrap.environment.issues[0];
   return <div className="desktop-shell">
@@ -112,7 +125,7 @@ export function App() {
       {message && <div className="desktop-notice">{message}<button onClick={() => setMessage("")}>×</button></div>}
       {page === "overview" && <OverviewPage state={bootstrap} />}
       {page === "environment" && <EnvironmentPage report={bootstrap.environment} />}
-      {page === "resources" && <ResourcesPage catalog={resourceCatalog} progress={resourceProgress} loading={catalogLoading} onReload={() => void reloadResourceCatalog()} onDownload={(resourceId) => void downloadResource(resourceId)} />}
+      {page === "resources" && <ResourcesPage catalog={resourceCatalog} progress={resourceProgress} installProgress={installProgress} loading={catalogLoading} onReload={() => void reloadResourceCatalog()} onDownload={(resourceId) => void downloadResource(resourceId)} onInstall={(resourceId) => void installResource(resourceId)} />}
       {page === "sync" && <SyncPage items={queue} />}
       {page === "settings" && <SettingsPage value={bootstrap.settings} onSaved={(settings) => { setBootstrap((current) => current ? { ...current, settings } : current); setMessage("本地设置已保存"); void reloadResourceCatalog(); }} onError={setMessage} />}
     </main>
@@ -132,8 +145,8 @@ function EnvironmentPage({ report }: { report: DesktopEnvironmentReport }) {
 }
 
 /** 资源页只开放真实签名目录中的项目，并展示断点、来源和校验状态。 */
-function ResourcesPage({ catalog, progress, loading, onReload, onDownload }: { catalog: DesktopResourceCatalogView | null; progress: Record<string, DesktopResourceDownloadView>; loading: boolean; onReload: () => void; onDownload: (resourceId: string) => void }) {
-  return <div className="desktop-page"><section className="section-card resource-card"><header><div><span>RESOURCE CHANNEL</span><h2>依赖与模型资源</h2></div><button className="resource-reload" disabled={loading} onClick={onReload}>{loading ? <LoaderCircle className="spin" /> : <RefreshCw />}刷新签名目录</button></header>{!catalog ? <div className="empty-block">正在读取资源发布状态</div> : !catalog.configured ? <div className="resource-unconfigured"><ShieldCheck /><div><strong>资源发布通道尚未配置</strong><span>{catalog.message}</span><small>安装入口保持关闭，避免下载未登记或未签名的文件。</small></div></div> : <><div className="resource-channel-status"><ShieldCheck /><span><strong>{catalog.message}</strong><small>密钥 {catalog.keyId} · 有效至 {catalog.expiresAt ? new Date(catalog.expiresAt).toLocaleString("zh-CN") : "-"}</small></span></div>{catalog.resources.length ? <div className="resource-list">{catalog.resources.map((resource) => { const current = progress[resource.id]; const busy = current && ["queued", "downloading", "verifying"].includes(current.status); const sourceAvailable = resource.sourceKinds.length > 0; const percent = current ? Math.min(100, Math.round(current.downloadedBytes / current.totalBytes * 100)) : resource.downloaded ? 100 : 0; return <article key={resource.id}><PackageOpen /><div className="resource-info"><strong>{resource.fileName}</strong><span>{resourceKindLabel(resource.kind)} · {resource.version} · {formatResourceBytes(resource.byteSize)} · {sourceAvailable ? resource.sourceKinds.map(sourceKindLabel).join(" / ") : "当前来源设置下不可用"}</span>{current && <div className="resource-progress"><i style={{ width: `${percent}%` }} /><small>{downloadStatusLabel(current.status)} · {percent}%{current.bytesPerSecond ? ` · ${formatResourceBytes(current.bytesPerSecond)}/s` : ""}</small></div>}</div><button disabled={busy || resource.downloaded || !sourceAvailable} onClick={() => onDownload(resource.id)}>{busy ? <LoaderCircle className="spin" /> : resource.downloaded ? <CheckCircle2 /> : <Download />}{resource.downloaded ? "已验证" : busy ? "下载中" : sourceAvailable ? "下载" : "无来源"}</button></article>; })}</div> : <div className="empty-block">签名目录中没有适用于当前 Windows 架构的资源</div>}</>}</section></div>;
+function ResourcesPage({ catalog, progress, installProgress, loading, onReload, onDownload, onInstall }: { catalog: DesktopResourceCatalogView | null; progress: Record<string, DesktopResourceDownloadView>; installProgress: Record<string, DesktopResourceInstallView>; loading: boolean; onReload: () => void; onDownload: (resourceId: string) => void; onInstall: (resourceId: string) => void }) {
+  return <div className="desktop-page"><section className="section-card resource-card"><header><div><span>RESOURCE CHANNEL</span><h2>依赖与模型资源</h2></div><button className="resource-reload" disabled={loading} onClick={onReload}>{loading ? <LoaderCircle className="spin" /> : <RefreshCw />}刷新签名目录</button></header>{!catalog ? <div className="empty-block">正在读取资源发布状态</div> : !catalog.configured ? <div className="resource-unconfigured"><ShieldCheck /><div><strong>资源发布通道尚未配置</strong><span>{catalog.message}</span><small>安装入口保持关闭，避免下载未登记或未签名的文件。</small></div></div> : <><div className="resource-channel-status"><ShieldCheck /><span><strong>{catalog.message}</strong><small>密钥 {catalog.keyId} · 有效至 {catalog.expiresAt ? new Date(catalog.expiresAt).toLocaleString("zh-CN") : "-"}</small></span></div>{catalog.resources.length ? <div className="resource-list">{catalog.resources.map((resource) => { const current = progress[resource.id]; const installing = installProgress[resource.id]; const downloadBusy = current && ["queued", "downloading", "verifying"].includes(current.status); const installBusy = installing && ["verifying", "installing", "switching"].includes(installing.status); const busy = downloadBusy || installBusy; const sourceAvailable = resource.sourceKinds.length > 0; const percent = installBusy ? installing.progress : current ? Math.min(100, Math.round(current.downloadedBytes / current.totalBytes * 100)) : resource.downloaded ? 100 : 0; const progressText = installBusy ? `${installStatusLabel(installing.status)} · ${installing.progress}%` : current ? `${downloadStatusLabel(current.status)} · ${percent}%${current.bytesPerSecond ? ` · ${formatResourceBytes(current.bytesPerSecond)}/s` : ""}` : ""; const action = resource.installed ? "installed" : resource.downloaded ? "install" : "download"; return <article key={resource.id}>{resource.installed ? <PackageCheck /> : <PackageOpen />}<div className="resource-info"><strong>{resource.fileName}</strong><span>{resourceKindLabel(resource.kind)} · {resource.version} · 下载 {formatResourceBytes(resource.byteSize)} · 安装 {formatResourceBytes(resource.installedSize)} · {sourceAvailable ? resource.sourceKinds.map(sourceKindLabel).join(" / ") : "当前来源设置下不可用"}</span>{(current || installing) && <div className="resource-progress"><i style={{ width: `${percent}%` }} /><small>{progressText || (resource.installed ? "已安装" : "等待操作")}</small></div>}</div><button disabled={Boolean(busy) || resource.installed || (!resource.downloaded && !sourceAvailable)} onClick={() => action === "install" ? onInstall(resource.id) : onDownload(resource.id)}>{busy ? <LoaderCircle className="spin" /> : resource.installed ? <CheckCircle2 /> : action === "install" ? <PackageCheck /> : <Download />}{resource.installed ? "已安装" : installBusy ? "安装中" : downloadBusy ? "下载中" : action === "install" ? "安装" : sourceAvailable ? "下载" : "无来源"}</button></article>; })}</div> : <div className="empty-block">签名目录中没有适用于当前 Windows 架构的资源</div>}</>}</section></div>;
 }
 
 /** 图库同步页读取真实 SQLite 队列，离线队列不会因关闭窗口而丢失。 */
@@ -167,6 +180,7 @@ function themeModeLabel(mode: DesktopSettings["themeMode"]): string { return { s
 function resourceKindLabel(kind: string): string { return { runtime: "运行环境", model: "底模", lora: "LoRA", captioner: "打标模型", trainer: "训练组件" }[kind] || kind; }
 function sourceKindLabel(kind: string): string { return { official: "官方", mirror: "主站镜像" }[kind] || kind; }
 function downloadStatusLabel(status: DesktopResourceDownloadView["status"]): string { return { queued: "排队中", downloading: "下载中", verifying: "校验中", downloaded: "已完成", failed: "失败" }[status]; }
+function installStatusLabel(status: DesktopResourceInstallView["status"]): string { return { verifying: "校验缓存", installing: "安装中", switching: "切换版本", installed: "已安装", rolled_back: "已回滚", failed: "安装失败" }[status]; }
 function formatResourceBytes(value: number): string { if (value < 1024 ** 2) return `${Math.max(1, Math.round(value / 1024))} KiB`; if (value < 1024 ** 3) return `${(value / 1024 ** 2).toFixed(1)} MiB`; return `${(value / 1024 ** 3).toFixed(2)} GiB`; }
 function formatBytes(value: number): string { if (value <= 0) return "0 GB"; return `${(value / 1024 ** 3).toFixed(value >= 10 * 1024 ** 3 ? 0 : 1)} GB`; }
 function errorMessage(error: unknown): string { return error instanceof Error ? error.message : String(error || "桌面端操作失败"); }

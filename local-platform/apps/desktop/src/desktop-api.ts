@@ -1,5 +1,5 @@
 /** 本文件封装 WebView 到 Tauri 本地核心的受类型约束命令。 */
-import type { DesktopBootstrapView, DesktopEnvironmentReport, DesktopGalleryPrivacy, DesktopGallerySyncItem, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopSettings, DesktopSettingsUpdate } from "@drawhime/contracts";
+import type { DesktopBootstrapView, DesktopEnvironmentReport, DesktopGalleryPrivacy, DesktopGallerySyncItem, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopSettings, DesktopSettingsUpdate } from "@drawhime/contracts";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
@@ -19,3 +19,7 @@ export function loadDesktopResourceCatalog(): Promise<DesktopResourceCatalogView
 export function downloadDesktopResource(resourceId: string): Promise<DesktopResourceDownloadView> { return invoke("desktop_download_resource", { resourceId }); }
 /** 监听 Rust 下载线程发出的资源进度。 */
 export function listenDesktopResourceProgress(handler: (progress: DesktopResourceDownloadView) => void): Promise<UnlistenFn> { return listen<DesktopResourceDownloadView>("desktop-resource-progress", (event) => handler(event.payload)); }
+/** 把已验证资源安全安装到受控目录并保留旧版本回滚副本。 */
+export function installDesktopResource(resourceId: string): Promise<DesktopResourceInstallView> { return invoke("desktop_install_resource", { resourceId }); }
+/** 监听资源校验、解压、切换和回滚进度。 */
+export function listenDesktopResourceInstallProgress(handler: (progress: DesktopResourceInstallView) => void): Promise<UnlistenFn> { return listen<DesktopResourceInstallView>("desktop-resource-install-progress", (event) => handler(event.payload)); }

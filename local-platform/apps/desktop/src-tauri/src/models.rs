@@ -99,6 +99,7 @@ pub struct DesktopResourceManifestItem {
     pub arch: String,
     pub file_name: String,
     pub byte_size: u64,
+    pub installed_size: u64,
     pub sha256: String,
     pub archive: String,
     pub required: bool,
@@ -129,9 +130,12 @@ pub struct DesktopResourceCatalogItemView {
     pub version: String,
     pub file_name: String,
     pub byte_size: u64,
+    pub installed_size: u64,
     pub sha256: String,
     pub required: bool,
     pub downloaded: bool,
+    pub installed: bool,
+    pub install_path: Option<String>,
     pub source_kinds: Vec<String>,
 }
 
@@ -158,6 +162,18 @@ pub struct DesktopResourceDownloadView {
     pub total_bytes: u64,
     pub bytes_per_second: u64,
     pub target_path: Option<String>,
+    pub error: Option<String>,
+}
+
+/** 桌面资源校验、解压、原子切换和回滚的统一视图。 */
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopResourceInstallView {
+    pub resource_id: String,
+    pub status: String,
+    pub progress: u32,
+    pub install_path: Option<String>,
+    pub rollback_path: Option<String>,
     pub error: Option<String>,
 }
 
