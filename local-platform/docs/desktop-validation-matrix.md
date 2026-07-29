@@ -35,12 +35,12 @@
 | 数据目录保留 | 通过 | 升级和回滚前后 11 个业务表行数完全一致；`models` 文件数/字节数一致；`runtime` 61775 个文件、6517373260 字节保持一致 |
 | 模块路径兼容 | 通过 | 在继承 PowerShell 7 `PSModulePath`、Windows PowerShell 无法加载 `Get-FileHash` 的环境复现退出码 97；改用纯 .NET SHA-256 后完整升级退出码 0 |
 | 签名资源不可变 | 通过 | 发布工具拒绝用不同安装包覆盖已经登记的相同语义版本；生产端已有同名文件时要求大小和 SHA-256 完全一致 |
-| WebView 响应式布局 | 通过 | 对 12 个页面分别执行 1380×860 与 720×560，共 24 次页面级宽度和唯一可见页检查，均无横向溢出；宽屏深色更新页、最小宽度亮色设置页和生成页截图已人工检查；真实窗口 DPI 144 且 Win32 上下文为 Per-Monitor V2 |
+| WebView 响应式布局 | 通过 | 对 12 个页面分别执行 1380×860 与 720×560，共 24 次页面级宽度和唯一可见页检查，均无横向溢出；0.1.7 正式安装版另对 5 个底模、53 个 LoRA 的列表、详情、筛选栏与返回路径执行宽屏和最小窗口探针；真实窗口 DPI 144 且 Win32 上下文为 Per-Monitor V2 |
 | WebView 主题切换 | 通过 | 同一运行实例依次切换深色、亮色和跟随系统；`data-theme`、活动按钮和持久设置均收敛，切页后主题不丢失 |
 | 安装包内容边界 | 通过 | 0.1.4 静默安装后目录仅有 2 个 EXE、共 17,976,638 字节；未发现 safetensors、checkpoint、PyTorch、ONNX、LoRA、Trainer 或 Tagger 文件 |
 | WebView2 离线载荷 | 通过 | 0.1.6 NSIS 使用 Tauri `offlineInstaller` 内嵌微软 Evergreen 离线安装器；最终安装包 211,125,907 字节，首次安装不依赖联网下载 WebView2 |
 | GPU 与磁盘门禁逻辑 | 通过 | 真实生产判断函数覆盖无 NVIDIA GPU、4 GiB、6 GiB 仅生成、低可用显存与安装空间差 1 字节的边界；对应能力锁定和中文提示测试通过 |
-| Windows 主机自动验收 | 通过 | `scripts/validate-desktop-windows-host.ps1` 在 Windows 11 10.0.26200、144 DPI 上完成 0.1.6 静默安装、数据库文件不变、WebView2 检测、安装目录边界、Per-Monitor V2 和十秒启动；脱敏证据写入 `.private/desktop-host-validation` |
+| Windows 主机自动验收 | 通过 | `scripts/validate-desktop-windows-host.ps1` 在 Windows 11 10.0.26200、144 DPI 上完成 0.1.7 正式安装包静默安装、数据库文件不变、WebView2 检测、安装目录边界、Per-Monitor V2 和十秒启动；脱敏证据写入 `.private/desktop-host-validation/0.1.7` |
 | UI 一键安装全部依赖 | 通过 | 从真实安装客户端点击一次“安装全部必需资源（4）”，串行完成 Trainer v2、3.90 GiB WAI、1.11 GiB Qwen3 和 242 MiB VAE 的下载、整体哈希与原子安装；主模型约 4.5 MiB/s，其余资源约 15.5–18.1 MiB/s，总耗时 1,001 秒，最终显示“必需资源已齐全” |
 | UI 本地生成闭环 | 通过 | 一键安装完成后直接在本地生成页提交 WAI Anima 任务；SQLite 状态收敛为 `succeeded/100%`，20 步 1024×1024 在 108.8 秒完成，产物为 533,702 字节 PNG 且 SHA-256、宽高和本地路径记录完整 |
 | 0.1.5 显存门禁修复 | 通过 | 真实 RTX 4060 Laptop 上报 8,188 MiB；0.1.4 曾误判少于 8 GiB，0.1.5 按 NVIDIA 固件保留显存修正阈值后环境横幅消失，生成与训练能力均开放；6,140 MiB 设备仍保持仅生成提示 |
