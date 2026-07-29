@@ -8,6 +8,7 @@ on:
       - ".github/workflows/desktop-windows.yml"
       - "local-platform/apps/desktop/**"
       - "local-platform/scripts/validate-desktop-windows-host.ps1"
+      - "local-platform/scripts/validate-desktop-webview-ui.mjs"
       - "local-platform/packages/contracts/**"
       - "local-platform/package.json"
       - "local-platform/pnpm-lock.yaml"
@@ -124,6 +125,11 @@ jobs:
       - name: 检出验收脚本
         uses: actions/checkout@v4
 
+      - name: 安装 UI 探针 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       - name: 下载待验收安装包
         uses: actions/download-artifact@v4
         with:
@@ -143,6 +149,15 @@ jobs:
           $evidenceData = Get-Content -Raw $evidence.FullName | ConvertFrom-Json
           $hostSummary = "### ${{ matrix.os }}`n- 安装与启动验收：$($evidence.Name)`n- 主机：$($evidenceData.os.caption)，构建 $($evidenceData.os.build)`n- DPI：$($evidenceData.dpi.value)，Per-Monitor V2=$($evidenceData.dpi.perMonitorV2)`n- WebView2：$($evidenceData.webView2Version)"
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value $hostSummary -Encoding UTF8
+
+      - name: 验证无 GPU WebView 门禁
+        shell: pwsh
+        run: |
+          $installation = Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -eq "DrawHime Desktop" } | Select-Object -First 1
+          if (-not $installation) { throw "UI 验收前未找到桌面安装登记" }
+          $executable = Join-Path ([string]$installation.InstallLocation).Trim('"') "drawhime-desktop.exe"
+          node scripts/validate-desktop-webview-ui.mjs --executable $executable --expect-no-gpu --evidence "$env:RUNNER_TEMP/desktop-host-validation/webview-no-gpu.json"
+          if ($LASTEXITCODE -ne 0) { throw "WebView 无 GPU 门禁验收退出码：$LASTEXITCODE" }
 
       - name: 保存 Windows 主机验收证据
         uses: actions/upload-artifact@v4

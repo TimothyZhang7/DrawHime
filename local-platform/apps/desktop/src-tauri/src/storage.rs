@@ -255,6 +255,7 @@ impl DesktopState {
     pub fn create_training_job(&self, input: DesktopTrainingJobCreateInput) -> Result<DesktopTrainingJobView, String> {
         let scheduler = self.training_scheduler.as_ref().ok_or_else(|| "本地训练调度器尚未启动".to_string())?;
         let settings = self.load_settings()?;
+        crate::environment::require_training_ready(&settings)?;
         let mut database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
         let job = crate::training::create_job(&mut database, &self.app_data_dir, Path::new(&settings.model_root), input)?;
         drop(database);
@@ -281,6 +282,7 @@ impl DesktopState {
     pub fn create_local_job(&self, input: DesktopLocalJobCreateInput) -> Result<DesktopLocalJobView, String> {
         let scheduler = self.scheduler.as_ref().ok_or_else(|| "本地调度器尚未启动".to_string())?;
         let settings = self.load_settings()?;
+        crate::environment::require_inference_ready(&settings)?;
         let mut database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
         let job = crate::scheduler::create_job(&mut database, &settings, input)?;
         drop(database);

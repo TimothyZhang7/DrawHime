@@ -48,6 +48,27 @@ pub fn inspect_environment(settings: &DesktopSettings) -> DesktopEnvironmentRepo
     }
 }
 
+/** 在创建持久生成任务前重新确认 GPU、Runtime 与底模能力，避免环境变化后留下无法执行的队列任务。 */
+pub fn require_inference_ready(settings: &DesktopSettings) -> Result<(), String> {
+    let report = inspect_environment(settings);
+    report.capabilities.inference.then_some(()).ok_or_else(|| capability_block_message(&report, "本地生成"))
+}
+
+/** 在创建持久训练任务前重新确认训练显存、Runtime 与 Anima 资产能力，避免无效占用训练队列。 */
+pub fn require_training_ready(settings: &DesktopSettings) -> Result<(), String> {
+    let report = inspect_environment(settings);
+    report.capabilities.training.then_some(()).ok_or_else(|| capability_block_message(&report, "LoRA 训练"))
+}
+
+/** 将当前环境的首个关键问题转为提交接口可直接显示的中文错误，不丢失可操作原因。 */
+fn capability_block_message(report: &DesktopEnvironmentReport, capability: &str) -> String {
+    let issue = report.issues.iter().find(|issue| issue.severity == "critical").or_else(|| report.issues.first());
+    match issue {
+        Some(issue) => format!("{capability}当前不可用：{}。{}", issue.title, issue.message),
+        None => format!("{capability}当前不可用，请重新检测本机 GPU、Runtime 与资源状态"),
+    }
+}
+
 /** 统一评估 GPU 门禁并生成可操作提示，确保无卡、低显存和繁忙状态使用同一真实逻辑。 */
 fn evaluate_gpu_state(gpus: &[GpuView], issues: &mut Vec<EnvironmentIssue>) -> (bool, bool, bool) {
     let generation_supported = gpus.iter().any(|gpu| gpu.memory_total_bytes >= MINIMUM_GPU_MEMORY_BYTES);
