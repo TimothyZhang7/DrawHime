@@ -270,7 +270,9 @@ async function evaluateAfterInitialReload(client, expression) {
 
 /** 对无 GPU Runner 执行强门禁；其他硬件仍至少要求导航横幅状态一致。 */
 function validateProbe(result, expectNoGpu) {
-  if (!result || !Array.isArray(result.navigationPages) || result.navigationPages.length !== 12) throw new Error("桌面导航页数量或探针结果异常");
+  const expectedNavigation = ["概览 / 账号", "本地生成", "LoRA 训练", "模型仓库", "LoRA 仓库", "图库", "设置"];
+  const actualNavigation = Array.isArray(result?.navigationPages) ? result.navigationPages.map((item) => item.label) : [];
+  if (JSON.stringify(actualNavigation) !== JSON.stringify(expectedNavigation)) throw new Error(`桌面导航结构异常：${actualNavigation.join(" / ")}`);
   if (result.environmentStatus !== "ready" && result.navigationPages.some((item) => !item.bannerVisible)) throw new Error("环境异常横幅未在全部导航页持续显示");
   if (expectNoGpu) {
     if (result.environmentStatus !== "blocked") throw new Error(`无 GPU 环境状态应为 blocked，实际为 ${result.environmentStatus}`);
