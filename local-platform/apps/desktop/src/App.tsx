@@ -229,6 +229,8 @@ export function App() {
   /** 训练提交和取消均按 ID 更新同一条持久化任务。 */
   const trainingJobUpdated = (job: DesktopTrainingJobView) => {
     setTrainingJobs((current) => [job, ...current.filter((item) => item.id !== job.id)].sort((left, right) => right.createdAt.localeCompare(left.createdAt)));
+    // 训练产物由 Rust 核心原子登记，成功事件后立即刷新 LoRA 仓库，页面无需重启才能使用。
+    if (job.status === "succeeded" && job.outputLoraId) void listDesktopLocalLoras().then(setLoras).catch((error) => setMessage(errorMessage(error)));
   };
   const jobCreated = (job: DesktopLocalJobView) => {
     setJobs((current) => [job, ...current.filter((item) => item.id !== job.id)]);
@@ -552,12 +554,12 @@ function trainingStatusLabel(status: DesktopTrainingDatasetView["status"]): stri
 function captionJobStatusLabel(status: DesktopCaptionJobView["status"]): string { return { queued: "等待离线打标", running: "正在离线打标", succeeded: "自动打标完成", failed: "自动打标部分或全部失败", cancelled: "自动打标已取消" }[status]; }
 function captionItemStatusLabel(status: DesktopCaptionJobView["items"][number]["status"]): string { return { queued: "等待打标", running: "识别中", succeeded: "识别完成", failed: "识别失败", skipped: "保留人工内容", cancelled: "已取消" }[status]; }
 function desktopTrainingStatusLabel(status: DesktopTrainingJobView["status"]): string { return { queued: "排队中", running: "训练中", succeeded: "训练完成", failed: "训练失败", cancelled: "已取消" }[status]; }
-/** 按训练集规模生成约 160 次图片遍历的稳健默认参数。 */
+/** 8 GiB 设备默认使用约 80 次 512px 图片遍历，兼顾半小时内完成与可用 LoRA 质量。 */
 function defaultDesktopTrainingDraft(dataset: DesktopTrainingDatasetView, modelId: string): DesktopTrainingJobCreateInput {
   const count = Math.max(5, dataset.assets.length);
   const epochs = count >= 80 ? 1 : count >= 40 ? 2 : 4;
-  const repeats = Math.max(1, Math.round(160 / count / epochs));
-  return { datasetId: dataset.id, modelId, title: `${dataset.title} LoRA`, parameters: { rank: 16, alpha: 16, epochs, repeats, resolution: 768, learningRate: 0.0001, lrScheduler: "constant", warmupRatio: 0, gradientAccumulationSteps: 1, captionDropoutRate: 0, shuffleCaption: false, keepTokens: 1, seed: Math.floor(Math.random() * 2147483647) } };
+  const repeats = Math.max(1, Math.round(80 / count / epochs));
+  return { datasetId: dataset.id, modelId, title: `${dataset.title} LoRA`, parameters: { rank: 8, alpha: 8, epochs, repeats, resolution: 512, learningRate: 0.0001, lrScheduler: "constant", warmupRatio: 0, gradientAccumulationSteps: 1, captionDropoutRate: 0, shuffleCaption: false, keepTokens: 1, seed: Math.floor(Math.random() * 2147483647) } };
 }
 function runtimeLabel(status: DesktopEnvironmentReport["runtime"]["status"]): string { return { not_installed: "未安装", installed_unverified: "等待自检", ready: "运行正常", broken: "需要修复" }[status]; }
 function syncStatusLabel(status: DesktopGallerySyncItem["status"]): string { return { queued: "等待上传", waiting_network: "等待网络", waiting_auth: "等待登录", uploading: "上传中", committing: "正在提交", synced: "已同步", privacy_pending: "权限待同步", paused: "已暂停", failed_retryable: "等待重试", failed_final: "同步失败", remote_deleted: "网页已删除" }[status]; }

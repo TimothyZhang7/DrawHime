@@ -84,7 +84,7 @@ impl DesktopState {
         let output_root = picture_dir.join("DrawHime");
         for directory in [&model_root, &runtime_root, &output_root] { fs::create_dir_all(directory).map_err(|error| format!("创建本地目录失败：{error}"))?; }
         connection.execute("INSERT OR IGNORE INTO desktop_settings (id, theme_mode, dependency_source, default_privacy, model_root, output_root, runtime_root, upload_concurrency, wifi_only, bandwidth_limit_kib, updated_at) VALUES (1, 'system', 'auto', 'private', ?1, ?2, ?3, 2, 0, NULL, ?4)", params![path_text(&model_root), path_text(&output_root), path_text(&runtime_root), Utc::now().to_rfc3339()]).map_err(|error| format!("写入默认设置失败：{error}"))?;
-        Ok(Self { database: Mutex::new(connection), app_data_dir: app_data_dir.to_path_buf(), database_path, scheduler: None, caption_scheduler: None, training_scheduler: None, gallery_sync_scheduler: None, runtime: Arc::new(RuntimeController::new()), gpu_workload: GpuWorkloadCoordinator::new() })
+        Ok(Self { database: Mutex::new(connection), app_data_dir: app_data_dir.to_path_buf(), database_path, scheduler: None, caption_scheduler: None, training_scheduler: None, gallery_sync_scheduler: None, runtime: Arc::new(RuntimeController::initialize(app_data_dir)?), gpu_workload: GpuWorkloadCoordinator::new() })
     }
 
     /** 数据库初始化完成后启动唯一后台调度线程。 */

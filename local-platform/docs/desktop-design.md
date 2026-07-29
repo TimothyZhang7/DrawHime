@@ -303,4 +303,6 @@ Local Scheduler 使用桌面 SQLite 作为唯一事实源。提交命令先固�
 
 两个连续签名版本的真实门禁已经完成：0.1.1 通过生产稳定通道升级到 0.1.2，随后使用本地可信缓存回滚到 0.1.1，两个 NSIS 辅助进程退出码均为 0；重新安装 0.1.2 后状态再次收敛为最新。升级和回滚前后的业务表行数、模型目录与 6.5GB Runtime 文件统计完全一致。测试同时发现 Windows PowerShell 在继承 PowerShell 7 模块路径时缺少 `Get-FileHash`，现已改为不依赖模块的 .NET SHA-256。详细直接证据和未覆盖项见 [`desktop-validation-matrix.md`](desktop-validation-matrix.md)。
 
+0.1.6 已进一步完成真实 UI LoRA 全链路：5 张图片经 WD14 自动打标、确认后使用 512px Rank 8 默认参数在 179.2 秒生成 23MB safetensors，产物立即进入本地仓库，并被下一张 1024×1024 生成任务以 0.8 强度成功加载。强制终止桌面进程遗留的 ComfyUI 已由持久 Runtime 租约在下次启动时按宿主、可执行文件、入口和端口身份安全回收，不再挤占训练显存。
+
 后续按顺序推进：补齐网站其余底模文件发布与授权安装 → Windows、DPI、WebView2、GPU、弱网和磁盘完整矩阵 → 正式 GitHub Release。
