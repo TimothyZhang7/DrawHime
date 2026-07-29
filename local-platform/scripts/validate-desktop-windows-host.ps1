@@ -13,7 +13,9 @@ $ErrorActionPreference = "Stop"
 
 # 使用纯 .NET 计算文件哈希，避免依赖 Windows PowerShell 模块自动加载。
 function Get-DrawHimeSha256([string]$Path) {
-  $stream = [System.IO.File]::OpenRead($Path)
+  # SQLite 的 WAL/SHM 可能短暂保留共享句柄；只读哈希允许其他进程继续读写或删除。
+  $share = [System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete
+  $stream = [System.IO.File]::Open($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, $share)
   try {
     $sha = [System.Security.Cryptography.SHA256]::Create()
     try { return ([System.BitConverter]::ToString($sha.ComputeHash($stream))).Replace("-", "").ToLowerInvariant() }
@@ -78,8 +80,10 @@ $build = [int64]$os.BuildNumber
 if (-not $os.Version.StartsWith("10.") -or $build -lt 17763) { throw "当前 Windows 构建不在支持范围：$($os.Version) ($build)" }
 
 $businessRoot = Join-Path $env:APPDATA "ink.xanime.drawhime.desktop"
+$existingProcesses = @(Get-Process -Name "drawhime-desktop" -ErrorAction SilentlyContinue)
+$existingProcesses | Stop-Process -Force
+$existingProcesses | Wait-Process -Timeout 10 -ErrorAction SilentlyContinue
 $databaseBefore = Get-DrawHimeDatabaseSnapshot $businessRoot
-Get-Process -Name "drawhime-desktop" -ErrorAction SilentlyContinue | Stop-Process -Force
 
 $installerEvidence = $null
 if ($resolvedInstaller) {

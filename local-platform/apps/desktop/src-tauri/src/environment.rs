@@ -6,8 +6,9 @@ use serde_json::Value;
 use std::{fs, path::Path, process::Command};
 
 const MIB: u64 = 1024 * 1024;
-const MINIMUM_GPU_MEMORY_BYTES: u64 = 6 * 1024 * MIB;
-const MINIMUM_TRAINING_GPU_MEMORY_BYTES: u64 = 8 * 1024 * MIB;
+// NVIDIA 会为固件保留少量显存，6/8 GiB 标称显卡通常分别上报约 6140/8188 MiB。
+const MINIMUM_GPU_MEMORY_BYTES: u64 = 5_800 * MIB;
+const MINIMUM_TRAINING_GPU_MEMORY_BYTES: u64 = 7_800 * MIB;
 
 /** 检测当前真实环境；任何缺失都转为明确问题，不使用虚构硬件数据。 */
 pub fn inspect_environment(settings: &DesktopSettings) -> DesktopEnvironmentReport {
@@ -157,13 +158,17 @@ mod tests {
         assert_eq!(evaluate_gpu_state(&[], &mut issues), (false, false, true));
         assert!(issues.iter().any(|issue| issue.code == "gpu_missing"));
 
-        let gpu = |total_gib: u64, free_gib: u64| GpuView { index: 0, uuid: "test".into(), name: "测试 GPU".into(), vendor: "NVIDIA".into(), memory_total_bytes: total_gib * 1024 * MIB, memory_free_bytes: free_gib * 1024 * MIB, driver_version: "test".into(), compute_capability: Some("test".into()), temperature_celsius: Some(0.0), utilization_percent: Some(0.0) };
+        let gpu = |total_mib: u64, free_mib: u64| GpuView { index: 0, uuid: "test".into(), name: "测试 GPU".into(), vendor: "NVIDIA".into(), memory_total_bytes: total_mib * MIB, memory_free_bytes: free_mib * MIB, driver_version: "test".into(), compute_capability: Some("test".into()), temperature_celsius: Some(0.0), utilization_percent: Some(0.0) };
         issues.clear();
-        assert_eq!(evaluate_gpu_state(&[gpu(4, 4)], &mut issues), (false, false, false));
+        assert_eq!(evaluate_gpu_state(&[gpu(4_092, 4_000)], &mut issues), (false, false, false));
         assert!(issues.iter().any(|issue| issue.code == "gpu_memory_insufficient"));
 
         issues.clear();
-        assert_eq!(evaluate_gpu_state(&[gpu(6, 6)], &mut issues), (true, false, false));
+        assert_eq!(evaluate_gpu_state(&[gpu(6_140, 6_000)], &mut issues), (true, false, false));
         assert!(issues.iter().any(|issue| issue.code == "training_gpu_memory_insufficient"));
+
+        issues.clear();
+        assert_eq!(evaluate_gpu_state(&[gpu(8_188, 8_000)], &mut issues), (true, true, false));
+        assert!(issues.is_empty());
     }
 }
