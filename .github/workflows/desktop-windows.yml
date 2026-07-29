@@ -20,6 +20,16 @@ on:
         required: true
         type: boolean
         default: false
+      publish_release:
+        description: "在完整验收通过后创建同一提交的 GitHub Release"
+        required: true
+        type: boolean
+        default: false
+      release_notes:
+        description: "GitHub Release 版本说明；仅发布时必填"
+        required: false
+        type: string
+        default: ""
 
 concurrency:
   group: desktop-windows-${{ github.ref }}
@@ -31,6 +41,7 @@ permissions:
 jobs:
   quick-check:
     name: windows-2022-quick-check
+    if: github.event_name == 'push' || inputs.full_validation != true
     runs-on: windows-2022
     timeout-minutes: 12
     defaults:
@@ -234,3 +245,57 @@ jobs:
           path: ${{ runner.temp }}/desktop-host-validation/*.json
           if-no-files-found: error
           retention-days: 30
+
+  publish-github-release:
+    name: publish-github-release
+    needs: install-validation
+    if: github.event_name == 'workflow_dispatch' && inputs.full_validation && inputs.publish_release && needs.install-validation.result == 'success'
+    runs-on: windows-2022
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: local-platform
+    steps:
+      - name: 检出已完整验收的源码
+        uses: actions/checkout@v4
+
+      - name: 下载已验收安装包
+        uses: actions/download-artifact@v4
+        with:
+          name: desktop-windows-x64-installer
+          path: ${{ runner.temp }}/desktop-release
+
+      - name: 验证发布矩阵与安装包
+        shell: pwsh
+        env:
+          RELEASE_NOTES: ${{ inputs.release_notes }}
+        run: |
+          $unverified = @(Select-String -LiteralPath "docs/desktop-validation-matrix.md" -SimpleMatch "| 待验证 |")
+          if ($unverified.Count -gt 0) {
+            $unverified | ForEach-Object { Write-Host $_.Line }
+            throw "发布矩阵仍存在待验证项，禁止创建 GitHub Release"
+          }
+          if ([string]::IsNullOrWhiteSpace($env:RELEASE_NOTES)) { throw "创建 GitHub Release 时必须填写 release_notes" }
+          $version = (Get-Content -Raw "apps/desktop/src-tauri/tauri.conf.json" | ConvertFrom-Json).version
+          if ($version -notmatch "^\d+\.\d+\.\d+$") { throw "桌面版本号格式无效：$version" }
+          $installer = @(Get-ChildItem -LiteralPath "$env:RUNNER_TEMP/desktop-release" -File -Filter "*.exe") | Select-Object -First 1
+          if (-not $installer) { throw "发布前未找到已验收的 NSIS 安装包" }
+          if ($installer.Name -notmatch "_x64-setup\.exe$") { throw "发布安装包命名不符合 x64 NSIS 约定：$($installer.Name)" }
+          if ($installer.Length -lt 150MB) { throw "发布安装包缺少 WebView2 离线载荷，实际字节数：$($installer.Length)" }
+          "RELEASE_TAG=v$version" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding UTF8
+          $summary = "### GitHub Release 预检`n- 版本：$version`n- 安装包：$($installer.Name)`n- SHA-256：$((Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant())"
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value $summary -Encoding UTF8
+
+      - name: 创建 GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_NOTES: ${{ inputs.release_notes }}
+        run: |
+          gh release view $env:RELEASE_TAG 2>$null
+          if ($LASTEXITCODE -eq 0) { throw "GitHub Release 已存在：$env:RELEASE_TAG" }
+          $installer = @(Get-ChildItem -LiteralPath "$env:RUNNER_TEMP/desktop-release" -File -Filter "*.exe") | Select-Object -First 1
+          gh release create $env:RELEASE_TAG $installer.FullName --target $env:GITHUB_SHA --title "DrawHime Desktop $env:RELEASE_TAG" --notes $env:RELEASE_NOTES
+          if ($LASTEXITCODE -ne 0) { throw "GitHub Release 创建失败" }

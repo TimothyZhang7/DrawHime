@@ -303,6 +303,7 @@ Local Scheduler 使用桌面 SQLite 作为唯一事实源。提交命令先固�
 - Release Rust 测试、WebView2 离线 NSIS 构建、安装包边界校验及 Windows 2022/2025 安装启动验收集中在 `workflow_dispatch.full_validation=true` 的发布前完整门禁中。
 - 正式发布必须以准备发布的同一提交执行一次完整门禁并通过；日常快速门禁只缩短反馈时间，不替代发布前兼容性、安装和启动证据。
 - 构建安装包的任务只执行桌面实际依赖的 `@drawhime/contracts`，不生成 Prisma Client，也不构建与桌面程序无依赖关系的服务端包。
+- 需要创建 GitHub Release 时，手动工作流必须同时勾选完整验收与发布，并填写版本说明；创建任务只接收本次验收产出的安装包，要求验证矩阵不存在待验证项、版本号与安装包命名正确且 WebView2 离线载荷完整。
 
 ## 18. 当前实现状态
 
