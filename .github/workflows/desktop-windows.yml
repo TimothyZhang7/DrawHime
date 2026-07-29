@@ -79,3 +79,14 @@ jobs:
           if ($installer.Length -lt 150MB) { throw "安装包缺少 WebView2 离线载荷，实际字节数：$($installer.Length)" }
           $summary = "### ${{ matrix.os }}`n- 安装包：$($installer.Name)`n- 字节数：$($installer.Length)`n- SHA-256：$((Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant())"
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value $summary -Encoding UTF8
+
+      - name: 验证 NSIS 安装与桌面启动
+        shell: pwsh
+        run: |
+          $bundleDirectory = Join-Path $PWD "apps/desktop/src-tauri/target/release/bundle/nsis"
+          $installer = @(Get-ChildItem -LiteralPath $bundleDirectory -File -Filter "*.exe") | Select-Object -First 1
+          if (-not $installer) { throw "未找到待验收的 NSIS 安装包" }
+          pnpm desktop:validate-windows-host --ExpectedVersion 0.1.6 --Installer $installer.FullName --EvidenceDirectory "$env:RUNNER_TEMP/desktop-host-validation"
+          $evidence = @(Get-ChildItem -LiteralPath "$env:RUNNER_TEMP/desktop-host-validation" -File -Filter "*.json") | Select-Object -First 1
+          if (-not $evidence) { throw "Windows 主机验收未输出证据文件" }
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "- 安装与启动验收：$($evidence.Name)" -Encoding UTF8
