@@ -1,6 +1,7 @@
 //! 本模块注册 DrawHime Desktop 本地核心、SQLite 和环境检测命令。
 
 mod captioner;
+mod ai_assist;
 mod auth;
 mod environment;
 mod generation;
@@ -20,8 +21,8 @@ mod website_media;
 mod website_model;
 mod software_update;
 
-use models::{DesktopBootstrapView, DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopEnvironmentReport, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopOfflineUpdateImportInput, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView, DesktopSettings, DesktopSoftwareUpdateView, DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetIdInput, DesktopTrainingDatasetView, DesktopTrainingImagesAddInput, DesktopTrainingJobCreateInput, DesktopTrainingJobView, DesktopWebsiteLoraView, DesktopWebsiteModelView, GalleryPublicationInput, GallerySyncItem};
-use std::path::PathBuf;
+use models::{DesktopAiAnalyzeInput, DesktopAiAnalyzeView, DesktopAiSettings, DesktopAiSettingsUpdate, DesktopBootstrapView, DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopEnvironmentReport, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopOfflineUpdateImportInput, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView, DesktopSettings, DesktopSoftwareUpdateView, DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetIdInput, DesktopTrainingDatasetView, DesktopTrainingImagesAddInput, DesktopTrainingJobCreateInput, DesktopTrainingJobView, DesktopWebsiteLoraView, DesktopWebsiteModelView, GalleryPublicationInput, GallerySyncItem};
+use std::{env, path::PathBuf};
 use storage::DesktopState;
 use tauri::{Manager, State};
 
@@ -71,6 +72,31 @@ fn desktop_save_settings(app: tauri::AppHandle, state: State<'_, DesktopState>, 
     Ok(settings)
 }
 
+/** 返回不含密钥正文的桌面 AI 辅助设置。 */
+#[tauri::command]
+fn desktop_load_ai_settings(state: State<'_, DesktopState>) -> Result<DesktopAiSettings, String> { state.load_ai_settings(ai_assist::api_key_configured()?) }
+
+/** 把非敏感设置写入 SQLite，把 API Key 写入 Windows Credential Manager。 */
+#[tauri::command]
+fn desktop_save_ai_settings(state: State<'_, DesktopState>, input: DesktopAiSettingsUpdate) -> Result<DesktopAiSettings, String> {
+    let (enabled, endpoint_type, base_url, model, configured) = ai_assist::prepare_settings(input)?;
+    state.save_ai_settings_metadata(enabled, &endpoint_type, &base_url, &model, configured)
+}
+
+/** 使用当前配置执行一次真实上游连通性测试。 */
+#[tauri::command]
+async fn desktop_test_ai_settings(state: State<'_, DesktopState>) -> Result<String, String> {
+    let settings = state.load_ai_settings(ai_assist::api_key_configured()?)?;
+    tauri::async_runtime::spawn_blocking(move || ai_assist::test_settings(&settings)).await.map_err(|error| format!("AI 测试任务异常：{error}"))?
+}
+
+/** 在后台线程中读取本机图片并执行 AI 打标或反推。 */
+#[tauri::command]
+async fn desktop_ai_analyze_image(state: State<'_, DesktopState>, input: DesktopAiAnalyzeInput) -> Result<DesktopAiAnalyzeView, String> {
+    let settings = state.load_ai_settings(ai_assist::api_key_configured()?)?;
+    tauri::async_runtime::spawn_blocking(move || ai_assist::analyze_image(&settings, input)).await.map_err(|error| format!("AI 图片分析任务异常：{error}"))?
+}
+
 #[tauri::command]
 fn desktop_enqueue_gallery_publication(state: State<'_, DesktopState>, input: GalleryPublicationInput) -> Result<GallerySyncItem, String> {
     state.enqueue_gallery_publication(input)
@@ -93,6 +119,12 @@ async fn desktop_download_resource(app: tauri::AppHandle, state: State<'_, Deskt
     let settings = state.load_settings()?;
     let app_data_dir = state.app_data_dir.clone();
     tauri::async_runtime::spawn_blocking(move || resource::download_resource(&settings, &app_data_dir, &resource_id, &app)).await.map_err(|error| format!("资源下载任务异常：{error}"))?
+}
+
+/** 暂停资源下载并保留已完成分片，用户再次下载时继续断点。 */
+#[tauri::command]
+fn desktop_pause_resource_download(resource_id: String) -> Result<(), String> {
+    resource::pause_download(&resource_id)
 }
 
 #[tauri::command]
@@ -342,22 +374,35 @@ fn inspect_and_store(state: &DesktopState, settings: &DesktopSettings) -> Result
     Ok(report)
 }
 
+/** 已安装程序以卸载器为边界识别用户选择的安装目录，开发构建继续使用系统应用数据目录。 */
+fn installed_data_root() -> Option<PathBuf> {
+    let executable = env::current_exe().ok()?;
+    let install_root = executable.parent()?;
+    install_root.join("uninstall.exe").is_file().then(|| install_root.join("data"))
+}
+
 /** 启动桌面窗口并在 setup 阶段建立真实本地数据库。 */
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            let app_data = app.path().app_data_dir().map_err(|error| format!("读取应用数据目录失败：{error}"))?;
-            let picture_dir = app.path().picture_dir().unwrap_or_else(|_| PathBuf::from(&app_data).join("pictures"));
-            let mut state = DesktopState::initialize(&app_data, &picture_dir)?;
+            let app_data = installed_data_root().map(Ok).unwrap_or_else(|| app.path().app_data_dir().map_err(|error| format!("读取应用数据目录失败：{error}")))?;
+            let mut state = DesktopState::initialize(&app_data)?;
             let settings = state.load_settings()?;
             app.asset_protocol_scope().allow_directory(&settings.output_root, true).map_err(|error| format!("授权作品预览目录失败：{error}"))?;
             state.start_scheduler(app.handle().clone())?;
             app.manage(state);
+            // WebView 必须手动指定绝对数据目录，否则 WebView2 会在 LocalAppData 生成第二份缓存。
+            let window_config = app.config().app.windows.first().ok_or_else(|| "缺少桌面窗口配置".to_string())?;
+            tauri::WebviewWindowBuilder::from_config(app.handle(), window_config)
+                .map_err(|error| format!("读取桌面窗口配置失败：{error}"))?
+                .data_directory(app_data.join("webview"))
+                .build()
+                .map_err(|error| format!("创建桌面窗口失败：{error}"))?;
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![desktop_account_status, desktop_start_authorization, desktop_poll_authorization, desktop_sign_out, desktop_bootstrap, desktop_inspect_environment, desktop_save_settings, desktop_enqueue_gallery_publication, desktop_list_gallery_sync_queue, desktop_load_resource_catalog, desktop_download_resource, desktop_install_resource, desktop_runtime_status, desktop_start_runtime, desktop_stop_runtime, desktop_self_test_runtime, desktop_import_local_model, desktop_list_local_models, desktop_import_local_lora, desktop_list_local_loras, desktop_load_website_models, desktop_load_website_loras, desktop_install_website_lora, desktop_software_update_status, desktop_download_software_update, desktop_import_offline_update, desktop_apply_software_update, desktop_rollback_software_update, desktop_create_training_dataset, desktop_list_training_datasets, desktop_add_training_images, desktop_update_training_caption, desktop_create_caption_job, desktop_list_caption_jobs, desktop_cancel_caption_job, desktop_confirm_training_dataset, desktop_create_training_job, desktop_list_training_jobs, desktop_cancel_training_job, desktop_create_local_job, desktop_list_local_jobs, desktop_cancel_local_job])
+        .invoke_handler(tauri::generate_handler![desktop_account_status, desktop_start_authorization, desktop_poll_authorization, desktop_sign_out, desktop_bootstrap, desktop_inspect_environment, desktop_save_settings, desktop_load_ai_settings, desktop_save_ai_settings, desktop_test_ai_settings, desktop_ai_analyze_image, desktop_enqueue_gallery_publication, desktop_list_gallery_sync_queue, desktop_load_resource_catalog, desktop_download_resource, desktop_pause_resource_download, desktop_install_resource, desktop_runtime_status, desktop_start_runtime, desktop_stop_runtime, desktop_self_test_runtime, desktop_import_local_model, desktop_list_local_models, desktop_import_local_lora, desktop_list_local_loras, desktop_load_website_models, desktop_load_website_loras, desktop_install_website_lora, desktop_software_update_status, desktop_download_software_update, desktop_import_offline_update, desktop_apply_software_update, desktop_rollback_software_update, desktop_create_training_dataset, desktop_list_training_datasets, desktop_add_training_images, desktop_update_training_caption, desktop_create_caption_job, desktop_list_caption_jobs, desktop_cancel_caption_job, desktop_confirm_training_dataset, desktop_create_training_job, desktop_list_training_jobs, desktop_cancel_training_job, desktop_create_local_job, desktop_list_local_jobs, desktop_cancel_local_job])
         .run(tauri::generate_context!())
         .expect("DrawHime Desktop 启动失败");
 }

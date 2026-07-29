@@ -48,13 +48,6 @@ node scripts/deploy-production.mjs --target web
 
 文档独立修改不重启运行服务；完成链接、Markdown、diff、提交和公开同步检查即可。训练 Runtime 变化使用 `node scripts/deploy-training-runtime.mjs --dry-run` 后再正式部署，不与平台部署命令混用。
 
-桌面底模下载 Runtime 独立部署，不重启 ComfyUI 或训练进程；脚本会校验全部白名单模型、限制来源 IP，并备份后更新平台私有连接地址：
-
-```powershell
-pnpm desktop:deploy-model-runtime -- --dry-run
-pnpm desktop:deploy-model-runtime
-```
-
 桌面应用更新先构建 NSIS，再使用私有签名目录准备并原子发布；`--dry-run` 只校验安装包、版本、契约、公钥和目标配置，不改本地清单或生产文件：
 
 ```powershell

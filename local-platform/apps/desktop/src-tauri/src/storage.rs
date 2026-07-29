@@ -2,7 +2,7 @@
 
 use crate::captioner::CaptionScheduler;
 use crate::gallery_sync::GallerySyncScheduler;
-use crate::models::{DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraView, DesktopLocalModelView, DesktopSettings, DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetView, DesktopTrainingJobCreateInput, DesktopTrainingJobView, GalleryPublicationInput, GallerySyncItem};
+use crate::models::{DesktopAiSettings, DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraView, DesktopLocalModelView, DesktopSettings, DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetView, DesktopTrainingJobCreateInput, DesktopTrainingJobView, GalleryPublicationInput, GallerySyncItem};
 use crate::runtime::RuntimeController;
 use crate::scheduler::LocalScheduler;
 use crate::trainer::TrainingScheduler;
@@ -27,12 +27,13 @@ pub struct DesktopState {
 
 impl DesktopState {
     /** 创建本地数据目录和数据库结构，任何失败都阻止桌面核心伪装为可用。 */
-    pub fn initialize(app_data_dir: &Path, picture_dir: &Path) -> Result<Self, String> {
+    pub fn initialize(app_data_dir: &Path) -> Result<Self, String> {
         fs::create_dir_all(app_data_dir).map_err(|error| format!("创建桌面数据目录失败：{error}"))?;
         let database_path = app_data_dir.join("desktop.sqlite3");
         let connection = Connection::open(&database_path).map_err(|error| format!("打开桌面数据库失败：{error}"))?;
         connection.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
-            CREATE TABLE IF NOT EXISTS desktop_settings (id INTEGER PRIMARY KEY CHECK(id=1), theme_mode TEXT NOT NULL DEFAULT 'system', dependency_source TEXT NOT NULL DEFAULT 'auto', default_privacy TEXT NOT NULL, model_root TEXT NOT NULL, output_root TEXT NOT NULL, runtime_root TEXT NOT NULL, upload_concurrency INTEGER NOT NULL, wifi_only INTEGER NOT NULL, bandwidth_limit_kib INTEGER, updated_at TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS desktop_settings (id INTEGER PRIMARY KEY CHECK(id=1), theme_mode TEXT NOT NULL DEFAULT 'system', dependency_source TEXT NOT NULL DEFAULT 'auto', default_privacy TEXT NOT NULL DEFAULT 'public', model_root TEXT NOT NULL, output_root TEXT NOT NULL, runtime_root TEXT NOT NULL, upload_concurrency INTEGER NOT NULL, wifi_only INTEGER NOT NULL, bandwidth_limit_kib INTEGER, updated_at TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS desktop_ai_settings (id INTEGER PRIMARY KEY CHECK(id=1), enabled INTEGER NOT NULL DEFAULT 0, endpoint_type TEXT NOT NULL DEFAULT 'openai_chat', base_url TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS environment_snapshots (id INTEGER PRIMARY KEY AUTOINCREMENT, report_json TEXT NOT NULL, checked_at TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS software_updates (version TEXT PRIMARY KEY, resource_id TEXT NOT NULL, file_name TEXT NOT NULL, sha256 TEXT NOT NULL, byte_size INTEGER NOT NULL, source TEXT NOT NULL, status TEXT NOT NULL, error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, applied_at TEXT);
             CREATE TABLE IF NOT EXISTS gallery_sync_queue (id TEXT PRIMARY KEY, local_task_id TEXT NOT NULL, artifact_path TEXT NOT NULL, artifact_sha256 TEXT NOT NULL, privacy TEXT NOT NULL, status TEXT NOT NULL, uploaded_bytes INTEGER NOT NULL DEFAULT 0, retry_count INTEGER NOT NULL DEFAULT 0, gallery_item_id TEXT, last_error TEXT, owner_issuer TEXT, owner_subject TEXT, server_upload_id TEXT, next_attempt_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(local_task_id, artifact_sha256));
@@ -81,9 +82,10 @@ impl DesktopState {
         connection.execute("UPDATE local_job_loras SET relative_path=COALESCE(NULLIF(relative_path,''),(SELECT relative_path FROM local_loras WHERE id=local_job_loras.lora_id)),byte_size=CASE WHEN byte_size=0 THEN COALESCE((SELECT byte_size FROM local_loras WHERE id=local_job_loras.lora_id),0) ELSE byte_size END,modified_ms=CASE WHEN modified_ms=0 THEN COALESCE((SELECT modified_ms FROM local_loras WHERE id=local_job_loras.lora_id),0) ELSE modified_ms END", []).map_err(|error| format!("补齐任务 LoRA 快照失败：{error}"))?;
         let model_root = app_data_dir.join("models");
         let runtime_root = app_data_dir.join("runtime");
-        let output_root = picture_dir.join("DrawHime");
+        let output_root = app_data_dir.join("outputs");
         for directory in [&model_root, &runtime_root, &output_root] { fs::create_dir_all(directory).map_err(|error| format!("创建本地目录失败：{error}"))?; }
-        connection.execute("INSERT OR IGNORE INTO desktop_settings (id, theme_mode, dependency_source, default_privacy, model_root, output_root, runtime_root, upload_concurrency, wifi_only, bandwidth_limit_kib, updated_at) VALUES (1, 'system', 'auto', 'private', ?1, ?2, ?3, 2, 0, NULL, ?4)", params![path_text(&model_root), path_text(&output_root), path_text(&runtime_root), Utc::now().to_rfc3339()]).map_err(|error| format!("写入默认设置失败：{error}"))?;
+        connection.execute("INSERT OR IGNORE INTO desktop_settings (id, theme_mode, dependency_source, default_privacy, model_root, output_root, runtime_root, upload_concurrency, wifi_only, bandwidth_limit_kib, updated_at) VALUES (1, 'system', 'auto', 'public', ?1, ?2, ?3, 2, 0, NULL, ?4)", params![path_text(&model_root), path_text(&output_root), path_text(&runtime_root), Utc::now().to_rfc3339()]).map_err(|error| format!("写入默认设置失败：{error}"))?;
+        connection.execute("INSERT OR IGNORE INTO desktop_ai_settings (id, enabled, endpoint_type, base_url, model, updated_at) VALUES (1, 0, 'openai_chat', '', '', ?1)", [Utc::now().to_rfc3339()]).map_err(|error| format!("写入默认 AI 设置失败：{error}"))?;
         Ok(Self { database: Mutex::new(connection), app_data_dir: app_data_dir.to_path_buf(), database_path, scheduler: None, caption_scheduler: None, training_scheduler: None, gallery_sync_scheduler: None, runtime: Arc::new(RuntimeController::initialize(app_data_dir)?), gpu_workload: GpuWorkloadCoordinator::new() })
     }
 
@@ -104,11 +106,15 @@ impl DesktopState {
     }
 
     /** 校验目录和上传策略后事务化更新设置。 */
-    pub fn save_settings(&self, settings: DesktopSettings) -> Result<DesktopSettings, String> {
+    pub fn save_settings(&self, mut settings: DesktopSettings) -> Result<DesktopSettings, String> {
         if !matches!(settings.theme_mode.as_str(), "system" | "dark" | "light") { return Err("主题模式不正确".into()); }
         if !matches!(settings.dependency_source.as_str(), "auto" | "official" | "mirror") { return Err("依赖来源不正确".into()); }
         if !matches!(settings.default_privacy.as_str(), "public" | "private") { return Err("默认图库权限不正确".into()); }
         if !(1..=4).contains(&settings.upload_concurrency) { return Err("上传并发数必须是 1–4".into()); }
+        // 存储目录固定跟随安装目录，前端传入的旧目录值不得把模型或作品重新写到其他磁盘位置。
+        settings.model_root = path_text(&self.app_data_dir.join("models"));
+        settings.output_root = path_text(&self.app_data_dir.join("outputs"));
+        settings.runtime_root = path_text(&self.app_data_dir.join("runtime"));
         for path in [&settings.model_root, &settings.output_root, &settings.runtime_root] {
             if path.trim().is_empty() { return Err("本地目录不能为空".into()); }
             fs::create_dir_all(path).map_err(|error| format!("目录不可写：{path}：{error}"))?;
@@ -120,6 +126,20 @@ impl DesktopState {
         database.execute("UPDATE desktop_settings SET theme_mode=?1, dependency_source=?2, default_privacy=?3, model_root=?4, output_root=?5, runtime_root=?6, upload_concurrency=?7, wifi_only=?8, bandwidth_limit_kib=?9, updated_at=?10 WHERE id=1", params![settings.theme_mode, settings.dependency_source, settings.default_privacy, settings.model_root, settings.output_root, settings.runtime_root, settings.upload_concurrency, settings.wifi_only, settings.bandwidth_limit_kib, Utc::now().to_rfc3339()]).map_err(|error| format!("保存桌面设置失败：{error}"))?;
         drop(database);
         self.load_settings()
+    }
+
+    /** 读取不含密钥正文的 AI 辅助设置，凭据状态由调用方从 Credential Manager 合并。 */
+    pub fn load_ai_settings(&self, api_key_configured: bool) -> Result<DesktopAiSettings, String> {
+        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        database.query_row("SELECT enabled, endpoint_type, base_url, model FROM desktop_ai_settings WHERE id=1", [], |row| Ok(DesktopAiSettings { enabled: row.get::<_, i64>(0)? != 0, endpoint_type: row.get(1)?, base_url: row.get(2)?, model: row.get(3)?, api_key_configured })).map_err(|error| format!("读取 AI 辅助设置失败：{error}"))
+    }
+
+    /** 持久化 AI 辅助非敏感配置，API Key 由独立凭据链路写入系统凭据库。 */
+    pub fn save_ai_settings_metadata(&self, enabled: bool, endpoint_type: &str, base_url: &str, model: &str, api_key_configured: bool) -> Result<DesktopAiSettings, String> {
+        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        database.execute("UPDATE desktop_ai_settings SET enabled=?1, endpoint_type=?2, base_url=?3, model=?4, updated_at=?5 WHERE id=1", params![i64::from(enabled), endpoint_type, base_url, model, Utc::now().to_rfc3339()]).map_err(|error| format!("保存 AI 辅助设置失败：{error}"))?;
+        drop(database);
+        self.load_ai_settings(api_key_configured)
     }
 
     /** 保存脱敏环境快照并只保留最近 20 次检查。 */
@@ -396,11 +416,11 @@ mod tests {
     #[test]
     fn settings_and_gallery_queue_are_persistent_and_idempotent() {
         let temporary = tempfile::tempdir().expect("创建临时目录");
-        let state = DesktopState::initialize(temporary.path(), temporary.path()).expect("初始化数据库");
+        let state = DesktopState::initialize(temporary.path()).expect("初始化数据库");
         let mut settings = state.load_settings().expect("读取设置");
         assert_eq!(settings.theme_mode, "system");
         assert_eq!(settings.dependency_source, "auto");
-        assert_eq!(settings.default_privacy, "private");
+        assert_eq!(settings.default_privacy, "public");
         settings.default_privacy = "public".into();
         assert_eq!(state.save_settings(settings).expect("保存设置").default_privacy, "public");
         let artifact = temporary.path().join("result.webp");
@@ -416,7 +436,7 @@ mod tests {
     #[test]
     fn restart_finishes_caption_job_with_pending_cancellation() {
         let temporary = tempfile::tempdir().expect("创建取消恢复临时目录");
-        let state = DesktopState::initialize(temporary.path(), temporary.path()).expect("初始化数据库");
+        let state = DesktopState::initialize(temporary.path()).expect("初始化数据库");
         let dataset_id = Uuid::new_v4().to_string();
         let asset_id = Uuid::new_v4().to_string();
         let job_id = Uuid::new_v4().to_string();
@@ -430,7 +450,7 @@ mod tests {
         }
         drop(state);
 
-        let restored = DesktopState::initialize(temporary.path(), temporary.path()).expect("重新初始化数据库");
+        let restored = DesktopState::initialize(temporary.path()).expect("重新初始化数据库");
         let database = restored.database.lock().expect("锁定恢复后的数据库");
         let job = crate::captioner::list_jobs(&database).expect("读取恢复后的任务").into_iter().find(|item| item.id == job_id).expect("找到恢复后的任务");
         assert_eq!(job.status, "cancelled");

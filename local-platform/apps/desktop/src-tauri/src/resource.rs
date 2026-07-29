@@ -20,7 +20,8 @@ const MANIFEST_PUBLIC_KEY: &str = "asfEBEwmIW6BPSgrLk9iNSgKqLprKisVFkq9QpJI8Pg="
 const MAX_MANIFEST_BYTES: u64 = 5 * 1024 * 1024;
 const DOWNLOAD_BUFFER_BYTES: usize = 256 * 1024;
 const DOWNLOAD_RANGE_BYTES: u64 = 8 * 1024 * 1024;
-const SOURCE_CIRCUIT_DURATION: Duration = Duration::from_secs(10 * 60);
+const SOURCE_CIRCUIT_DURATION: Duration = Duration::from_secs(2 * 60);
+const DOWNLOAD_PAUSED_ERROR: &str = "download_paused";
 
 #[derive(Clone, Copy)]
 struct DownloadPolicy {
@@ -29,11 +30,12 @@ struct DownloadPolicy {
 }
 
 const PRODUCTION_DOWNLOAD_POLICY: DownloadPolicy = DownloadPolicy {
-    low_speed_window: Duration::from_secs(20),
-    minimum_bytes_per_second: 1024 * 1024,
+    low_speed_window: Duration::from_secs(8),
+    minimum_bytes_per_second: 512 * 1024,
 };
 
 static SOURCE_FAILURES: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
+static PAUSED_DOWNLOADS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 
 #[derive(Deserialize)]
 struct ManifestApiResponse {
@@ -152,6 +154,7 @@ fn ensure_sufficient_space(available: u64, required: u64) -> Result<(), String> 
 
 /** 下载单个资源并保存断点；只有整体哈希匹配后才写入已验证标记。 */
 pub fn download_resource(settings: &DesktopSettings, app_data_dir: &Path, resource_id: &str, app: &tauri::AppHandle) -> Result<DesktopResourceDownloadView, String> {
+    clear_download_pause(resource_id);
     let Some((manifest_url, key_id, public_key)) = manifest_configuration() else { return Err("当前安装包尚未配置经过签名的资源发布通道".into()); };
     let payload = fetch_verified_manifest(manifest_url, key_id, public_key)?;
     let item = payload.resources.into_iter().find(|candidate| candidate.id == resource_id && resource_matches_current_platform(candidate)).ok_or_else(|| "资源不存在或不适用于当前系统".to_string())?;
@@ -168,7 +171,7 @@ pub fn download_resource(settings: &DesktopSettings, app_data_dir: &Path, resour
     let partial = partial_path(&target);
     if partial.metadata().map(|metadata| metadata.len() > item.byte_size).unwrap_or(false) { fs::remove_file(&partial).map_err(|error| format!("清理超长下载断点失败：{error}"))?; }
     emit_progress(app, progress_view(&item, "queued", None, partial.metadata().map(|metadata| metadata.len()).unwrap_or(0), 0, None, None, None));
-    let client = Client::builder().connect_timeout(Duration::from_secs(6)).timeout(Duration::from_secs(30)).user_agent("DrawHime-Desktop/0.1").build().map_err(|error| format!("创建资源下载客户端失败：{error}"))?;
+    let client = Client::builder().connect_timeout(Duration::from_secs(4)).timeout(Duration::from_secs(20)).user_agent("DrawHime-Desktop/0.1").build().map_err(|error| format!("创建资源下载客户端失败：{error}"))?;
     let started_at = Instant::now();
     let mut errors = Vec::new();
     let mut switch_reason = None;
@@ -180,6 +183,12 @@ pub fn download_resource(settings: &DesktopSettings, app_data_dir: &Path, resour
         match download_from_source(&client, &item, source, &partial, started_at, &notify) {
             Ok(()) => record_source_success(source),
             Err(error) => {
+                if error == DOWNLOAD_PAUSED_ERROR {
+                    let downloaded = partial.metadata().map(|metadata| metadata.len()).unwrap_or(0);
+                    let view = progress_view(&item, "paused", active_source_kind, downloaded, 0, None, Some(&partial), None);
+                    emit_progress(app, view.clone());
+                    return Ok(view);
+                }
                 record_source_failure(source);
                 let reason = format!("{}来源{}，已保留断点", source_kind_name(&source.kind), error);
                 errors.push(reason.clone());
@@ -212,6 +221,13 @@ pub fn download_resource(settings: &DesktopSettings, app_data_dir: &Path, resour
     let view = progress_view(&item, "downloaded", active_source_kind, item.byte_size, average_speed(item.byte_size, started_at), switch_reason, Some(&target), None);
     emit_progress(app, view.clone());
     Ok(view)
+}
+
+/** 标记指定资源暂停；已写入的分片继续保留，下一次下载从原偏移恢复。 */
+pub fn pause_download(resource_id: &str) -> Result<(), String> {
+    if resource_id.trim().is_empty() || resource_id.len() > 128 { return Err("资源 ID 不正确".into()); }
+    paused_downloads().lock().unwrap_or_else(|poisoned| poisoned.into_inner()).insert(resource_id.to_string());
+    Ok(())
 }
 
 fn manifest_configuration() -> Option<(&'static str, &'static str, &'static str)> {
@@ -437,6 +453,10 @@ fn stream_response<F: Fn(DesktopResourceDownloadView)>(mut response: Response, f
     let mut buffer = vec![0_u8; DOWNLOAD_BUFFER_BYTES];
     let mut last_emit = Instant::now();
     loop {
+        if download_paused(&item.id) {
+            file.flush().map_err(|error| format!("保存暂停断点失败：{error}"))?;
+            return Err(DOWNLOAD_PAUSED_ERROR.into());
+        }
         let read = response.read(&mut buffer).map_err(|error| format!("读取中断：{error}"))?;
         if read == 0 { break; }
         let next = downloaded.saturating_add(read as u64);
@@ -463,6 +483,9 @@ fn stream_response<F: Fn(DesktopResourceDownloadView)>(mut response: Response, f
 }
 
 fn source_failures() -> &'static Mutex<HashMap<String, Instant>> { SOURCE_FAILURES.get_or_init(|| Mutex::new(HashMap::new())) }
+fn paused_downloads() -> &'static Mutex<HashSet<String>> { PAUSED_DOWNLOADS.get_or_init(|| Mutex::new(HashSet::new())) }
+fn download_paused(resource_id: &str) -> bool { paused_downloads().lock().unwrap_or_else(|poisoned| poisoned.into_inner()).contains(resource_id) }
+fn clear_download_pause(resource_id: &str) { paused_downloads().lock().unwrap_or_else(|poisoned| poisoned.into_inner()).remove(resource_id); }
 
 fn source_circuit_open(source: &DesktopResourceSource) -> bool {
     let mut failures = source_failures().lock().unwrap_or_else(|poisoned| poisoned.into_inner());

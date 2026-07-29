@@ -240,6 +240,50 @@
   transform: scale(1.08);
 }
 
+.repository-cover-slides {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+}
+
+.repository-cover-slides > img {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity .35s ease;
+}
+
+.repository-cover-slides > img:first-child {
+  opacity: 1;
+}
+
+.repository-cover.has-examples:hover .repository-cover-slides > img {
+  animation-name: repository-example-cycle;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+
+.repository-example-count {
+  position: absolute;
+  z-index: 4;
+  right: 7px;
+  bottom: 7px;
+  padding: 4px 6px;
+  border: 1px solid rgba(255, 255, 255, .16);
+  border-radius: 3px;
+  background: rgba(9, 13, 18, .72);
+  color: #fff;
+  font-size: 7px;
+  font-weight: 800;
+  backdrop-filter: blur(8px);
+}
+
+@keyframes repository-example-cycle {
+  0%, 22% { opacity: 1; }
+  27%, 100% { opacity: 0; }
+}
+
 .repository-cover-fallback {
   position: absolute;
   inset: 0;

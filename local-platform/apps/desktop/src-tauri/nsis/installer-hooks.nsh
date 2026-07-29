@@ -31,6 +31,7 @@ Var DrawHimePreserveData
   ${If} $UpdateMode <> 1
   ${AndIf} $R7 = 0
     SetShellVarContext current
+    !insertmacro DrawHimeQueueDataDirectoryForDeletion "$INSTDIR\data"
     !insertmacro DrawHimeQueueDataDirectoryForDeletion "$APPDATA\${BUNDLEID}"
     !insertmacro DrawHimeQueueDataDirectoryForDeletion "$LOCALAPPDATA\${BUNDLEID}"
   ${EndIf}

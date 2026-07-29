@@ -12,10 +12,17 @@ const MAXIMUM_COVER_BYTES: u64 = 12 * 1024 * 1024;
 #[serde(rename_all = "camelCase")]
 pub struct WebsiteImageRef { pub id: String, pub content_url: String }
 
-/** 下载第一张示例图作为封面；单张失败只回退默认封面，不阻断整个仓库。 */
-pub fn cache_cover(client: &Client, token: &str, app_data_dir: &Path, namespace: &str, images: &[WebsiteImageRef]) -> Option<String> {
-    let image = images.first()?;
-    cache_cover_inner(client, token, app_data_dir, namespace, image).ok().map(|path| path.to_string_lossy().into_owned())
+/** 按服务端顺序缓存全部示例图片；任意单张失败只跳过该图，不阻断仓库加载。 */
+pub fn cache_images(client: &Client, token: &str, app_data_dir: &Path, namespace: &str, images: &[WebsiteImageRef]) -> Vec<String> {
+    let mut paths = Vec::new();
+    // 每批最多四张并发，兼顾仓库首屏速度与主站媒体端点压力；批次和句柄顺序保持服务端图片顺序。
+    for batch in images.chunks(4) {
+        let resolved = std::thread::scope(|scope| {
+            batch.iter().map(|image| scope.spawn(move || cache_cover_inner(client, token, app_data_dir, namespace, image))).collect::<Vec<_>>().into_iter().map(|handle| handle.join().ok().and_then(Result::ok)).collect::<Vec<_>>()
+        });
+        paths.extend(resolved.into_iter().flatten().map(|path| path.to_string_lossy().into_owned()));
+    }
+    paths
 }
 
 fn cache_cover_inner(client: &Client, token: &str, app_data_dir: &Path, namespace: &str, image: &WebsiteImageRef) -> Result<PathBuf, String> {

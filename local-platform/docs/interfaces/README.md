@@ -40,6 +40,7 @@
 | `GET /v1/models/:fileName` | api | desktop model runtime | 使用 `x-desktop-model-token` 读取 GPU 主机白名单中的已校验底模、文本编码器或 VAE；只支持固定文件名和单段 Range，API 逐段核对签名清单大小与 `Content-Range` 后再转发给桌面端 |
 | `desktop_load_resource_catalog` | desktop webview | desktop core | 拉取并验签资源清单，校验过期时间、Windows/架构、文件名、大小、SHA-256 与 HTTPS 来源后返回可展示目录；未配置真实清单和公钥时明确返回未配置状态 |
 | `desktop_download_resource` | desktop webview | desktop core | 按资源 ID 执行断点下载；`auto` 优先官方，连接失败或持续低速后从相同哈希的主站镜像续传，完成整体 SHA-256 后原子写入本机下载缓存 |
+| `desktop_pause_resource_download` | desktop webview | desktop core | 将指定活动下载标记为暂停，后台流在下一个分片边界停止并保留 `.part`；再次下载同一资源从真实偏移继续 |
 | `desktop-resource-progress` | desktop core | desktop webview | 资源下载进度事件；对应 `DesktopResourceDownloadView`，包含当前来源、已下载字节、总字节、速度、剩余秒数、最近切源原因、状态与脱敏错误；切源后沿用同一已校验偏移 |
 | `desktop_install_resource` | desktop webview | desktop core | 再次校验缓存 SHA-256 与磁盘空间后安装资源；ZIP 拒绝路径穿越、链接和 Windows 保留名，在临时目录完成后原子切换，旧版本保留为可回滚目录 |
 | `desktop-resource-install-progress` | desktop core | desktop webview | 资源校验、解压、切换和回滚事件；对应 `DesktopResourceInstallView` |
@@ -70,7 +71,10 @@
 | `desktop-local-job-updated` | desktop core/local scheduler | desktop webview | 本地任务状态、进度或产物变化事件；载荷为 `DesktopLocalJobView`，刷新页面后仍以 SQLite 为准 |
 | `desktop_enqueue_gallery_publication` | desktop runtime/UI | desktop core | 校验本地结果文件、计算 SHA-256，并以本地任务和文件哈希幂等写入图库同步队列 |
 | `desktop_list_gallery_sync_queue` | desktop webview | desktop core | 读取当前设备本地图库同步队列；对应 `DesktopGallerySyncItem[]` |
-| `desktop_load_website_models` | desktop webview | desktop core/api | 使用 Credential Manager 设备会话读取主站底模仓库，并把首张受保护示例图缓存到应用数据目录作为封面；页面只得到本机路径和公开元数据 |
+| `desktop_load_website_models` | desktop webview | desktop core/api | 使用 Credential Manager 设备会话读取主站底模仓库，逐张容错缓存最多 8 张受保护示例图并以首张作为封面；页面只得到本机路径和公开元数据 |
+| `desktop_load_ai_settings` / `desktop_save_ai_settings` | desktop webview | desktop core | AI 端点类型、基础地址、模型和开关保存到 SQLite；API Key 只写 Windows Credential Manager，WebView 仅得到 `apiKeyConfigured` |
+| `desktop_test_ai_settings` | desktop webview | desktop core/OpenAI-compatible API | 使用已保存凭据向真实 Chat Completions 或 Responses 端点发送轻量文本请求，验证连接、鉴权和模型响应 |
+| `desktop_ai_analyze_image` | desktop webview | desktop core/OpenAI-compatible API | 读取 20 MiB 内 PNG/JPEG/WebP 并转 data URL，按固定 `caption` 或 `reverse` 用途调用真实多模态端点，返回可编辑文本 |
 | `desktop_load_website_loras` | desktop webview | desktop core/api | 使用 Credential Manager 设备会话读取当前账号可访问的公开 LoRA 与本人私有 LoRA；返回封面本机路径、SHA-256、大小、触发词和本机安装状态，不向 WebView 暴露会话密钥 |
 | `desktop_install_website_lora` | desktop webview | desktop core/api | 按 LoRA 条目 ID 重新鉴权，使用 HTTP Range 断点下载最新有效 safetensors，完成整体 SHA-256 后原子导入本机仓库 |
 | `desktop-website-lora-progress` | desktop core | desktop webview | 网站 LoRA 下载与校验进度事件；对应 `DesktopWebsiteLoraInstallProgress` |

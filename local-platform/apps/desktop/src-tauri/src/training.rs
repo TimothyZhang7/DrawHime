@@ -367,7 +367,7 @@ mod tests {
     #[test]
     fn confirmed_dataset_and_anima_snapshot_create_persistent_training_job() {
         let temporary = tempfile::tempdir().expect("创建训练任务临时目录");
-        let state = DesktopState::initialize(temporary.path(), temporary.path()).expect("初始化桌面状态");
+        let state = DesktopState::initialize(temporary.path()).expect("初始化桌面状态");
         let dataset = state.create_training_dataset(DesktopTrainingDatasetCreateInput { title: "训练快照".into(), r#type: "character".into(), trigger_words: vec!["dh_token".into()] }).expect("创建训练集");
         let source_paths = (0..5).map(|index| { let path = temporary.path().join(format!("training-{index}.png")); RgbImage::from_pixel(32, 32, Rgb([index, 40, 80])).save(&path).expect("写入训练图片"); path.to_string_lossy().into_owned() }).collect::<Vec<_>>();
         let imported = { let mut database = state.database.lock().expect("锁定导入数据库"); training_dataset::add_images(&mut database, &state.app_data_dir, DesktopTrainingImagesAddInput { dataset_id: dataset.id.clone(), source_paths }).expect("导入训练图片") };

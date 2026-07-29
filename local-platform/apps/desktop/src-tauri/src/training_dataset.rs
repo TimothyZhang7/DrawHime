@@ -220,7 +220,7 @@ mod tests {
     #[test]
     fn dataset_images_and_captions_persist_through_confirmation_gate() {
         let temporary = tempfile::tempdir().expect("创建训练集测试目录");
-        let state = DesktopState::initialize(temporary.path(), temporary.path()).expect("初始化桌面状态");
+        let state = DesktopState::initialize(temporary.path()).expect("初始化桌面状态");
         let dataset = state.create_training_dataset(DesktopTrainingDatasetCreateInput { title: "测试角色".into(), r#type: "character".into(), trigger_words: vec!["dh_test".into()] }).expect("创建训练集");
         let mut source_paths = Vec::new();
         for (index, extension) in ["png", "jpg", "webp", "png", "jpg"].iter().enumerate() {

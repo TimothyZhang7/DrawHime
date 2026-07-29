@@ -6,7 +6,7 @@
 web/admin -> api -> 独立数据库 / Redis / 对象存储
 api -> 主站 SSO、钱包 Integration API、图库发布 Integration API
 scheduler -> inference-worker / training-worker -> gpu-agent -> 私有 Runtime
-desktop -> api -> desktop-model-runtime -> GPU 模型目录
+desktop -> api -> 主站资源存储或签名官方来源
 artifact-service -> 独立对象存储
 ```
 
@@ -33,7 +33,7 @@ artifact-service -> 独立对象存储
 
 `apps/desktop` 是独立离线客户端。桌面核心通过 Tauri 命令连接 WebView，使用本机 SQLite、文件目录和用户自己的 GPU，不连接独立平台数据库、Redis 或对象存储。本地计算不进入主站钱包计费；联网身份使用浏览器设备码确认，随机会话只写 Windows Credential Manager。模型下载使用签名资源接口，私有 LoRA 下载和图库上传继续按版本化用户接口接入。生成结果必须先在本地完成格式与 SHA-256 校验，再进入独立的网页图库同步队列，任务成功状态不依赖网络上传结果。
 
-扩展底模保留在 GPU 数据盘，`desktop-model-runtime` 只对白名单文件和平台来源 IP 开放受服务令牌保护的单段 Range。公网 API 根据离线签名清单核对文件名、总大小、分片范围与最终 SHA-256，并流式转发，不把大模型复制到平台系统盘，也不让桌面客户端接触内部地址或服务令牌。
+底模资源由桌面端直接访问签名清单登记的官方 HTTPS 来源，或访问主站已经校验的 Range 镜像。主站缺少镜像文件时只代理同一签名官方对象，不访问共享 GPU Runtime；桌面客户端始终复核总大小和完整 SHA-256。
 
 ## 公网路径边界
 

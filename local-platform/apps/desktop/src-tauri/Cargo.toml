@@ -1,6 +1,6 @@
 [package]
 name = "drawhime-desktop"
-version = "0.1.8"
+version = "0.1.9"
 description = "DrawHime 本地模型桌面客户端"
 authors = ["DrawHime"]
 edition = "2021"

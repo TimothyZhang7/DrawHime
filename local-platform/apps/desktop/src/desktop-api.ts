@@ -1,5 +1,6 @@
 /** 本文件封装 WebView 到 Tauri 本地核心的受类型约束命令。 */
 import type { DesktopAccountView, DesktopAuthorizationRequestView, DesktopAuthorizationStartRequest, DesktopBootstrapView, DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopEnvironmentReport, DesktopGalleryPrivacy, DesktopGallerySyncItem, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopOfflineUpdateImportInput, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView, DesktopSettings, DesktopSettingsUpdate, DesktopSoftwareUpdateView, DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetIdInput, DesktopTrainingDatasetView, DesktopTrainingImagesAddInput, DesktopTrainingJobCreateInput, DesktopTrainingJobView, DesktopWebsiteLoraInstallProgress, DesktopWebsiteLoraView, DesktopWebsiteModelView } from "@drawhime/contracts";
+import type { DesktopAiAnalyzeInput, DesktopAiAnalyzeView, DesktopAiSettings, DesktopAiSettingsUpdate } from "@drawhime/contracts";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
@@ -21,6 +22,14 @@ export function loadDesktopBootstrap(): Promise<DesktopBootstrapView> { return i
 export function inspectDesktopEnvironment(): Promise<DesktopEnvironmentReport> { return invoke("desktop_inspect_environment"); }
 /** 校验并保存桌面端设置。 */
 export function saveDesktopSettings(settings: DesktopSettingsUpdate): Promise<DesktopSettings> { return invoke("desktop_save_settings", { settings }); }
+/** 读取不含密钥正文的 AI 辅助设置。 */
+export function loadDesktopAiSettings(): Promise<DesktopAiSettings> { return invoke("desktop_load_ai_settings"); }
+/** 保存 AI 端点元数据并通过 Rust 核心安全处理 API Key。 */
+export function saveDesktopAiSettings(input: DesktopAiSettingsUpdate): Promise<DesktopAiSettings> { return invoke("desktop_save_ai_settings", { input }); }
+/** 使用已保存配置执行真实连通性测试。 */
+export function testDesktopAiSettings(): Promise<string> { return invoke("desktop_test_ai_settings"); }
+/** 使用固定用途对本机图片执行真实 AI 打标或反推。 */
+export function analyzeDesktopImage(input: DesktopAiAnalyzeInput): Promise<DesktopAiAnalyzeView> { return invoke("desktop_ai_analyze_image", { input }); }
 /** 读取本机持久化图库同步队列。 */
 export function listDesktopGallerySyncQueue(): Promise<DesktopGallerySyncItem[]> { return invoke("desktop_list_gallery_sync_queue"); }
 /** 监听图库 Worker 已持久化的断点与终态变化。 */
@@ -31,6 +40,8 @@ export function enqueueDesktopGalleryPublication(input: { localTaskId: string; a
 export function loadDesktopResourceCatalog(): Promise<DesktopResourceCatalogView> { return invoke("desktop_load_resource_catalog"); }
 /** 执行真实的断点下载、切源和整体哈希校验。 */
 export function downloadDesktopResource(resourceId: string): Promise<DesktopResourceDownloadView> { return invoke("desktop_download_resource", { resourceId }); }
+/** 暂停当前资源并保留断点。 */
+export function pauseDesktopResourceDownload(resourceId: string): Promise<void> { return invoke("desktop_pause_resource_download", { resourceId }); }
 /** 监听 Rust 下载线程发出的资源进度。 */
 export function listenDesktopResourceProgress(handler: (progress: DesktopResourceDownloadView) => void): Promise<UnlistenFn> { return listen<DesktopResourceDownloadView>("desktop-resource-progress", (event) => handler(event.payload)); }
 /** 把已验证资源安全安装到受控目录并保留旧版本回滚副本。 */

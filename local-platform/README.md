@@ -23,7 +23,6 @@ DrawHime 是面向本地生成模型的独立推理、LoRA 管理与训练平台
 | `inference-worker` | 7111 | 提示增强、推理、计费和图库发布 |
 | `training-worker` | 7112 | 打标、训练、退款和可用 LoRA 产物闭环 |
 | `artifact-service` | 7113 | 产物控制面 |
-| `desktop-model-runtime` | 7121 | GPU 主机上的桌面签名模型白名单与 Range 流式下载 |
 | `desktop` | 本机进程 | Tauri 离线客户端、本机环境检测、SQLite 设置与图库同步队列 |
 
 更完整的职责边界见 [`docs/architecture.md`](docs/architecture.md)，桌面端长期设计见 [`docs/desktop-design.md`](docs/desktop-design.md)，跨程序契约见 [`docs/interfaces/README.md`](docs/interfaces/README.md)，生产执行顺序与命令约束见 [`docs/operations.md`](docs/operations.md)。

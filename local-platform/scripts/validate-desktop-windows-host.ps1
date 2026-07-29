@@ -81,12 +81,14 @@ $os = Get-CimInstance Win32_OperatingSystem
 $build = [int64]$os.BuildNumber
 if (-not $os.Version.StartsWith("10.") -or $build -lt 17763) { throw "当前 Windows 构建不在支持范围：$($os.Version) ($build)" }
 
-$businessRoot = Join-Path $env:APPDATA "ink.xanime.drawhime.desktop"
-$businessFilesBefore = if (Test-Path -LiteralPath $businessRoot) { @(Get-ChildItem -LiteralPath $businessRoot -Recurse -Force -File).Count } else { 0 }
+$legacyBusinessRoot = Join-Path $env:APPDATA "ink.xanime.drawhime.desktop"
+$installationBefore = Get-DrawHimeInstallation
+$businessRootBefore = if ($installationBefore) { Join-Path (([string]$installationBefore.InstallLocation).Trim('"')) "data" } else { $legacyBusinessRoot }
+$businessFilesBefore = if (Test-Path -LiteralPath $businessRootBefore) { @(Get-ChildItem -LiteralPath $businessRootBefore -Recurse -Force -File).Count } else { 0 }
 $existingProcesses = @(Get-Process -Name "drawhime-desktop" -ErrorAction SilentlyContinue)
 $existingProcesses | Stop-Process -Force
 $existingProcesses | Wait-Process -Timeout 10 -ErrorAction SilentlyContinue
-$databaseBefore = Get-DrawHimeDatabaseSnapshot $businessRoot
+$databaseBefore = Get-DrawHimeDatabaseSnapshot $businessRootBefore
 
 $installerEvidence = $null
 if ($resolvedInstaller) {
@@ -99,10 +101,13 @@ $installation = Get-DrawHimeInstallation
 if (-not $installation) { throw "未找到 DrawHime Desktop 当前用户安装登记" }
 if ([string]$installation.DisplayVersion -ne $ExpectedVersion) { throw "安装版本不一致：$($installation.DisplayVersion) != $ExpectedVersion" }
 $installRoot = ([string]$installation.InstallLocation).Trim('"')
+$businessRoot = Join-Path $installRoot "data"
 $executable = Join-Path $installRoot "drawhime-desktop.exe"
 if (-not (Test-Path -LiteralPath $executable)) { throw "安装目录缺少桌面主程序" }
 $installedFiles = @(Get-ChildItem -LiteralPath $installRoot -File -Recurse)
-$forbidden = @($installedFiles | Where-Object { $_.Extension -match "^\.(safetensors|ckpt|pt|pth|onnx)$" -or $_.Name -match "(?i)(trainer|tagger|checkpoint|lora)" })
+$dataPrefix = [System.IO.Path]::GetFullPath($businessRoot).TrimEnd('\') + '\'
+$programFiles = @($installedFiles | Where-Object { -not $_.FullName.StartsWith($dataPrefix, [System.StringComparison]::OrdinalIgnoreCase) })
+$forbidden = @($programFiles | Where-Object { $_.Extension -match "^\.(safetensors|ckpt|pt|pth|onnx)$" -or $_.Name -match "(?i)(trainer|tagger|checkpoint|lora)" })
 if ($forbidden.Count -gt 0) { throw "安装目录包含模型或训练依赖" }
 
 $databaseAfterInstall = Get-DrawHimeDatabaseSnapshot $businessRoot
@@ -183,7 +188,7 @@ $result = [ordered]@{
   gpus = $gpuSummary
   gpuGate = [ordered]@{ expectedNoNvidiaGpu = [bool]$ExpectNoGpu.IsPresent; detectedCount = $gpuSummary.Count; passed = (-not $ExpectNoGpu.IsPresent) -or $gpuSummary.Count -eq 0 }
   installer = $installerEvidence
-  installation = [ordered]@{ version = [string]$installation.DisplayVersion; fileCount = $installedFiles.Count; totalBytes = ($installedFiles | Measure-Object Length -Sum).Sum; containsModelOrTrainer = $false }
+  installation = [ordered]@{ version = [string]$installation.DisplayVersion; fileCount = $programFiles.Count; totalBytes = ($programFiles | Measure-Object Length -Sum).Sum; containsModelOrTrainer = $false; dataRoot = "data" }
   uninstall = $uninstallValidation
   gates = [ordered]@{ supportedWindows = $true; databasePreservedByInstaller = $true; launchAliveTenSeconds = $true; perMonitorV2 = $true; webView2Present = $true; uninstallChoice = (-not $ValidateUninstall.IsPresent) -or $null -ne $uninstallValidation }
 }

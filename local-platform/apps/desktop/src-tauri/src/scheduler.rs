@@ -712,7 +712,7 @@ mod tests {
     fn queued_job_is_persistent_and_cancellable() {
         let temporary = tempfile::tempdir().expect("创建本地任务临时目录");
         let state =
-            DesktopState::initialize(temporary.path(), temporary.path()).expect("初始化桌面数据库");
+            DesktopState::initialize(temporary.path()).expect("初始化桌面数据库");
         let settings = state.load_settings().expect("读取设置");
         let model_path = Path::new(&settings.model_root)
             .join("checkpoints")

@@ -47,7 +47,7 @@ export function registerDesktopResourceRoutes(router: ServiceRouter): void {
     }
     try { metadata = await stat(filePath); }
     catch {
-      if (await proxyGpuModelResource(response, resource, range)) return;
+      // 主站镜像缺失时直接访问签名清单中的官方来源，桌面底模不再绕经共享 GPU Runtime。
       await proxyOfficialResource(response, resource, range);
       return;
     }
@@ -66,40 +66,6 @@ export function registerDesktopResourceRoutes(router: ServiceRouter): void {
     stream.on("error", () => response.destroy());
     stream.pipe(response);
   });
-}
-
-/** 本地镜像缺失时优先从受训练令牌保护的 GPU Runtime 流式读取已签名模型，不复制模型到系统盘。 */
-async function proxyGpuModelResource(response: ServerResponse, resource: DesktopResourceManifestPayload["resources"][number], range: { start: number; end: number } | null): Promise<boolean> {
-  if (resource.kind !== "model") return false;
-  const baseUrl = process.env.DESKTOP_MODEL_RUNTIME_BASE_URL?.trim();
-  const token = process.env.TRAINING_RUNTIME_TOKEN?.trim();
-  if (!baseUrl || !token) return false;
-  const controller = new AbortController();
-  const deadline = setTimeout(() => controller.abort(), 20_000);
-  try {
-    const headers = new Headers({ "accept-encoding": "identity", "x-desktop-model-token": token });
-    if (range) headers.set("range", `bytes=${range.start}-${range.end}`);
-    const upstream = await fetch(`${baseUrl.replace(/\/$/, "")}/v1/models/${encodeURIComponent(resource.fileName)}`, { headers, signal: controller.signal });
-    clearTimeout(deadline);
-    const contentLength = Number(upstream.headers.get("content-length") || 0);
-    const contentRange = upstream.headers.get("content-range");
-    if (!validateDesktopResourceProxyResponse(upstream.status, contentLength, contentRange, resource.byteSize, range) || !upstream.body) {
-      controller.abort();
-      return false;
-    }
-    const start = range?.start ?? 0;
-    const end = range?.end ?? resource.byteSize - 1;
-    response.writeHead(range ? 206 : 200, {
-      "content-type": "application/octet-stream", "content-length": String(end - start + 1), "accept-ranges": "bytes",
-      "etag": `"${resource.sha256}"`, "cache-control": "public, max-age=31536000, immutable",
-      ...(range ? { "content-range": contentRange! } : {}),
-    });
-    Readable.fromWeb(upstream.body as import("node:stream/web").ReadableStream<Uint8Array>).on("error", () => response.destroy()).pipe(response);
-    return true;
-  } catch {
-    clearTimeout(deadline);
-    return false;
-  }
 }
 
 /** 本地镜像缺失时只代理签名清单登记的官方 HTTPS 来源，并在发头前核对完整 Range 语义。 */

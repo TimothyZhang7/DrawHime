@@ -447,6 +447,26 @@ pub struct DesktopSettings {
     pub bandwidth_limit_kib: Option<u64>,
 }
 
+/** 桌面 AI 辅助设置视图不包含 Windows Credential Manager 中的密钥正文。 */
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopAiSettings { pub enabled: bool, pub endpoint_type: String, pub base_url: String, pub model: String, pub api_key_configured: bool }
+
+/** 桌面 AI 辅助设置更新请求使用显式清除字段，避免空输入覆盖既有密钥。 */
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopAiSettingsUpdate { pub enabled: bool, pub endpoint_type: String, pub base_url: String, pub model: String, pub api_key: Option<String>, pub clear_api_key: bool }
+
+/** 桌面 AI 图片分析请求只允许固定的打标和反推用途。 */
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopAiAnalyzeInput { pub image_path: String, pub purpose: String, pub user_instruction: Option<String> }
+
+/** 桌面 AI 图片分析结果可直接写入 Caption 或生成提示词。 */
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopAiAnalyzeView { pub purpose: String, pub text: String }
+
 /** 服务端签名前的资源清单载荷。 */
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -597,12 +617,12 @@ pub struct GallerySyncItem {
 /** 当前账号可访问的网站 LoRA 目录项。 */
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DesktopWebsiteLoraView { pub id: String, pub title: String, pub description: String, pub r#type: String, pub model_family: String, pub model_family_name: String, pub trigger_words: Vec<String>, pub owner_display_name: String, pub privacy: String, pub is_owner: bool, pub version_id: String, pub file_name: String, pub sha256: String, pub byte_size: u64, pub installed: bool, pub cover_path: Option<String> }
+pub struct DesktopWebsiteLoraView { pub id: String, pub title: String, pub description: String, pub r#type: String, pub model_family: String, pub model_family_name: String, pub trigger_words: Vec<String>, pub owner_display_name: String, pub privacy: String, pub is_owner: bool, pub version_id: String, pub file_name: String, pub sha256: String, pub byte_size: u64, pub installed: bool, pub cover_path: Option<String>, pub example_paths: Vec<String> }
 
 /** 桌面端网站底模仓库视图；远端封面已转换为受控本机缓存路径。 */
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DesktopWebsiteModelView { pub id: String, pub display_name: String, pub description: String, pub family: String, pub family_name: String, pub model_file_name: String, pub runtime_format: String, pub usage_guide: String, pub source_links: Vec<DesktopWebsiteSourceLink>, pub parameters: DesktopWebsiteModelParameters, pub cover_path: Option<String> }
+pub struct DesktopWebsiteModelView { pub id: String, pub display_name: String, pub description: String, pub family: String, pub family_name: String, pub model_file_name: String, pub runtime_format: String, pub usage_guide: String, pub source_links: Vec<DesktopWebsiteSourceLink>, pub parameters: DesktopWebsiteModelParameters, pub cover_path: Option<String>, pub example_paths: Vec<String> }
 
 /** 网站底模来源链接只包含可公开展示的站点名称和 HTTPS 地址。 */
 #[derive(Debug, Clone, Serialize, Deserialize)]

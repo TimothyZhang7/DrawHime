@@ -46,8 +46,8 @@ pub fn load_catalog(app_data_dir: &Path, installed_hashes: &HashSet<String>) -> 
     let client = network_client()?;
     let payload: WebsiteLoraList = parse_json(client.get(auth::api_url("/v1/lora-library")).bearer_auth(&session.token).send())?;
     Ok(payload.entries.into_iter().filter_map(|entry| {
-        let cover_path = website_media::cache_cover(&client, &session.token, app_data_dir, "loras", &entry.examples);
-        to_view(entry, installed_hashes, cover_path)
+        let example_paths = website_media::cache_images(&client, &session.token, app_data_dir, "loras", &entry.examples);
+        to_view(entry, installed_hashes, example_paths)
     }).collect())
 }
 
@@ -57,8 +57,8 @@ pub fn download_and_verify(app_data_dir: &Path, lora_id: &str, installed_hashes:
     let session = authenticated_session()?;
     let client = network_client()?;
     let entry: WebsiteLoraEntry = parse_json(client.get(auth::api_url(&format!("/v1/lora-library/{lora_id}"))).bearer_auth(&session.token).send())?;
-    let cover_path = website_media::cache_cover(&client, &session.token, app_data_dir, "loras", &entry.examples);
-    let view = to_view(entry, installed_hashes, cover_path).ok_or_else(|| "网站 LoRA 当前没有可下载版本".to_string())?;
+    let example_paths = website_media::cache_images(&client, &session.token, app_data_dir, "loras", &entry.examples);
+    let view = to_view(entry, installed_hashes, example_paths).ok_or_else(|| "网站 LoRA 当前没有可下载版本".to_string())?;
     let cache_root = app_data_dir.join("downloads").join("website-loras");
     fs::create_dir_all(&cache_root).map_err(|error| format!("创建网站 LoRA 下载目录失败：{error}"))?;
     let partial = cache_root.join(format!("{}.part", view.version_id));
@@ -119,9 +119,10 @@ fn parse_json<T: DeserializeOwned>(result: Result<Response, reqwest::Error>) -> 
     payload.data.ok_or_else(|| "网站 LoRA 服务未返回数据".into())
 }
 
-fn to_view(entry: WebsiteLoraEntry, installed_hashes: &HashSet<String>, cover_path: Option<String>) -> Option<crate::models::DesktopWebsiteLoraView> {
+fn to_view(entry: WebsiteLoraEntry, installed_hashes: &HashSet<String>, example_paths: Vec<String>) -> Option<crate::models::DesktopWebsiteLoraView> {
     let version = entry.version?;
-    Some(crate::models::DesktopWebsiteLoraView { id: entry.id, title: entry.title, description: entry.description, r#type: entry.r#type, model_family: entry.model_family, model_family_name: entry.model_family_name, trigger_words: entry.trigger_words, owner_display_name: entry.owner_display_name, privacy: entry.privacy, is_owner: entry.is_owner, version_id: version.id, file_name: version.file_name, sha256: version.sha256.clone(), byte_size: version.byte_size, installed: installed_hashes.contains(&version.sha256), cover_path })
+    let cover_path = example_paths.first().cloned();
+    Some(crate::models::DesktopWebsiteLoraView { id: entry.id, title: entry.title, description: entry.description, r#type: entry.r#type, model_family: entry.model_family, model_family_name: entry.model_family_name, trigger_words: entry.trigger_words, owner_display_name: entry.owner_display_name, privacy: entry.privacy, is_owner: entry.is_owner, version_id: version.id, file_name: version.file_name, sha256: version.sha256.clone(), byte_size: version.byte_size, installed: installed_hashes.contains(&version.sha256), cover_path, example_paths })
 }
 
 fn validate_download_response(response: &Response, offset: u64, total: u64) -> Result<(), String> {

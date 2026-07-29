@@ -459,6 +459,163 @@ select:focus-visible {
   margin-top: 14px;
 }
 
+/* 合并页面使用单一滚动流，子功能块之间保持稳定间距。 */
+.merged-page {
+  display: grid;
+  gap: 16px;
+}
+
+/* AI 配置使用紧凑工业化分区，密钥状态和可执行动作保持清晰可见。 */
+.ai-settings-card,
+.ai-tool-card {
+  max-width: none;
+}
+
+.ai-credential-state,
+.ai-settings-actions,
+.ai-tool-actions,
+.ai-enabled,
+.ai-analysis-loading,
+.resource-item-actions {
+  display: flex;
+  align-items: center;
+}
+
+.ai-credential-state {
+  gap: 6px;
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.ai-credential-state.configured {
+  border-color: var(--success-border);
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.ai-credential-state svg { width: 14px; }
+
+.ai-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.ai-settings-grid > label:not(.ai-enabled):not(.ai-clear-key) {
+  display: grid;
+  gap: 5px;
+}
+
+.ai-settings-grid label > span {
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 700;
+}
+
+.ai-settings-grid input[type="text"],
+.ai-settings-grid input[type="password"],
+.ai-settings-grid select,
+.ai-analysis-output {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  outline: 0;
+  background: var(--control);
+  color: var(--text);
+}
+
+.ai-settings-grid input[type="text"],
+.ai-settings-grid input[type="password"],
+.ai-settings-grid select {
+  height: 36px;
+  padding: 0 9px;
+  font-size: 9px;
+}
+
+.ai-enabled {
+  grid-column: 1 / -1;
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid var(--accent-border);
+  border-radius: 5px;
+  background: var(--accent-soft);
+}
+
+.ai-enabled > span { display: grid; gap: 2px; }
+.ai-enabled strong { color: var(--text); font-size: 9px; }
+.ai-enabled small { font-size: 7px; font-weight: 500; }
+.ai-enabled input,
+.ai-clear-key input { accent-color: var(--accent); }
+.ai-clear-key { display: flex; align-items: center; gap: 7px; }
+
+.ai-settings-actions,
+.ai-tool-actions {
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.ai-settings-actions button,
+.ai-tool-actions button {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 11px;
+  border: 1px solid var(--accent-border);
+  border-radius: 4px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 8px;
+  font-weight: 800;
+}
+
+.ai-settings-actions button.secondary,
+.ai-tool-actions button.secondary {
+  border-color: var(--border);
+  background: var(--panel-muted);
+  color: var(--text);
+}
+
+.ai-settings-actions button svg,
+.ai-tool-actions button svg { width: 14px; }
+.ai-settings-actions button:disabled,
+.ai-tool-actions button:disabled { cursor: not-allowed; opacity: .48; }
+
+.ai-analysis-output {
+  min-height: 150px;
+  margin-top: 10px;
+  padding: 10px;
+  resize: vertical;
+  font-size: 9px;
+  line-height: 1.7;
+}
+
+.ai-analysis-loading {
+  min-height: 96px;
+  justify-content: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.resource-item-actions { gap: 6px; }
+
+@media (max-width: 760px) {
+  .ai-settings-grid { grid-template-columns: 1fr; }
+  .ai-enabled { grid-column: 1; }
+}
+
+.merged-page > .desktop-page + .desktop-page {
+  margin-top: 0;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
 .overview-hero {
   position: relative;
   min-height: 188px;

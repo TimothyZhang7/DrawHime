@@ -712,6 +712,38 @@ export const desktopSettingsSchema = z.object({
 /** 桌面端设置更新请求与持久化视图使用同一受控字段集合。 */
 export const desktopSettingsUpdateSchema = desktopSettingsSchema;
 
+/** 桌面 AI 辅助设置只返回凭据是否存在，密钥正文始终留在 Windows Credential Manager。 */
+export const desktopAiSettingsSchema = z.object({
+  enabled: z.boolean(),
+  endpointType: z.enum(["openai_chat", "openai_responses"]),
+  baseUrl: z.string(),
+  model: z.string(),
+  apiKeyConfigured: z.boolean(),
+});
+
+/** 保存 AI 辅助设置时，空密钥表示保留现有凭据，显式清除字段用于删除凭据。 */
+export const desktopAiSettingsUpdateSchema = z.object({
+  enabled: z.boolean(),
+  endpointType: desktopAiSettingsSchema.shape.endpointType,
+  baseUrl: z.string().trim().max(2048),
+  model: z.string().trim().max(191),
+  apiKey: z.string().trim().max(4096).nullable(),
+  clearApiKey: z.boolean(),
+});
+
+/** AI 辅助分析使用本机受控图片路径与固定用途，不把任意上游请求结构交给页面。 */
+export const desktopAiAnalyzeInputSchema = z.object({
+  imagePath: z.string().min(1),
+  purpose: z.enum(["caption", "reverse"]),
+  userInstruction: z.string().trim().max(4000).nullable(),
+});
+
+/** AI 辅助返回可直接用于 Caption 或生成提示词的文本。 */
+export const desktopAiAnalyzeViewSchema = z.object({
+  purpose: desktopAiAnalyzeInputSchema.shape.purpose,
+  text: z.string().min(1),
+});
+
 /** 桌面端资源文件的官方或主站镜像来源。 */
 export const desktopResourceSourceSchema = z.object({
   kind: z.enum(["official", "mirror"]),
@@ -825,7 +857,7 @@ export const desktopResourceCatalogViewSchema = z.object({
 /** 桌面端资源断点下载状态和进度事件。 */
 export const desktopResourceDownloadViewSchema = z.object({
   resourceId: z.string(),
-  status: z.enum(["queued", "downloading", "verifying", "downloaded", "failed"]),
+  status: z.enum(["queued", "downloading", "paused", "verifying", "downloaded", "failed"]),
   sourceKind: desktopResourceSourceSchema.shape.kind.nullable(),
   downloadedBytes: z.number().int().nonnegative(),
   totalBytes: z.number().int().positive(),
@@ -924,6 +956,8 @@ export const desktopWebsiteLoraViewSchema = z.object({
   installed: z.boolean(),
   /** 已由桌面核心鉴权下载到应用数据目录的封面文件。 */
   coverPath: z.string().nullable(),
+  /** 已逐张容错缓存的全部示例图片，第一张同时作为封面。 */
+  examplePaths: z.array(z.string()),
 });
 
 /** 桌面端展示的网站底模仓库条目，封面只返回本机缓存路径。 */
@@ -939,6 +973,8 @@ export const desktopWebsiteModelViewSchema = z.object({
   sourceLinks: z.array(z.object({ label: z.string(), url: z.string().url() })).max(8),
   parameters: z.object({ steps: z.number(), cfg: z.number(), sampler: z.string(), scheduler: z.string(), samplingMaxEdge: z.number(), maxEdge: z.number() }),
   coverPath: z.string().nullable(),
+  /** 已逐张容错缓存的全部示例图片，详情页按原始顺序展示。 */
+  examplePaths: z.array(z.string()),
 });
 
 /** 网站 LoRA 断点下载、校验和安装进度。 */
@@ -1396,6 +1432,10 @@ export type DesktopGalleryPrivacy = z.infer<typeof desktopGalleryPrivacySchema>;
 export type DesktopEnvironmentReport = z.infer<typeof desktopEnvironmentReportSchema>;
 export type DesktopSettings = z.infer<typeof desktopSettingsSchema>;
 export type DesktopSettingsUpdate = z.infer<typeof desktopSettingsUpdateSchema>;
+export type DesktopAiSettings = z.infer<typeof desktopAiSettingsSchema>;
+export type DesktopAiSettingsUpdate = z.infer<typeof desktopAiSettingsUpdateSchema>;
+export type DesktopAiAnalyzeInput = z.infer<typeof desktopAiAnalyzeInputSchema>;
+export type DesktopAiAnalyzeView = z.infer<typeof desktopAiAnalyzeViewSchema>;
 export type DesktopResourceSource = z.infer<typeof desktopResourceSourceSchema>;
 export type DesktopResourceManifestItem = z.infer<typeof desktopResourceManifestItemSchema>;
 export type DesktopResourceManifestPayload = z.infer<typeof desktopResourceManifestPayloadSchema>;

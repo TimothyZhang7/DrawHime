@@ -10,6 +10,9 @@ import { importDesktopLocalLora, importDesktopLocalModel } from "./desktop-api";
 
 type ResourceItem = DesktopResourceCatalogView["resources"][number];
 
+/** 以首图本机路径索引同一仓库条目的全部示例图，现有卡片接口无需暴露远端媒体地址。 */
+const repositoryExamplePaths = new Map<string, string[]>();
+
 type ModelRepositoryEntry = {
   key: string;
   displayName: string;
@@ -110,7 +113,10 @@ function LoraDetail({ entry, modelRoot, progress, onBack, onInstall }: { entry: 
   return <div className="desktop-page repository-detail"><button className="repository-back" onClick={onBack}><ArrowLeft />返回 LoRA 仓库</button><section className="repository-detail-hero"><RepositoryCover path={entry.coverPath} fallback="LORA" /><div className="repository-detail-summary"><div className="repository-detail-tags">{local && <b>已在本地</b>}<i>{loraTypeLabel(entry.type)}</i>{entry.website?.privacy === "private" && <i>私有</i>}</div><h1>{entry.title}</h1><p>{entry.description || "当前条目未填写详细说明。"}</p><div className="repository-detail-actions">{local ? <button disabled><CheckCircle2 />已安装，可用于生成</button> : entry.website ? <button className="primary" disabled={running} onClick={onInstall}>{running ? <LoaderCircle className="spin" /> : <Download />}{running ? loraProgressLabel(progress!) : `下载到本机 · ${formatBytes(entry.website.byteSize)}`}</button> : null}</div>{percent !== null && <div className="repository-detail-progress"><i style={{ width: `${percent}%` }} /><span>{loraProgressLabel(progress!)} · {percent}%</span></div>}</div></section><section className="repository-detail-grid"><article><header><Layers3 /><strong>LoRA 信息</strong></header><dl><InfoRow label="类型" value={loraTypeLabel(entry.type)} /><InfoRow label="适用底模" value={entry.modelFamilyName} /><InfoRow label="文件名称" value={entry.website?.fileName || entry.local?.fileName || "-"} /><InfoRow label="文件大小" value={formatBytes(entry.website?.byteSize || entry.local?.byteSize || 0)} /></dl></article><article><header><HardDrive /><strong>本机状态</strong></header><dl><InfoRow label="状态" value={local ? "文件校验通过" : entry.website ? "可从主站下载" : "本地文件发生变化"} /><InfoRow label="存储位置" value={joinPath(modelRoot, "loras", entry.local?.fileName || entry.website?.fileName || "")} /><InfoRow label="作者" value={entry.website?.ownerDisplayName || "本机导入"} /><InfoRow label="更新时间" value={entry.local ? new Date(entry.local.updatedAt).toLocaleString("zh-CN") : "随主站同步"} /></dl></article></section><section className="repository-detail-copy"><h3>触发词</h3>{triggers.length ? <div className="repository-trigger-list">{triggers.map((trigger) => <button key={trigger} onClick={() => void navigator.clipboard.writeText(trigger)}>{trigger}<Copy /></button>)}</div> : <p>该 LoRA 未设置触发词，可直接按说明使用。</p>}</section></div>;
 }
 
-function RepositoryCover({ path, fallback }: { path: string | null; fallback: string }) { return <div className="repository-cover">{path ? <><img className="blur" src={convertFileSrc(path)} alt="" /><img src={convertFileSrc(path)} alt="仓库封面" /></> : <div className="repository-cover-fallback"><Image /><span>{fallback}</span></div>}</div>; }
+function RepositoryCover({ path, fallback }: { path: string | null; fallback: string }) {
+  const examples = path ? repositoryExamplePaths.get(path) || [path] : [];
+  return <div className={`repository-cover ${examples.length > 1 ? "has-examples" : ""}`}>{path ? <><img className="blur" src={convertFileSrc(path)} alt="" /><div className="repository-cover-slides">{examples.map((example, index) => <img key={example} style={{ animationDelay: `${index * 2.8}s`, animationDuration: `${examples.length * 2.8}s` }} src={convertFileSrc(example)} alt={index === 0 ? "仓库封面" : `示例图 ${index + 1}`} />)}</div>{examples.length > 1 && <span className="repository-example-count">{examples.length} 张示例</span>}</> : <div className="repository-cover-fallback"><Image /><span>{fallback}</span></div>}</div>;
+}
 function RepositoryHint({ text }: { text: string }) { return <section className="repository-hint"><ShieldCheck /><span>{text}</span></section>; }
 function RepositoryEmpty({ text }: { text: string }) { return <section className="repository-empty"><PackageOpen /><strong>{text}</strong><span>可调整筛选、连接账号或导入本机文件。</span></section>; }
 function InfoRow({ label, value }: { label: string; value: string }) { return <div><dt>{label}</dt><dd title={value}>{value}</dd></div>; }
@@ -138,6 +144,8 @@ function FileField({ label, value, onPick }: { label: string; value: string; onP
 function DialogActions({ busy, ready, onClose, onSubmit }: { busy: boolean; ready: boolean; onClose: () => void; onSubmit: () => void }) { return <footer className="repository-dialog-actions"><button onClick={onClose}>取消</button><button className="primary" disabled={!ready || busy} onClick={onSubmit}>{busy ? <LoaderCircle className="spin" /> : <Download />}{busy ? "正在校验并导入" : "确认导入"}</button></footer>; }
 
 function mergeModelEntries(models: DesktopLocalModelView[], websiteModels: DesktopWebsiteModelView[], catalog: DesktopResourceCatalogView | null): ModelRepositoryEntry[] {
+  // 本机缓存路径在列表和详情页之间稳定复用，坏图已由 Rust 核心逐张跳过。
+  for (const website of websiteModels) if (website.coverPath) repositoryExamplePaths.set(website.coverPath, website.examplePaths.length ? website.examplePaths : [website.coverPath]);
   const groups = new Map<string, ResourceItem[]>();
   for (const resource of catalog?.resources || []) { const groupId = resource.modelRegistration?.groupId; if (groupId) groups.set(groupId, [...(groups.get(groupId) || []), resource]); }
   const usedLocal = new Set<string>();
@@ -155,6 +163,8 @@ function mergeModelEntries(models: DesktopLocalModelView[], websiteModels: Deskt
 }
 
 function mergeLoraEntries(loras: DesktopLocalLoraView[], websiteLoras: DesktopWebsiteLoraView[]): LoraRepositoryEntry[] {
+  // LoRA 与底模共用示例图索引，首图仍是封面，其余图片按原顺序轮播。
+  for (const website of websiteLoras) if (website.coverPath) repositoryExamplePaths.set(website.coverPath, website.examplePaths.length ? website.examplePaths : [website.coverPath]);
   const usedLocal = new Set<string>();
   const entries: LoraRepositoryEntry[] = websiteLoras.map((website) => { const local = loras.find((item) => item.sha256 === website.sha256) || null; if (local) usedLocal.add(local.id); return { key: `web:${website.id}`, title: website.title, description: website.description, type: website.type, modelFamilyName: website.modelFamilyName, coverPath: website.coverPath, local, website }; });
   for (const local of loras) { if (!usedLocal.has(local.id)) entries.push({ key: `local:${local.id}`, title: local.title, description: local.triggerWords.join(", "), type: local.type, modelFamilyName: "本机模型", coverPath: null, local, website: null }); }
