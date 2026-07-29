@@ -45,7 +45,7 @@ try {
   }
 } finally {
   terminateProcessTree(child.pid);
-  await rm(userDataDirectory, { recursive: true, force: true });
+  await removeUserDataDirectory(userDataDirectory);
 }
 
 /** 解析严格的 --key value 与布尔参数，未知位置参数直接拒绝。 */
@@ -204,6 +204,20 @@ function validateProbe(result, expectNoGpu) {
 
 /** 统一异步等待，避免高频轮询占用 Runner。 */
 function delay(milliseconds) { return new Promise((resolve) => setTimeout(resolve, milliseconds)); }
+
+/** WebView2 子进程终止后锁文件可能短暂存活，有限退避清理且不覆盖已经通过的 UI 结论。 */
+async function removeUserDataDirectory(directory) {
+  let lastError = null;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    try { await rm(directory, { recursive: true, force: true }); return; }
+    catch (error) {
+      lastError = error;
+      if (!["EBUSY", "EPERM", "ENOTEMPTY"].includes(error?.code)) throw error;
+      await delay(250);
+    }
+  }
+  process.stderr.write(`WebView2 临时目录将在 Runner 退出时清理：${lastError?.code || "UNKNOWN"}\n`);
+}
 
 /** Windows 下终止完整桌面进程树，避免 WebView2 子进程污染后续安装任务。 */
 function terminateProcessTree(processId) {
