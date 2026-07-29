@@ -209,12 +209,16 @@ export function App() {
     if (modelGroupBusy || !resourceCatalog?.configured) return;
     setModelGroupBusy(groupId);
     try {
+      let installedResource = false;
       for (const resourceId of resourceIds) {
         const resource = resourceCatalog.resources.find((item) => item.id === resourceId);
         if (!resource || resource.installed) continue;
         if (!resource.downloaded && !(await downloadResource(resourceId))) return;
         if (!(await installResource(resourceId))) return;
+        installedResource = true;
       }
+      // 文件已经存在但本地数据库尚未登记时，重新执行一次幂等安装以恢复模型登记。
+      if (!installedResource && resourceIds[0] && !(await installResource(resourceIds[0]))) return;
       const [nextModels, nextCatalog] = await Promise.all([listDesktopLocalModels(), loadDesktopResourceCatalog()]);
       setModels(nextModels); setResourceCatalog(nextCatalog); setMessage("底模文件已安装并完成本地登记");
     } finally { setModelGroupBusy(null); }

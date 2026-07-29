@@ -13,7 +13,8 @@ const argumentsMap = parseArguments(rawArguments);
 if (command === "generate") await generateSigningKey(argumentsMap);
 else if (command === "sign") await signManifest(argumentsMap);
 else if (command === "normalize") await normalizeManifest(argumentsMap);
-else throw new Error("用法：generate --private-key PATH --public-key PATH；sign --payload PATH --private-key PATH --output PATH --key-id ID；或 normalize --payload PATH --output PATH");
+else if (command === "add-anima-models") await addAnimaModels(argumentsMap);
+else throw new Error("用法：generate --private-key PATH --public-key PATH；sign --payload PATH --private-key PATH --output PATH --key-id ID；normalize --payload PATH --output PATH；或 add-anima-models --payload PATH --output PATH");
 
 /** 解析明确的 --key value 参数，拒绝遗漏值和重复键。 */
 function parseArguments(values) {
@@ -91,6 +92,55 @@ async function normalizeManifest(options) {
   await mkdir(dirname(outputPath), { recursive: true });
   await writeFile(outputPath, `${JSON.stringify(parsed.data, null, 2)}\n`, "utf8");
   process.stdout.write(`已规范化资源清单：${outputPath}\n`);
+}
+
+/** 在现有签名载荷基础上幂等补齐四个 Anima 底模及其共享文本编码器和 VAE。 */
+async function addAnimaModels(options) {
+  const payloadPath = requiredPath(options, "payload");
+  const outputPath = requiredPath(options, "output");
+  const raw = JSON.parse(await readFile(payloadPath, "utf8"));
+  if (!Array.isArray(raw.resources)) throw new Error("资源清单缺少 resources 数组");
+  const groups = animaModelDefinitions().map((model) => model.groupId);
+  const retained = raw.resources.filter((resource) => !groups.includes(resource.modelRegistration?.groupId));
+  const resources = [...retained, ...animaModelDefinitions().flatMap(buildAnimaModelResources)];
+  const minimumExpiry = new Date(Date.now() + 180 * 24 * 60 * 60 * 1000);
+  const currentExpiry = new Date(raw.expiresAt);
+  const candidate = { ...raw, generatedAt: new Date().toISOString(), expiresAt: currentExpiry > minimumExpiry ? currentExpiry.toISOString() : minimumExpiry.toISOString(), resources };
+  const parsed = desktopResourceManifestPayloadSchema.safeParse(candidate);
+  if (!parsed.success) throw new Error(`补齐 Anima 模型后的资源清单未通过契约校验：${parsed.error.issues[0]?.message || "未知字段错误"}`);
+  await mkdir(dirname(outputPath), { recursive: true });
+  await writeFile(outputPath, `${JSON.stringify(parsed.data, null, 2)}\n`, "utf8");
+  process.stdout.write(`已补齐桌面 Anima 底模：${animaModelDefinitions().length} 个模型组合 · ${parsed.data.resources.length} 项资源\n`);
+}
+
+/** 返回已经通过官方文件大小与 SHA-256 校验的桌面 Anima 底模定义。 */
+function animaModelDefinitions() {
+  return [
+    { groupId: "model.anima-base-v10", id: "anima-base-v10", displayName: "Anima Base v1.0", version: "anima-base-v1.0", fileName: "anima-base-v1.0.safetensors", byteSize: 4_182_218_328, sha256: "bd43b7cffe1ed1153d9c41e7beb2f18cb1273eafbaa3af3edd6a173dc90a006e", officialUrl: "https://huggingface.co/circlestone-labs/Anima/resolve/main/split_files/diffusion_models/anima-base-v1.0.safetensors" },
+    { groupId: "model.anime-bulldozer-anima", id: "anime-bulldozer-anima", displayName: "Anime Bulldozer Anima", version: "civitai-3047288", fileName: "animeBulldozer_anima.safetensors", byteSize: 4_182_218_504, sha256: "8e279f111ed7e7ea214ea61850e002f700cce55a8cd027675796773089b3c739", officialUrl: "https://civitai.com/api/download/models/3047288" },
+    { groupId: "model.miaomiao-realskin-anima11", id: "miaomiao-realskin-anima11", displayName: "MiaoMiao RealSkin Anima 1.1", version: "civitai-3071702", fileName: "miaomiaoRealskin_anima11.safetensors", byteSize: 4_182_218_328, sha256: "d33247d48a9c15a872aef963940fc87362f925e3e087365810ad747042fcc454", officialUrl: "https://civitai.com/api/download/models/3071702" },
+    { groupId: "model.miaomiao-3d-harem-anima-lh3d10", id: "miaomiao-3d-harem-anima-lh3d10", displayName: "MiaoMiao 3D Harem Anima LH3D 1.0", version: "civitai-3074791", fileName: "miaomiao3DHarem_animaLH3D10.safetensors", byteSize: 4_182_218_328, sha256: "0707cbe8deed6c858a6ba8dfbcfe2006e3a4fd44c099aafd048400fdec1866dd", officialUrl: "https://civitai.com/api/download/models/3074791" },
+  ];
+}
+
+/** 为一个底模构造主文件、共享文本编码器与共享 VAE 三个可独立断点安装的资源。 */
+function buildAnimaModelResources(model) {
+  const shared = [
+    { role: "text_encoder", suffix: "text-encoder", version: "anima-qwen3-0.6b", fileName: "qwen_3_06b_base.safetensors", byteSize: 1_192_135_096, sha256: "cd2a512003e2f9f3cd3c32a9c3573f820bb28c940f73c57b1ddaa983d9223eba", installDirectory: "text_encoders", officialUrl: "https://huggingface.co/circlestone-labs/Anima/resolve/main/split_files/text_encoders/qwen_3_06b_base.safetensors" },
+    { role: "vae", suffix: "vae", version: "anima-qwen-image-vae", fileName: "qwen_image_vae.safetensors", byteSize: 253_806_246, sha256: "a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f", installDirectory: "vae", officialUrl: "https://huggingface.co/circlestone-labs/Anima/resolve/main/split_files/vae/qwen_image_vae.safetensors" },
+  ];
+  const primary = { role: "primary", suffix: "primary", version: model.version, fileName: model.fileName, byteSize: model.byteSize, sha256: model.sha256, installDirectory: "diffusion_models", officialUrl: model.officialUrl };
+  return [primary, ...shared].map((component) => {
+    const id = `${model.groupId}.${component.suffix}`;
+    return {
+      id, kind: "model", version: component.version, os: "windows", arch: "x86_64", fileName: component.fileName,
+      byteSize: component.byteSize, installedSize: component.byteSize, sha256: component.sha256, archive: "raw", rootDirectory: null,
+      installDirectory: component.installDirectory,
+      modelRegistration: { groupId: model.groupId, displayName: model.displayName, family: "anima", workflowKind: "anima", role: component.role },
+      required: false,
+      sources: [{ kind: "official", url: component.officialUrl }, { kind: "mirror", url: `https://www.xanime.ink/local-model-api/v1/desktop/resources/${id}/content` }],
+    };
+  });
 }
 
 /** 读取必填路径参数并转换为绝对路径。 */

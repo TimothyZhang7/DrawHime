@@ -543,9 +543,13 @@ fn installed_resource_matches(item: &DesktopResourceManifestItem, settings: &Des
     let destination = install_destination(item, settings);
     let marker = install_marker_path(&destination, item.archive != "raw");
     if !destination.exists() || !marker.is_file() { return false; }
+    if item.archive == "raw" && destination.metadata().map(|metadata| !metadata.is_file() || metadata.len() != item.byte_size).unwrap_or(true) { return false; }
     let Ok(content) = fs::read_to_string(marker) else { return false; };
     let Ok(value) = serde_json::from_str::<serde_json::Value>(&content) else { return false; };
-    value.get("resourceId").and_then(serde_json::Value::as_str) == Some(item.id.as_str()) && value.get("sha256").and_then(serde_json::Value::as_str) == Some(item.sha256.as_str())
+    let sha256_matches = value.get("sha256").and_then(serde_json::Value::as_str) == Some(item.sha256.as_str());
+    let resource_matches = value.get("resourceId").and_then(serde_json::Value::as_str) == Some(item.id.as_str());
+    // 相同签名内容可由多个底模组合复用，避免文本编码器和 VAE 被重复下载及占用磁盘。
+    sha256_matches && (resource_matches || item.archive == "raw")
 }
 
 fn install_marker_path(destination: &Path, directory: bool) -> PathBuf {
@@ -1131,5 +1135,32 @@ mod tests {
         assert_eq!(registrations[0].model_file_name, "model.safetensors");
         assert_eq!(registrations[0].text_encoder_file_name.as_deref(), Some("clip.safetensors"));
         assert_eq!(registrations[0].vae_file_name.as_deref(), Some("vae.safetensors"));
+    }
+
+    /** 验证不同模型组合可以安全复用文件名、大小和哈希完全一致的原始组件。 */
+    #[test]
+    fn identical_raw_model_resource_is_shared_across_groups() {
+        let temporary = tempfile::tempdir().expect("创建共享模型资源临时目录");
+        let settings = DesktopSettings { theme_mode: "system".into(), dependency_source: "auto".into(), default_privacy: "private".into(), model_root: temporary.path().join("models").to_string_lossy().into_owned(), output_root: temporary.path().join("outputs").to_string_lossy().into_owned(), runtime_root: temporary.path().join("runtime").to_string_lossy().into_owned(), upload_concurrency: 2, wifi_only: false, bandwidth_limit_kib: None };
+        let cache = temporary.path().join("shared-encoder.safetensors");
+        fs::write(&cache, b"shared-encoder").expect("写入共享文本编码器缓存");
+        let mut first = item();
+        first.id = "model.first.text-encoder".into();
+        first.kind = "model".into();
+        first.file_name = "shared-encoder.safetensors".into();
+        first.byte_size = cache.metadata().expect("读取共享组件大小").len();
+        first.installed_size = first.byte_size;
+        first.sha256 = sha256_file(&cache).expect("计算共享组件哈希");
+        first.archive = "raw".into();
+        first.root_directory = None;
+        first.install_directory = Some("text_encoders".into());
+        first.model_registration = Some(crate::models::DesktopResourceModelRegistration { group_id: "model.first".into(), display_name: "模型一".into(), family: "anima".into(), workflow_kind: "anima".into(), role: "text_encoder".into() });
+        install_cached_resource(&settings, &first, &cache, &|_| {}).expect("安装第一组共享组件");
+        let mut second = first.clone();
+        second.id = "model.second.text-encoder".into();
+        second.model_registration = Some(crate::models::DesktopResourceModelRegistration { group_id: "model.second".into(), display_name: "模型二".into(), family: "anima".into(), workflow_kind: "anima".into(), role: "text_encoder".into() });
+        assert!(installed_resource_matches(&second, &settings));
+        second.byte_size += 1;
+        assert!(!installed_resource_matches(&second, &settings));
     }
 }

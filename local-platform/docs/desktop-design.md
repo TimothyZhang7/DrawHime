@@ -166,6 +166,8 @@ Runtime 更新不能中断运行中任务；队列空闲后切换。
 
 首个一键底模组合使用 WAI Anima v1.0 主文件、`qwen_3_06b_base.safetensors` 和 `qwen_image_vae.safetensors`。三个签名资源分别安装到 `diffusion_models`、`text_encoders` 和 `vae`，全部哈希匹配后自动登记为一个 Anima 底模。WAI 主文件优先从 Hugging Face 官方下载，失败后由主站镜像端点按 8 MiB Range 代理同一签名官方对象；CLIP/VAE 使用主站已校验镜像。代理逐段核对状态码、`Content-Length`、`Content-Range` 和总大小，最终客户端仍执行完整 SHA-256，不信任代理传输结果。
 
+Anima Base、Anime Bulldozer、MiaoMiao RealSkin 与 MiaoMiao 3D Harem 使用同一组三文件安装语义。主文件各自保留独立签名 ID，文本编码器和 VAE 以相同文件名、字节数和 SHA-256 作为可复用内容；桌面端接受不同模型组引用同一份已校验原始文件，因此安装第二个底模时只下载新的主文件。四个扩展底模均为可选资源，不进入首次安装的必需资源队列。
+
 ## 9. 本地生成、打标和训练
 
 - 生成页复用网页端模型、LoRA、画幅、提示词和任务详情语义，但数据源切换为本地仓库和 Local Scheduler。
