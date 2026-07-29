@@ -37,6 +37,7 @@
 | `desktop_sign_out` | desktop webview | desktop core | 尽力撤销服务端会话后删除 Windows Credential Manager 凭据；网络异常不阻止本机退出 |
 | `GET /v1/desktop/resources/manifest` | desktop core | api/CDN | 返回 `{ ok: true, data: DesktopResourceManifestEnvelope }`；`payload` 是原始 UTF-8 JSON，`signature` 是服务端 Ed25519 签名，桌面端使用安装包内固定公钥验签后才解析资源；模型资源额外固化受控安装目录和模型组合的 group/role，只有主文件、文本编码器与 VAE 全部通过哈希安装后才自动登记 Anima 底模 |
 | `GET /v1/desktop/resources/:id/content` | desktop core | api | 从签名清单定位主站镜像资源，只流式返回大小与清单一致的受控文件；支持单段 HTTP Range、`ETag=SHA-256` 和断点续传，不接受客户端文件路径；本地镜像文件缺失时只允许代理同一签名资源登记的 `official` HTTPS 来源，并严格核对上游 `Content-Range`、长度和总大小，私有下载令牌不回显给桌面端 |
+| `GET /v1/models/:fileName` | api | desktop model runtime | 使用 `x-desktop-model-token` 读取 GPU 主机白名单中的已校验底模、文本编码器或 VAE；只支持固定文件名和单段 Range，API 逐段核对签名清单大小与 `Content-Range` 后再转发给桌面端 |
 | `desktop_load_resource_catalog` | desktop webview | desktop core | 拉取并验签资源清单，校验过期时间、Windows/架构、文件名、大小、SHA-256 与 HTTPS 来源后返回可展示目录；未配置真实清单和公钥时明确返回未配置状态 |
 | `desktop_download_resource` | desktop webview | desktop core | 按资源 ID 执行断点下载；`auto` 优先官方，连接失败或持续低速后从相同哈希的主站镜像续传，完成整体 SHA-256 后原子写入本机下载缓存 |
 | `desktop-resource-progress` | desktop core | desktop webview | 资源下载进度事件；对应 `DesktopResourceDownloadView`，包含当前来源、已下载字节、总字节、速度、剩余秒数、最近切源原因、状态与脱敏错误；切源后沿用同一已校验偏移 |

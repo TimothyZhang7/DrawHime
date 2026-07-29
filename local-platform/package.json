@@ -24,6 +24,7 @@
     "sync:anima-models": "node scripts/sync-anima-base-models.mjs",
     "desktop:resource-manifest": "node scripts/manage-desktop-resource-manifest.mjs",
     "desktop:deploy-manifest": "node scripts/deploy-desktop-resource-manifest.mjs",
+    "desktop:deploy-model-runtime": "node scripts/deploy-desktop-model-runtime.mjs",
     "desktop:publish-application": "node scripts/publish-desktop-application-update.mjs",
     "desktop:validate-windows-host": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/validate-desktop-windows-host.ps1",
     "desktop:set-version": "node scripts/set-desktop-version.mjs",

@@ -48,6 +48,13 @@ node scripts/deploy-production.mjs --target web
 
 文档独立修改不重启运行服务；完成链接、Markdown、diff、提交和公开同步检查即可。训练 Runtime 变化使用 `node scripts/deploy-training-runtime.mjs --dry-run` 后再正式部署，不与平台部署命令混用。
 
+桌面底模下载 Runtime 独立部署，不重启 ComfyUI 或训练进程；脚本会校验全部白名单模型、限制来源 IP，并备份后更新平台私有连接地址：
+
+```powershell
+pnpm desktop:deploy-model-runtime -- --dry-run
+pnpm desktop:deploy-model-runtime
+```
+
 桌面应用更新先构建 NSIS，再使用私有签名目录准备并原子发布；`--dry-run` 只校验安装包、版本、契约、公钥和目标配置，不改本地清单或生产文件：
 
 ```powershell
@@ -69,10 +76,13 @@ pnpm desktop:validate-windows-host --ExpectedVersion X.Y.Z --Installer INSTALLER
 
 ```powershell
 pnpm desktop:resource-manifest normalize --payload OLD_PAYLOAD.json --output NEXT_PAYLOAD.json
-pnpm desktop:resource-manifest sign --payload NEXT_PAYLOAD.json --private-key PRIVATE.pem --output NEXT_ENVELOPE.json --key-id KEY_ID
+pnpm desktop:resource-manifest add-anima-models --payload NEXT_PAYLOAD.json --output NEXT_MODELS_PAYLOAD.json
+pnpm desktop:resource-manifest sign --payload NEXT_MODELS_PAYLOAD.json --private-key PRIVATE.pem --output NEXT_ENVELOPE.json --key-id KEY_ID
 pnpm desktop:deploy-manifest --envelope NEXT_ENVELOPE.json --state-payload CURRENT_PAYLOAD.json --state-envelope CURRENT_ENVELOPE.json --dry-run
 pnpm desktop:deploy-manifest --envelope NEXT_ENVELOPE.json --state-payload CURRENT_PAYLOAD.json --state-envelope CURRENT_ENVELOPE.json
 ```
+
+`add-anima-models` 幂等补齐 Anima Base、Anime Bulldozer、MiaoMiao RealSkin 和 MiaoMiao 3D Harem。四个模型均为用户主动安装的可选资源；相同 SHA-256 的 Qwen 文本编码器和 VAE 在多个模型组合间复用本机文件，不重复下载或占用磁盘。发布前必须确认主文件已进入 `DESKTOP_RESOURCE_STORAGE_ROOT`，或存在可由 API 严格代理的签名官方来源。
 
 可选目标：`web`、`admin`、`api`、`scheduler`、`gpu-agent`、`inference-worker`、`training-worker`、`artifact-service`、`source`、`all`。单服务目标只上传共享包与对应 app，只构建和重启该 PM2 进程；`api` 额外执行 Prisma 生成、生产迁移和标签种子，其他服务不触碰数据库。前端目标直接上传本机构建产物，不在生产机安装依赖。
 
