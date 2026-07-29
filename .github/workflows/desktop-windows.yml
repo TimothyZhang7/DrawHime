@@ -22,14 +22,10 @@ permissions:
   contents: read
 
 jobs:
-  desktop:
-    name: ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-2022, windows-2025]
+  build-installer:
+    name: windows-2022-build
+    runs-on: windows-2022
+    timeout-minutes: 35
     defaults:
       run:
         working-directory: local-platform
@@ -52,6 +48,19 @@ jobs:
       - name: 安装 Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: 恢复 Rust 构建缓存
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: local-platform/apps/desktop/src-tauri -> target
+          shared-key: desktop-windows-2022-release
+          cache-on-failure: true
+
+      - name: 恢复 Tauri 打包工具缓存
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\tauri
+          key: tauri-windows-x64-v1
+
       - name: 安装工作区依赖
         run: pnpm install --frozen-lockfile
 
@@ -64,11 +73,17 @@ jobs:
       - name: 检查桌面 TypeScript
         run: pnpm --filter @drawhime/desktop run type-check
 
-      - name: 运行桌面 Rust 测试
-        run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
+      - name: 运行 Release Rust 测试
+        run: cargo test --release --manifest-path apps/desktop/src-tauri/Cargo.toml
 
       - name: 构建 WebView2 离线 NSIS
-        run: pnpm --filter @drawhime/desktop run tauri:build
+        shell: pwsh
+        run: |
+          $bundleDirectory = Join-Path $PWD "apps/desktop/src-tauri/target/release/bundle"
+          if (Test-Path -LiteralPath $bundleDirectory -PathType Container) {
+            Remove-Item -LiteralPath $bundleDirectory -Recurse -Force
+          }
+          pnpm --filter @drawhime/desktop run tauri:build
 
       - name: 校验安装包边界
         shell: pwsh
@@ -81,21 +96,52 @@ jobs:
           $installer = $installers[0]
           if ($installer.Name -notmatch "_x64-setup\.exe$") { throw "安装包命名不符合 x64 NSIS 约定：$($installer.Name)" }
           if ($installer.Length -lt 150MB) { throw "安装包缺少 WebView2 离线载荷，实际字节数：$($installer.Length)" }
-          $summary = "### ${{ matrix.os }}`n- 安装包：$($installer.Name)`n- 字节数：$($installer.Length)`n- SHA-256：$((Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant())"
+          $summary = "### windows-2022-build`n- 安装包：$($installer.Name)`n- 字节数：$($installer.Length)`n- SHA-256：$((Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant())"
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value $summary -Encoding UTF8
+
+      - name: 上传待验收安装包
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-windows-x64-installer
+          path: local-platform/apps/desktop/src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  install-validation:
+    name: ${{ matrix.os }}-install
+    needs: build-installer
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    defaults:
+      run:
+        working-directory: local-platform
+    steps:
+      - name: 检出验收脚本
+        uses: actions/checkout@v4
+
+      - name: 下载待验收安装包
+        uses: actions/download-artifact@v4
+        with:
+          name: desktop-windows-x64-installer
+          path: ${{ runner.temp }}/desktop-installer
 
       - name: 验证 NSIS 安装与桌面启动
         shell: pwsh
         run: |
-          $bundleDirectory = Join-Path $PWD "apps/desktop/src-tauri/target/release/bundle/nsis"
-          $installer = @(Get-ChildItem -LiteralPath $bundleDirectory -File -Filter "*.exe") | Select-Object -First 1
+          $installer = @(Get-ChildItem -LiteralPath "$env:RUNNER_TEMP/desktop-installer" -File -Filter "*.exe") | Select-Object -First 1
           if (-not $installer) { throw "未找到待验收的 NSIS 安装包" }
           $expectedVersion = (Get-Content -Raw "apps/desktop/src-tauri/tauri.conf.json" | ConvertFrom-Json).version
-          pnpm desktop:validate-windows-host --ExpectedVersion $expectedVersion --Installer $installer.FullName --EvidenceDirectory "$env:RUNNER_TEMP/desktop-host-validation"
+          & powershell -NoProfile -ExecutionPolicy Bypass -File "scripts/validate-desktop-windows-host.ps1" -ExpectedVersion $expectedVersion -Installer $installer.FullName -EvidenceDirectory "$env:RUNNER_TEMP/desktop-host-validation"
+          if ($LASTEXITCODE -ne 0) { throw "Windows 主机验收脚本退出码：$LASTEXITCODE" }
           $evidence = @(Get-ChildItem -LiteralPath "$env:RUNNER_TEMP/desktop-host-validation" -File -Filter "*.json") | Select-Object -First 1
           if (-not $evidence) { throw "Windows 主机验收未输出证据文件" }
           $evidenceData = Get-Content -Raw $evidence.FullName | ConvertFrom-Json
-          $hostSummary = "- 安装与启动验收：$($evidence.Name)`n- 主机：$($evidenceData.os.caption)，构建 $($evidenceData.os.build)`n- DPI：$($evidenceData.dpi.value)，Per-Monitor V2=$($evidenceData.dpi.perMonitorV2)`n- WebView2：$($evidenceData.webView2Version)"
+          $hostSummary = "### ${{ matrix.os }}`n- 安装与启动验收：$($evidence.Name)`n- 主机：$($evidenceData.os.caption)，构建 $($evidenceData.os.build)`n- DPI：$($evidenceData.dpi.value)，Per-Monitor V2=$($evidenceData.dpi.perMonitorV2)`n- WebView2：$($evidenceData.webView2Version)"
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value $hostSummary -Encoding UTF8
 
       - name: 保存 Windows 主机验收证据
