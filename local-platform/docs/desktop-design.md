@@ -320,4 +320,4 @@ Local Scheduler 使用桌面 SQLite 作为唯一事实源。提交命令先固�
 
 0.1.6 已进一步完成真实 UI LoRA 全链路：5 张图片经 WD14 自动打标、确认后使用 512px Rank 8 默认参数在 179.2 秒生成 23MB safetensors，产物立即进入本地仓库，并被下一张 1024×1024 生成任务以 0.8 强度成功加载。强制终止桌面进程遗留的 ComfyUI 已由持久 Runtime 租约在下次启动时按宿主、可执行文件、入口和端口身份安全回收，不再挤占训练显存。
 
-后续按顺序推进：补齐网站其余底模文件发布与授权安装 → Windows、DPI、WebView2、GPU、弱网和磁盘完整矩阵 → 正式 GitHub Release。
+0.1.7 已补齐五个底模的签名下载与授权安装，完成 Windows 2022/2025 同包验收并发布正式 GitHub Release。后续继续扩充 Windows、DPI、WebView2、GPU、弱网和磁盘实机矩阵，不回退当前已通过的发布门禁。

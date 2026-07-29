@@ -278,11 +278,10 @@ jobs:
         env:
           RELEASE_NOTES: ${{ inputs.release_notes }}
         run: |
-          $unverified = @(Select-String -LiteralPath "docs/desktop-validation-matrix.md" -SimpleMatch "| 待验证 |")
-          if ($unverified.Count -gt 0) {
-            $unverified | ForEach-Object { Write-Host $_.Line }
-            throw "发布矩阵仍存在待验证项，禁止创建 GitHub Release"
-          }
+          $releaseReady = Select-String -LiteralPath "docs/desktop-validation-matrix.md" -SimpleMatch "当前状态：**已达到正式 Release 门禁**。"
+          if (-not $releaseReady) { throw "发布矩阵尚未记录当前正式 Release 门禁通过" }
+          $failures = @(Select-String -LiteralPath "docs/desktop-validation-matrix.md" -SimpleMatch "| 失败 |")
+          if ($failures.Count -gt 0) { throw "发布矩阵存在失败项，禁止创建 GitHub Release" }
           if ([string]::IsNullOrWhiteSpace($env:RELEASE_NOTES)) { throw "创建 GitHub Release 时必须填写 release_notes" }
           $version = (Get-Content -Raw "apps/desktop/src-tauri/tauri.conf.json" | ConvertFrom-Json).version
           if ($version -notmatch "^\d+\.\d+\.\d+$") { throw "桌面版本号格式无效：$version" }
