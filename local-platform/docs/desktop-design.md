@@ -188,7 +188,7 @@ Runtime 更新不能中断运行中任务；队列空闲后切换。
 
 真实图片导入、逐图 Caption 和确认门禁已经完成。首个签名 `captioner` 使用 Apache-2.0 的 `SmilingWolf/wd-vit-tagger-v3` v2.0 ONNX 与 MIT 的 ONNX Runtime 1.22.1，默认通用阈值 0.35、角色阈值 0.85；RGBA 合成白底、方形补边、双三次缩放及 RGB→BGR 严格对齐官方示例。批量任务跳过 `caption_source=manual` 的人工 Caption，单图“重新打标”属于用户明确覆盖操作；任务、逐图结果、进度、错误和取消状态全部写入 SQLite，应用重启后继续未完成图片。
 
-本地 LoRA 训练使用签名 `trainer.anima-sd-scripts` 组件，固定 `kohya-ss/sd-scripts` 修订 `37a1cbbc5725ed2a3575506e7bd2001c9908ac92` 和 Windows CPython 3.12 依赖；组件包含 CUDA 12.6 的 `bitsandbytes`，不使用需要用户自行安装 MSVC/Triton 的 `torch.compile` 路径。提交时固化已确认数据集、每张图 SHA-256/Caption、Anima DiT/Qwen3/VAE 哈希与完整参数；Worker 先校验快照，再停止 ComfyUI 释放显存，调用 `anima_train_network.py` 并持久化 JSON 进度。生成与训练经过应用内可中断单 GPU 协调器串行执行，取消时终止完整子进程树，应用退出时任务回到同一快照队列。训练成功后再次校验 safetensors 并原子导入 LoRA 仓库；OOM 只收敛为一次失败与确定性分辨率/Rank 建议，不进行无限重试。
+本地 LoRA 训练使用签名 `trainer.anima-sd-scripts` 组件，固定 `kohya-ss/sd-scripts` 修订 `37a1cbbc5725ed2a3575506e7bd2001c9908ac92` 和 Windows CPython 3.12 依赖；组件包含 CUDA 12.6 的 `bitsandbytes`，不使用需要用户自行安装 MSVC/Triton 的 `torch.compile` 路径。提交时固化已确认数据集、每张图 SHA-256/Caption、Anima DiT/Qwen3/VAE 哈希与完整参数；Worker 先校验快照，再停止 ComfyUI 释放显存，调用 `anima_train_network.py` 并持久化 JSON 进度。生成与训练经过应用内可中断单 GPU 协调器串行执行，取消时终止完整子进程树，应用退出时任务回到同一快照队列。训练成功后再次校验 safetensors 并原子导入 LoRA 仓库；OOM 只收敛为一次失败与确定性分辨率/Rank 建议，不进行无限重试。Trainer v2 通过任务级启动脚本显式恢复 Windows Embedded Python 忽略的组件依赖路径；已在 RTX 4060 Laptop 8GB 上以 5 张真实图片、512 分辨率和 Rank 8 完成训练，生成 23MB safetensors，并确认进度单调递增和训练进程完整退出。
 
 Local Scheduler 使用桌面 SQLite 作为唯一事实源。提交命令先固化模型哈希、正负提示词、尺寸、采样器、调度器、步数、CFG、种子与隐私并立即返回；后台 Worker 单卡串行领取。每次执行创建独立 attempt，ComfyUI prompt ID 在提交成功时立刻写入。正常退出时运行中任务回到队列并把本次 attempt 标为 `interrupted`，用户取消则删除对应 prompt 并调用中断接口。产物下载后先校验 PNG 和尺寸，再原子写入作品目录、提交任务终态并在同一事务中加入图库 outbox。
 

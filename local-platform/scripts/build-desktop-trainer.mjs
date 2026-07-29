@@ -9,6 +9,7 @@ import { pipeline } from "node:stream/promises";
 import { spawn } from "node:child_process";
 
 const REVISION = "37a1cbbc5725ed2a3575506e7bd2001c9908ac92";
+const COMPONENT_REVISION = 2;
 const SOURCE = {
   url: `https://github.com/kohya-ss/sd-scripts/archive/${REVISION}.zip`,
   mirror: `https://gh-proxy.com/https://github.com/kohya-ss/sd-scripts/archive/${REVISION}.zip`,
@@ -32,7 +33,7 @@ const PACKAGES = [
 const options = parseArguments(process.argv.slice(2));
 const python = options.get("python") || "python";
 const cache = resolve(options.get("cache") || ".private/desktop-trainer-cache");
-const output = resolve(options.get("output") || ".private/desktop-resources/assets/drawhime-anima-trainer-win-x64.zip");
+const output = resolve(options.get("output") || ".private/desktop-resources/assets/drawhime-anima-trainer-win-x64-v2.zip");
 const staging = resolve(options.get("staging") || ".private/desktop-trainer-build");
 const component = join(staging, "drawhime-anima-trainer");
 const packageRoot = join(component, "site-packages");
@@ -55,7 +56,7 @@ await cp(resolve("deploy/desktop-trainer/runner.py"), join(component, "runner.py
 await writeFile(join(component, "component-manifest.json"), `${JSON.stringify({
   schemaVersion: 1,
   component: "trainer",
-  version: `anima-sd-scripts-${REVISION.slice(0, 12)}-py312-v1`,
+  version: `anima-sd-scripts-${REVISION.slice(0, 12)}-py312-v${COMPONENT_REVISION}`,
   runtimePython: "3.12",
   source: { repository: "kohya-ss/sd-scripts", revision: REVISION, license: "Apache-2.0", sha256: SOURCE.sha256 },
   packages: PACKAGES,

@@ -120,9 +120,15 @@ def build_command(request: dict, config: Path, workspace: Path) -> list[str]:
     optimizer_steps = max(1, (image_passes + parameters["gradientAccumulationSteps"] - 1) // parameters["gradientAccumulationSteps"])
     warmup_steps = round(optimizer_steps * float(parameters["warmupRatio"]))
     blocks_to_swap = choose_blocks_to_swap(parameters["resolution"])
+    training_entrypoint = write_training_entrypoint(workspace)
+    accelerate_bootstrap = (
+        "import sys;"
+        f"sys.path[:0]=[{str(SITE_PACKAGES)!r},{str(SD_SCRIPTS)!r}];"
+        "from accelerate.commands.launch import main;main()"
+    )
     command = [
-        sys.executable, "-m", "accelerate.commands.launch", "--num_cpu_threads_per_process", "4",
-        str(SD_SCRIPTS / "anima_train_network.py"),
+        sys.executable, "-c", accelerate_bootstrap, "--num_cpu_threads_per_process", "4",
+        str(training_entrypoint),
         f"--pretrained_model_name_or_path={request['modelPath']}", f"--qwen3={request['textEncoderPath']}", f"--vae={request['vaePath']}",
         f"--dataset_config={config}", f"--output_dir={output_dir}", f"--output_name={request['outputName']}",
         "--save_model_as=safetensors", "--network_module=networks.lora_anima", "--network_train_unet_only",
@@ -138,6 +144,21 @@ def build_command(request: dict, config: Path, workspace: Path) -> list[str]:
     if parameters["lrScheduler"] == "cosine_with_restarts":
         command.append("--lr_scheduler_num_cycles=2")
     return command
+
+
+def write_training_entrypoint(workspace: Path) -> Path:
+    """生成子进程入口，显式恢复 Windows Embedded Python 忽略的组件依赖路径。"""
+    entrypoint = workspace / "launch_anima.py"
+    entrypoint.write_text(
+        "\"\"\"本文件由桌面 Trainer 为当前任务生成，用于恢复隔离 Python 的依赖搜索路径。\"\"\"\n"
+        "import os\nimport runpy\nimport sys\n"
+        "site_packages = os.environ['DRAWHIME_TRAINER_SITE_PACKAGES']\n"
+        "sd_scripts = os.environ['DRAWHIME_TRAINER_SD_SCRIPTS']\n"
+        "sys.path[:0] = [site_packages, sd_scripts]\n"
+        "runpy.run_path(os.path.join(sd_scripts, 'anima_train_network.py'), run_name='__main__')\n",
+        encoding="utf-8",
+    )
+    return entrypoint
 
 
 def choose_blocks_to_swap(resolution: int) -> int:
@@ -166,6 +187,8 @@ def run_training(command: list[str], workspace: Path, total_epochs: int) -> Path
     environment = {
         **os.environ,
         "PYTHONPATH": os.pathsep.join((str(SITE_PACKAGES), str(SD_SCRIPTS))),
+        "DRAWHIME_TRAINER_SITE_PACKAGES": str(SITE_PACKAGES),
+        "DRAWHIME_TRAINER_SD_SCRIPTS": str(SD_SCRIPTS),
         "PYTHONUTF8": "1", "PYTHONUNBUFFERED": "1", "PYTHONNOUSERSITE": "1",
         "HF_HOME": str(workspace / "hf-cache"), "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1",
     }
@@ -173,6 +196,8 @@ def run_training(command: list[str], workspace: Path, total_epochs: int) -> Path
     log_path = workspace / "training.log"
     process = subprocess.Popen(command, cwd=SD_SCRIPTS, env=environment, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace", bufsize=1, creationflags=flags)
     emit({"kind": "progress", "progress": 3, "currentEpoch": 0})
+    last_progress = 3
+    last_epoch = 0
     try:
         assert process.stdout is not None
         with log_path.open("a", encoding="utf-8") as log:
@@ -181,13 +206,20 @@ def run_training(command: list[str], workspace: Path, total_epochs: int) -> Path
                 log.flush()
                 epoch = re.search(r"epoch\s+(\d+)\s*/\s*(\d+)", line, re.I)
                 if epoch:
-                    current = min(total_epochs, int(epoch.group(1)))
-                    emit({"kind": "progress", "progress": min(95, max(3, round(current / max(1, total_epochs) * 95))), "currentEpoch": current})
+                    current = max(0, min(total_epochs, int(epoch.group(1)) - 1))
+                    progress = min(94, max(last_progress, round(current / max(1, total_epochs) * 95)))
+                    if progress != last_progress or current != last_epoch:
+                        emit({"kind": "progress", "progress": progress, "currentEpoch": current})
+                        last_progress, last_epoch = progress, current
                     continue
                 steps = re.search(r"steps:\s*(\d+)%.*?(\d+)\s*/\s*(\d+)", line, re.I)
                 if steps:
                     percent = min(100, int(steps.group(1)))
-                    emit({"kind": "progress", "progress": min(95, max(3, round(percent * 0.95))), "currentEpoch": min(total_epochs, percent * total_epochs // 100)})
+                    progress = min(95, max(last_progress, round(percent * 0.95)))
+                    current = max(last_epoch, min(total_epochs, percent * total_epochs // 100))
+                    if progress != last_progress or current != last_epoch:
+                        emit({"kind": "progress", "progress": progress, "currentEpoch": current})
+                        last_progress, last_epoch = progress, current
         exit_code = process.wait()
     except BaseException:
         terminate_process_tree(process)
