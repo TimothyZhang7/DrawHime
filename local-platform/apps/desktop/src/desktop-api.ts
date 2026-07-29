@@ -1,5 +1,5 @@
 /** 本文件封装 WebView 到 Tauri 本地核心的受类型约束命令。 */
-import type { DesktopBootstrapView, DesktopEnvironmentReport, DesktopGalleryPrivacy, DesktopGallerySyncItem, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView, DesktopSettings, DesktopSettingsUpdate, DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetIdInput, DesktopTrainingDatasetView, DesktopTrainingImagesAddInput } from "@drawhime/contracts";
+import type { DesktopBootstrapView, DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopEnvironmentReport, DesktopGalleryPrivacy, DesktopGallerySyncItem, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView, DesktopSettings, DesktopSettingsUpdate, DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetIdInput, DesktopTrainingDatasetView, DesktopTrainingImagesAddInput } from "@drawhime/contracts";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
@@ -47,6 +47,14 @@ export function listDesktopTrainingDatasets(): Promise<DesktopTrainingDatasetVie
 export function addDesktopTrainingImages(input: DesktopTrainingImagesAddInput): Promise<DesktopTrainingDatasetView> { return invoke("desktop_add_training_images", { input }); }
 /** 保存单张训练图片 Caption。 */
 export function updateDesktopTrainingCaption(input: DesktopTrainingCaptionUpdateInput): Promise<DesktopTrainingDatasetView> { return invoke("desktop_update_training_caption", { input }); }
+/** 创建批量或单图离线自动打标任务。 */
+export function createDesktopCaptionJob(input: DesktopCaptionJobCreateInput): Promise<DesktopCaptionJobView> { return invoke("desktop_create_caption_job", { input }); }
+/** 读取最近的持久化离线自动打标任务。 */
+export function listDesktopCaptionJobs(): Promise<DesktopCaptionJobView[]> { return invoke("desktop_list_caption_jobs"); }
+/** 取消排队或运行中的离线自动打标任务。 */
+export function cancelDesktopCaptionJob(id: string): Promise<DesktopCaptionJobView> { return invoke("desktop_cancel_caption_job", { id }); }
+/** 监听 SQLite 已持久化的离线自动打标状态。 */
+export function listenDesktopCaptionJobUpdates(handler: (job: DesktopCaptionJobView) => void): Promise<UnlistenFn> { return listen<DesktopCaptionJobView>("desktop-caption-job-updated", (event) => handler(event.payload)); }
 /** 全量校验后确认训练集。 */
 export function confirmDesktopTrainingDataset(input: DesktopTrainingDatasetIdInput): Promise<DesktopTrainingDatasetView> { return invoke("desktop_confirm_training_dataset", { input }); }
 /** 持久化创建本地生成任务并立即返回。 */

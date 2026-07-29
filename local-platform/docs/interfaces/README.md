@@ -47,6 +47,10 @@
 | `desktop_list_training_datasets` | desktop webview | desktop core | 返回当前设备训练集、真实图片文件摘要、逐图 Caption 和确认状态；应用重启后仍以 SQLite 为准 |
 | `desktop_add_training_images` | desktop webview | desktop core | 校验并原子复制用户选择的 PNG/JPEG/WebP，读取真实尺寸和 SHA-256；同训练集内容去重且总量不超过 200，添加后重新执行确认门禁 |
 | `desktop_update_training_caption` | desktop webview | desktop core | 逐图保存人工 Caption；修改后只使当前训练集回到待确认，不改写其他图片内容 |
+| `desktop_create_caption_job` | desktop webview | desktop core/caption scheduler | 按训练集或单张图片创建持久化离线打标任务；批量任务跳过人工 Caption，单图重新打标属于用户明确覆盖操作；对应 `DesktopCaptionJobCreateInput` 和 `DesktopCaptionJobView` |
+| `desktop_list_caption_jobs` | desktop webview | desktop core | 返回最近 100 个打标任务、逐图状态、阈值、进度和脱敏错误；应用重启后仍以 SQLite 为准 |
+| `desktop_cancel_caption_job` | desktop webview | desktop core/caption scheduler | 幂等取消排队或运行中的打标任务，已经成功落库的逐图 Caption 保留 |
+| `desktop-caption-job-updated` | desktop core/caption scheduler | desktop webview | 离线打标任务及逐图状态变化事件；载荷为 `DesktopCaptionJobView` |
 | `desktop_confirm_training_dataset` | desktop webview | desktop core | 仅在训练集含 5–200 张图片且每张 Caption 非空时事务化确认，确认成功后才允许进入训练参数阶段 |
 | `desktop_create_local_job` | desktop webview | desktop core/local scheduler | 校验模型与最多 4 个 LoRA 快照、提示词和参数后持久化创建 `DesktopLocalJobView`；提交立即返回排队状态，后台串行调度不会阻塞页面 |
 | `desktop_list_local_jobs` | desktop webview | desktop core | 分页前的首版接口返回当前设备最近 100 个本地任务及产物摘要，任务、尝试和错误在应用重启后保留 |

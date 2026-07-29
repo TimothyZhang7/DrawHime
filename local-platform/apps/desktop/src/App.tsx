@@ -1,13 +1,13 @@
 /**
  * 本文件实现桌面生成、任务、模型、Runtime、资源、环境、图库同步和本地设置的响应式工作区。
  */
-import type { DesktopBootstrapView, DesktopEnvironmentReport, DesktopGallerySyncItem, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView, DesktopSettings, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetView } from "@drawhime/contracts";
-import { Activity, AlertTriangle, BookOpenCheck, CheckCircle2, Cpu, Database, Download, FlaskConical, FolderCog, FolderPlus, Gauge, HardDrive, Image, Images, Layers3, LoaderCircle, MemoryStick, Monitor, Moon, PackageCheck, PackageOpen, Play, Power, RefreshCw, Save, Settings2, ShieldCheck, Sun, Upload, UploadCloud, X } from "lucide-react";
+import type { DesktopBootstrapView, DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopEnvironmentReport, DesktopGallerySyncItem, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView, DesktopSettings, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetView } from "@drawhime/contracts";
+import { Activity, AlertTriangle, BookOpenCheck, CheckCircle2, Cpu, Database, Download, FlaskConical, FolderCog, FolderPlus, Gauge, HardDrive, Image, Images, Layers3, LoaderCircle, MemoryStick, Monitor, Moon, PackageCheck, PackageOpen, Play, Power, RefreshCw, Save, Settings2, ShieldCheck, Sun, Tags, Upload, UploadCloud, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { addDesktopTrainingImages, cancelDesktopLocalJob, confirmDesktopTrainingDataset, createDesktopLocalJob, createDesktopTrainingDataset, downloadDesktopResource, importDesktopLocalLora, importDesktopLocalModel, inspectDesktopEnvironment, installDesktopResource, listDesktopGallerySyncQueue, listDesktopLocalJobs, listDesktopLocalLoras, listDesktopLocalModels, listDesktopTrainingDatasets, listenDesktopLocalJobUpdates, listenDesktopResourceInstallProgress, listenDesktopResourceProgress, loadDesktopBootstrap, loadDesktopResourceCatalog, loadDesktopRuntimeStatus, saveDesktopSettings, selfTestDesktopRuntime, startDesktopRuntime, stopDesktopRuntime, updateDesktopTrainingCaption } from "./desktop-api";
+import { addDesktopTrainingImages, cancelDesktopCaptionJob, cancelDesktopLocalJob, confirmDesktopTrainingDataset, createDesktopCaptionJob, createDesktopLocalJob, createDesktopTrainingDataset, downloadDesktopResource, importDesktopLocalLora, importDesktopLocalModel, inspectDesktopEnvironment, installDesktopResource, listDesktopCaptionJobs, listDesktopGallerySyncQueue, listDesktopLocalJobs, listDesktopLocalLoras, listDesktopLocalModels, listDesktopTrainingDatasets, listenDesktopCaptionJobUpdates, listenDesktopLocalJobUpdates, listenDesktopResourceInstallProgress, listenDesktopResourceProgress, loadDesktopBootstrap, loadDesktopResourceCatalog, loadDesktopRuntimeStatus, saveDesktopSettings, selfTestDesktopRuntime, startDesktopRuntime, stopDesktopRuntime, updateDesktopTrainingCaption } from "./desktop-api";
 
 type DesktopPage = "generate" | "jobs" | "models" | "loras" | "training" | "overview" | "environment" | "resources" | "sync" | "settings";
 
@@ -35,6 +35,7 @@ export function App() {
   const [models, setModels] = useState<DesktopLocalModelView[]>([]);
   const [loras, setLoras] = useState<DesktopLocalLoraView[]>([]);
   const [trainingDatasets, setTrainingDatasets] = useState<DesktopTrainingDatasetView[]>([]);
+  const [captionJobs, setCaptionJobs] = useState<DesktopCaptionJobView[]>([]);
   const [jobs, setJobs] = useState<DesktopLocalJobView[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -45,13 +46,23 @@ export function App() {
   const [message, setMessage] = useState("");
   const environmentCheckRunning = useRef(false);
   const lastEnvironmentCheckAt = useRef(0);
+  const captionDatasetRefresh = useRef<number | null>(null);
   const bootstrapReady = bootstrap !== null;
 
-  useEffect(() => { void loadDesktopBootstrap().then(async (state) => { lastEnvironmentCheckAt.current = Date.now(); setBootstrap(state); const [nextQueue, catalog, nextModels, nextJobs, nextLoras, nextTrainingDatasets] = await Promise.all([listDesktopGallerySyncQueue(), loadDesktopResourceCatalog(), listDesktopLocalModels(), listDesktopLocalJobs(), listDesktopLocalLoras(), listDesktopTrainingDatasets()]); setQueue(nextQueue); setResourceCatalog(catalog); setModels(nextModels); setJobs(nextJobs); setLoras(nextLoras); setTrainingDatasets(nextTrainingDatasets); }).catch((error) => setMessage(errorMessage(error))).finally(() => setLoading(false)); }, []);
+  useEffect(() => { void loadDesktopBootstrap().then(async (state) => { lastEnvironmentCheckAt.current = Date.now(); setBootstrap(state); const [nextQueue, catalog, nextModels, nextJobs, nextLoras, nextTrainingDatasets, nextCaptionJobs] = await Promise.all([listDesktopGallerySyncQueue(), loadDesktopResourceCatalog(), listDesktopLocalModels(), listDesktopLocalJobs(), listDesktopLocalLoras(), listDesktopTrainingDatasets(), listDesktopCaptionJobs()]); setQueue(nextQueue); setResourceCatalog(catalog); setModels(nextModels); setJobs(nextJobs); setLoras(nextLoras); setTrainingDatasets(nextTrainingDatasets); setCaptionJobs(nextCaptionJobs); }).catch((error) => setMessage(errorMessage(error))).finally(() => setLoading(false)); }, []);
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     void listenDesktopResourceProgress((progress) => setResourceProgress((current) => ({ ...current, [progress.resourceId]: progress }))).then((dispose) => { unlisten = dispose; }).catch((error) => setMessage(errorMessage(error)));
     return () => unlisten?.();
+  }, []);
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    void listenDesktopCaptionJobUpdates((job) => {
+      setCaptionJobs((current) => [job, ...current.filter((item) => item.id !== job.id)].sort((left, right) => right.createdAt.localeCompare(left.createdAt)));
+      if (captionDatasetRefresh.current !== null) window.clearTimeout(captionDatasetRefresh.current);
+      captionDatasetRefresh.current = window.setTimeout(() => void listDesktopTrainingDatasets().then(setTrainingDatasets).catch((error) => setMessage(errorMessage(error))), 120);
+    }).then((dispose) => { unlisten = dispose; }).catch((error) => setMessage(errorMessage(error)));
+    return () => { unlisten?.(); if (captionDatasetRefresh.current !== null) window.clearTimeout(captionDatasetRefresh.current); };
   }, []);
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -179,6 +190,10 @@ export function App() {
   const trainingDatasetUpdated = (dataset: DesktopTrainingDatasetView) => {
     setTrainingDatasets((current) => [dataset, ...current.filter((item) => item.id !== dataset.id)]);
   };
+  /** 打标任务按 ID 实时更新，数据库事件是进度事实源。 */
+  const captionJobUpdated = (job: DesktopCaptionJobView) => {
+    setCaptionJobs((current) => [job, ...current.filter((item) => item.id !== job.id)].sort((left, right) => right.createdAt.localeCompare(left.createdAt)));
+  };
   const jobCreated = (job: DesktopLocalJobView) => {
     setJobs((current) => [job, ...current.filter((item) => item.id !== job.id)]);
     setMessage("本地任务已进入持久队列");
@@ -200,7 +215,7 @@ export function App() {
       <div hidden={page !== "jobs"}><JobsPage jobs={jobs} onCancel={(id) => void cancelJob(id)} /></div>
       <div hidden={page !== "models"}><ModelsPage models={models} onImported={modelImported} onError={setMessage} /></div>
       <div hidden={page !== "loras"}><LorasPage loras={loras} onImported={loraImported} onError={setMessage} /></div>
-      <div hidden={page !== "training"}><TrainingPage datasets={trainingDatasets} onUpdated={trainingDatasetUpdated} onError={setMessage} /></div>
+      <div hidden={page !== "training"}><TrainingPage datasets={trainingDatasets} captionJobs={captionJobs} captioningReady={bootstrap.environment.capabilities.captioning} onUpdated={trainingDatasetUpdated} onCaptionJobUpdated={captionJobUpdated} onOpenResources={() => setPage("resources")} onError={setMessage} /></div>
       <div hidden={page !== "overview"}><OverviewPage state={bootstrap} runtimeBusy={runtimeBusy} onRuntimeAction={(action) => void controlRuntime(action)} /></div>
       <div hidden={page !== "environment"}><EnvironmentPage report={bootstrap.environment} /></div>
       <div hidden={page !== "resources"}><ResourcesPage catalog={resourceCatalog} progress={resourceProgress} installProgress={installProgress} loading={catalogLoading} bulkBusy={resourceBulkBusy} onReload={() => void reloadResourceCatalog()} onInstallRequired={() => void installRequiredResources()} onDownload={(resourceId) => void downloadResource(resourceId)} onInstall={(resourceId) => void installResource(resourceId)} /></div>
@@ -284,13 +299,16 @@ function LorasPage({ loras, onImported, onError }: { loras: DesktopLocalLoraView
   return <div className="desktop-page lora-layout"><section className="section-card model-import"><header><div><span>LORA IMPORT</span><h2>导入本机 LoRA</h2></div><small>内容哈希去重 · 受控目录保存</small></header><div className="model-import-grid"><label><span>标题</span><input maxLength={191} value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} /></label><label><span>类型</span><select value={form.type} onChange={(event) => setForm({ ...form, type: event.target.value as DesktopLocalLoraImportInput["type"] })}>{["style", "character", "concept", "clothing", "pose", "other"].map((type) => <option key={type} value={type}>{loraTypeLabel(type)}</option>)}</select></label><label><span>触发词</span><input value={triggerText} onChange={(event) => setTriggerText(event.target.value)} placeholder="多个触发词使用逗号分隔" /></label><FilePicker label="LoRA 文件" value={form.sourcePath} onPick={() => void chooseFile()} /></div><footer><button disabled={busy || !form.title.trim() || !form.sourcePath} onClick={() => void submit()}>{busy ? <LoaderCircle className="spin" /> : <Download />}{busy ? "正在校验并导入" : "导入 LoRA"}</button></footer></section><section className="section-card"><header><div><span>LOCAL LORA LIBRARY</span><h2>已登记 LoRA</h2></div><small>{loras.length} 个</small></header>{loras.length ? <div className="lora-library-grid">{loras.map((lora) => <article key={lora.id} className={lora.available ? "is-ready" : "is-missing"}><div><Layers3 /><b>{loraTypeLabel(lora.type)}</b></div><strong>{lora.title}</strong><span>{lora.triggerWords.join(", ") || "无触发词"}</span><small>{lora.fileName} · {formatResourceBytes(lora.byteSize)} · {lora.sha256.slice(0, 12)}</small><i>{lora.available ? "可用" : "文件已变化"}</i></article>)}</div> : <div className="empty-block">当前设备尚未登记 LoRA</div>}</section></div>;
 }
 
-/** LoRA 训练页先完成真实训练集、图片导入、逐图 Caption 与确认门禁。 */
-function TrainingPage({ datasets, onUpdated, onError }: { datasets: DesktopTrainingDatasetView[]; onUpdated: (dataset: DesktopTrainingDatasetView) => void; onError: (message: string) => void }) {
+/** LoRA 训练页统一管理真实训练集、离线自动打标、人工 Caption 与确认门禁。 */
+function TrainingPage({ datasets, captionJobs, captioningReady, onUpdated, onCaptionJobUpdated, onOpenResources, onError }: { datasets: DesktopTrainingDatasetView[]; captionJobs: DesktopCaptionJobView[]; captioningReady: boolean; onUpdated: (dataset: DesktopTrainingDatasetView) => void; onCaptionJobUpdated: (job: DesktopCaptionJobView) => void; onOpenResources: () => void; onError: (message: string) => void }) {
   const [selectedId, setSelectedId] = useState("");
   const [form, setForm] = useState<DesktopTrainingDatasetCreateInput>({ title: "", type: "character", triggerWords: [] });
   const [triggerText, setTriggerText] = useState("");
   const [busy, setBusy] = useState(false);
+  const [captionOptions, setCaptionOptions] = useState<Pick<DesktopCaptionJobCreateInput, "generalThreshold" | "characterThreshold" | "includeCharacterTags">>({ generalThreshold: 0.35, characterThreshold: 0.85, includeCharacterTags: false });
   const selected = datasets.find((dataset) => dataset.id === selectedId) || null;
+  const activeCaptionJob = captionJobs.find((job) => job.datasetId === selectedId && ["queued", "running"].includes(job.status)) || null;
+  const latestCaptionJob = captionJobs.find((job) => job.datasetId === selectedId) || null;
   useEffect(() => { if (!datasets.some((dataset) => dataset.id === selectedId)) setSelectedId(datasets[0]?.id || ""); }, [datasets, selectedId]);
   const create = async () => {
     if (busy || !form.title.trim()) return;
@@ -319,13 +337,29 @@ function TrainingPage({ datasets, onUpdated, onError }: { datasets: DesktopTrain
     catch (error) { onError(errorMessage(error)); }
     finally { setBusy(false); }
   };
+  /** 批量任务保护人工 Caption；单图按钮是用户明确请求重新识别。 */
+  const caption = async (assetId: string | null) => {
+    if (!selected || busy || activeCaptionJob || !captioningReady) return;
+    setBusy(true);
+    try { onCaptionJobUpdated(await createDesktopCaptionJob({ datasetId: selected.id, assetId, ...captionOptions })); }
+    catch (error) { onError(errorMessage(error)); }
+    finally { setBusy(false); }
+  };
+  const cancelCaption = async () => {
+    if (!activeCaptionJob || busy) return;
+    setBusy(true);
+    try { onCaptionJobUpdated(await cancelDesktopCaptionJob(activeCaptionJob.id)); }
+    catch (error) { onError(errorMessage(error)); }
+    finally { setBusy(false); }
+  };
   const missingCaptions = selected?.assets.filter((asset) => !asset.caption?.trim()).length || 0;
   const unavailableAssets = selected?.assets.filter((asset) => !asset.available).length || 0;
-  return <div className="desktop-page training-page"><section className="section-card training-create"><header><div><span>TRAINING DATASETS</span><h2>LoRA 训练集</h2></div><small>图片与 Caption 全部持久化</small></header><div><label><span>训练集标题</span><input maxLength={191} value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} placeholder="例如：角色立绘训练集" /></label><label><span>训练类型</span><select value={form.type} onChange={(event) => setForm({ ...form, type: event.target.value as DesktopTrainingDatasetCreateInput["type"] })}><option value="character">角色</option><option value="style">画风</option><option value="concept">概念</option></select></label><label><span>触发词</span><input value={triggerText} onChange={(event) => setTriggerText(event.target.value)} placeholder="建议使用唯一、无语义的英文词" /></label><button disabled={busy || !form.title.trim()} onClick={() => void create()}>{busy ? <LoaderCircle className="spin" /> : <FolderPlus />}创建训练集</button></div></section><div className="training-workspace"><aside className="section-card training-dataset-list"><header><strong>训练集</strong><small>{datasets.length} 个</small></header>{datasets.length ? datasets.map((dataset) => <button key={dataset.id} className={dataset.id === selectedId ? "active" : ""} onClick={() => setSelectedId(dataset.id)}><span><strong>{dataset.title}</strong><small>{trainingTypeLabel(dataset.type)} · {dataset.assets.length} 张</small></span><b className={`is-${dataset.status}`}>{trainingStatusLabel(dataset.status)}</b></button>) : <div className="empty-block">创建第一个本地训练集</div>}</aside><section className="section-card training-editor">{selected ? <><header><div><span>{trainingTypeLabel(selected.type)} · {selected.triggerWords.join(", ") || "未设置触发词"}</span><h2>{selected.title}</h2></div><div className="training-editor-actions"><button disabled={busy || selected.assets.length >= 200} onClick={() => void addImages()}><Upload />导入图片</button><button disabled={busy || selected.assets.length < 5 || missingCaptions > 0 || unavailableAssets > 0 || selected.status === "confirmed"} onClick={() => void confirm()}><BookOpenCheck />确认训练集</button></div></header><div className="training-gate"><span><strong>{selected.assets.length}/200 张</strong><small>{unavailableAssets ? `${unavailableAssets} 张文件缺失或已变化` : missingCaptions ? `${missingCaptions} 张缺少 Caption` : selected.assets.length >= 5 ? "全部 Caption 已填写" : `还需 ${5 - selected.assets.length} 张图片`}</small></span><b className={`is-${selected.status}`}>{trainingStatusLabel(selected.status)}</b></div>{selected.assets.length ? <div className="training-asset-list">{selected.assets.map((asset) => <TrainingAssetRow key={asset.id} datasetId={selected.id} asset={asset} onUpdated={onUpdated} onError={onError} />)}</div> : <div className="empty-block">导入 5–200 张 PNG、JPEG 或 WebP 开始整理训练集</div>}</> : <div className="empty-block">从左侧选择训练集</div>}</section></div></div>;
+  const batchCandidates = selected?.assets.filter((asset) => asset.captionSource !== "manual").length || 0;
+  return <div className="desktop-page training-page"><section className="section-card training-create"><header><div><span>TRAINING DATASETS</span><h2>LoRA 训练集</h2></div><small>图片、Caption 与任务进度全部持久化</small></header><div><label><span>训练集标题</span><input maxLength={191} value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} placeholder="例如：角色立绘训练集" /></label><label><span>训练类型</span><select value={form.type} onChange={(event) => setForm({ ...form, type: event.target.value as DesktopTrainingDatasetCreateInput["type"] })}><option value="character">角色</option><option value="style">画风</option><option value="concept">概念</option></select></label><label><span>触发词</span><input value={triggerText} onChange={(event) => setTriggerText(event.target.value)} placeholder="建议使用唯一、无语义的英文词" /></label><button disabled={busy || !form.title.trim()} onClick={() => void create()}>{busy ? <LoaderCircle className="spin" /> : <FolderPlus />}创建训练集</button></div></section><div className="training-workspace"><aside className="section-card training-dataset-list"><header><strong>训练集</strong><small>{datasets.length} 个</small></header>{datasets.length ? datasets.map((dataset) => <button key={dataset.id} className={dataset.id === selectedId ? "active" : ""} onClick={() => setSelectedId(dataset.id)}><span><strong>{dataset.title}</strong><small>{trainingTypeLabel(dataset.type)} · {dataset.assets.length} 张</small></span><b className={`is-${dataset.status}`}>{trainingStatusLabel(dataset.status)}</b></button>) : <div className="empty-block">创建第一个本地训练集</div>}</aside><section className="section-card training-editor">{selected ? <><header><div><span>{trainingTypeLabel(selected.type)} · {selected.triggerWords.join(", ") || "未设置触发词"}</span><h2>{selected.title}</h2></div><div className="training-editor-actions"><button disabled={busy || selected.assets.length >= 200} onClick={() => void addImages()}><Upload />导入图片</button><button disabled={busy || Boolean(activeCaptionJob) || selected.assets.length < 5 || missingCaptions > 0 || unavailableAssets > 0 || selected.status === "confirmed"} onClick={() => void confirm()}><BookOpenCheck />确认训练集</button></div></header><div className="training-gate"><span><strong>{selected.assets.length}/200 张</strong><small>{unavailableAssets ? `${unavailableAssets} 张文件缺失或已变化` : missingCaptions ? `${missingCaptions} 张缺少 Caption` : selected.assets.length >= 5 ? "全部 Caption 已填写" : `还需 ${5 - selected.assets.length} 张图片`}</small></span><b className={`is-${selected.status}`}>{trainingStatusLabel(selected.status)}</b></div><section className="caption-control"><div className="caption-control-title"><Tags /><span><strong>离线自动打标</strong><small>WD ViT Tagger v3 · 批量任务保护人工 Caption</small></span></div>{captioningReady ? <div className="caption-options"><label><span>通用阈值</span><input type="number" min={0.05} max={0.95} step={0.05} value={captionOptions.generalThreshold} onChange={(event) => setCaptionOptions({ ...captionOptions, generalThreshold: Number(event.target.value) })} /></label><label><span>角色阈值</span><input type="number" min={0.05} max={0.99} step={0.05} value={captionOptions.characterThreshold} onChange={(event) => setCaptionOptions({ ...captionOptions, characterThreshold: Number(event.target.value) })} /></label><label className="caption-character-toggle"><input type="checkbox" checked={captionOptions.includeCharacterTags} onChange={(event) => setCaptionOptions({ ...captionOptions, includeCharacterTags: event.target.checked })} /><span>包含角色标签</span></label><button disabled={busy || Boolean(activeCaptionJob) || batchCandidates === 0 || unavailableAssets > 0} onClick={() => void caption(null)}>{busy ? <LoaderCircle className="spin" /> : <Tags />}{activeCaptionJob ? "打标进行中" : `自动打标 ${batchCandidates} 张`}</button></div> : <button className="caption-install" onClick={onOpenResources}><Download />安装打标组件</button>}{latestCaptionJob && <div className={`caption-job is-${latestCaptionJob.status}`}><div><span><strong>{captionJobStatusLabel(latestCaptionJob.status)}</strong><small>{latestCaptionJob.processedAssets}/{latestCaptionJob.totalAssets} · 成功 {latestCaptionJob.succeededAssets} · 失败 {latestCaptionJob.failedAssets} · 保留人工 {latestCaptionJob.skippedAssets}</small></span><b>{latestCaptionJob.progress}%</b></div><i><em style={{ width: `${latestCaptionJob.progress}%` }} /></i>{latestCaptionJob.error && <small>{latestCaptionJob.error}</small>}{activeCaptionJob && <button disabled={busy} onClick={() => void cancelCaption()}><X />取消任务</button>}</div>}</section>{selected.assets.length ? <div className="training-asset-list">{selected.assets.map((asset) => <TrainingAssetRow key={asset.id} datasetId={selected.id} asset={asset} captionItem={latestCaptionJob?.items.find((item) => item.assetId === asset.id) || null} captioningReady={captioningReady} captionJobActive={Boolean(activeCaptionJob)} onRetag={() => void caption(asset.id)} onUpdated={onUpdated} onError={onError} />)}</div> : <div className="empty-block">导入 5–200 张 PNG、JPEG 或 WebP 开始整理训练集</div>}</> : <div className="empty-block">从左侧选择训练集</div>}</section></div></div>;
 }
 
 /** 单图编辑器独立保存草稿，其他图片保存成功时不会覆盖尚未提交的输入。 */
-function TrainingAssetRow({ datasetId, asset, onUpdated, onError }: { datasetId: string; asset: DesktopTrainingDatasetView["assets"][number]; onUpdated: (dataset: DesktopTrainingDatasetView) => void; onError: (message: string) => void }) {
+function TrainingAssetRow({ datasetId, asset, captionItem, captioningReady, captionJobActive, onRetag, onUpdated, onError }: { datasetId: string; asset: DesktopTrainingDatasetView["assets"][number]; captionItem: DesktopCaptionJobView["items"][number] | null; captioningReady: boolean; captionJobActive: boolean; onRetag: () => void; onUpdated: (dataset: DesktopTrainingDatasetView) => void; onError: (message: string) => void }) {
   const [caption, setCaption] = useState(asset.caption || "");
   const [busy, setBusy] = useState(false);
   useEffect(() => setCaption(asset.caption || ""), [asset.caption]);
@@ -337,7 +371,8 @@ function TrainingAssetRow({ datasetId, asset, onUpdated, onError }: { datasetId:
     catch (error) { onError(errorMessage(error)); }
     finally { setBusy(false); }
   };
-  return <article className={asset.available ? "" : "is-missing"}><div className="training-asset-image">{asset.available ? <img loading="lazy" src={convertFileSrc(asset.path)} alt={asset.fileName} /> : <div><AlertTriangle /><span>文件缺失</span></div>}<span>{asset.width}×{asset.height}</span></div><div className="training-asset-caption"><header><strong>{asset.fileName}</strong><small>{asset.sha256.slice(0, 12)} · {formatResourceBytes(asset.byteSize)}</small></header><textarea value={caption} onChange={(event) => setCaption(event.target.value)} placeholder="使用英文逗号分隔准确标签；人工保存后不会被后台改写" /><footer><span className={asset.available ? asset.confirmed ? "confirmed" : "pending" : "missing"}>{asset.available ? asset.confirmed ? "已确认" : asset.caption ? "待重新确认" : "缺少 Caption" : "文件缺失或已变化"}</span><button disabled={!changed || busy} onClick={() => void save()}>{busy ? <LoaderCircle className="spin" /> : <Save />}{busy ? "保存中" : "保存 Caption"}</button></footer></div></article>;
+  const sourceText = asset.captionSource === "manual" ? "人工 Caption" : asset.captionSource === "auto" ? "自动 Caption" : "尚未打标";
+  return <article className={asset.available ? "" : "is-missing"}><div className="training-asset-image">{asset.available ? <img loading="lazy" src={convertFileSrc(asset.path)} alt={asset.fileName} /> : <div><AlertTriangle /><span>文件缺失</span></div>}<span>{asset.width}×{asset.height}</span></div><div className="training-asset-caption"><header><strong>{asset.fileName}</strong><small>{asset.sha256.slice(0, 12)} · {formatResourceBytes(asset.byteSize)}</small></header><textarea value={caption} onChange={(event) => setCaption(event.target.value)} placeholder="使用英文逗号分隔准确标签；人工保存后批量任务不会改写" /><footer><span className={asset.available ? asset.confirmed ? "confirmed" : "pending" : "missing"}>{asset.available ? asset.confirmed ? "已确认" : `${sourceText}${captionItem ? ` · ${captionItemStatusLabel(captionItem.status)}` : ""}` : "文件缺失或已变化"}</span><div><button className="caption-row-action" disabled={!captioningReady || captionJobActive || busy || !asset.available} onClick={onRetag}><Tags />重新打标</button><button disabled={!changed || busy} onClick={() => void save()}>{busy ? <LoaderCircle className="spin" /> : <Save />}{busy ? "保存中" : "保存 Caption"}</button></div></footer>{captionItem?.error && <small className="caption-item-error">{captionItem.error}</small>}</div></article>;
 }
 
 /** 原生文件选择字段只展示已选路径，不允许网页侧直接读取文件内容。 */
@@ -395,6 +430,8 @@ function pageTitle(page: DesktopPage): string { return { generate: "本地生成
 function loraTypeLabel(type: string): string { return { style: "画风", character: "角色", concept: "概念", clothing: "服装", pose: "姿势", other: "其他" }[type] || type; }
 function trainingTypeLabel(type: DesktopTrainingDatasetView["type"]): string { return { character: "角色", style: "画风", concept: "概念" }[type]; }
 function trainingStatusLabel(status: DesktopTrainingDatasetView["status"]): string { return { draft: "整理中", review_ready: "可确认", confirmed: "已确认" }[status]; }
+function captionJobStatusLabel(status: DesktopCaptionJobView["status"]): string { return { queued: "等待离线打标", running: "正在离线打标", succeeded: "自动打标完成", failed: "自动打标部分或全部失败", cancelled: "自动打标已取消" }[status]; }
+function captionItemStatusLabel(status: DesktopCaptionJobView["items"][number]["status"]): string { return { queued: "等待打标", running: "识别中", succeeded: "识别完成", failed: "识别失败", skipped: "保留人工内容", cancelled: "已取消" }[status]; }
 function runtimeLabel(status: DesktopEnvironmentReport["runtime"]["status"]): string { return { not_installed: "未安装", installed_unverified: "等待自检", ready: "运行正常", broken: "需要修复" }[status]; }
 function syncStatusLabel(status: DesktopGallerySyncItem["status"]): string { return { queued: "等待上传", waiting_network: "等待网络", waiting_auth: "等待登录", uploading: "上传中", committing: "正在提交", synced: "已同步", privacy_pending: "权限待同步", paused: "已暂停", failed_retryable: "等待重试", failed_final: "同步失败", remote_deleted: "网页已删除" }[status]; }
 /** 主题选项使用简短中文标签供按钮标题和辅助技术读取。 */

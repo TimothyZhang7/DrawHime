@@ -1548,6 +1548,180 @@ select:focus-visible {
   display: block;
 }
 
+/* 离线打标控制区把组件状态、阈值和持久任务进度放在同一紧凑工作流内。 */
+.caption-control {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--accent-soft) 38%, var(--panel-raised));
+}
+
+.caption-control-title,
+.caption-control-title span,
+.caption-options,
+.caption-options label,
+.caption-job > div,
+.training-asset-caption footer > div {
+  display: flex;
+  align-items: center;
+}
+
+.caption-control-title {
+  gap: 8px;
+}
+
+.caption-control-title > svg {
+  width: 18px;
+  color: var(--accent);
+}
+
+.caption-control-title span {
+  min-width: 0;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.caption-control-title strong {
+  font-size: 9px;
+}
+
+.caption-control-title small {
+  color: var(--muted);
+  font-size: 7px;
+}
+
+.caption-options {
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.caption-options label {
+  gap: 5px;
+  color: var(--muted);
+  font-size: 7px;
+}
+
+.caption-options input[type="number"] {
+  width: 64px;
+  height: 30px;
+  padding: 0 7px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--control);
+  color: var(--text);
+}
+
+.caption-options .caption-character-toggle {
+  min-height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--control);
+  color: var(--text);
+}
+
+.caption-options .caption-character-toggle input {
+  accent-color: var(--accent);
+}
+
+.caption-options > button,
+.caption-install,
+.caption-job > button {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  margin-left: auto;
+  padding: 0 10px;
+  border: 1px solid var(--accent-border);
+  border-radius: 4px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 8px;
+  font-weight: 800;
+}
+
+.caption-options > button:disabled,
+.caption-job > button:disabled {
+  cursor: not-allowed;
+  opacity: .48;
+}
+
+.caption-options button svg,
+.caption-install svg,
+.caption-job button svg {
+  width: 13px;
+}
+
+.caption-job {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 5px 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.caption-job > div {
+  grid-column: 1 / -1;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.caption-job > div span,
+.caption-job > div strong,
+.caption-job > div small {
+  display: block;
+}
+
+.caption-job > div strong {
+  font-size: 8px;
+}
+
+.caption-job > div small,
+.caption-job > small {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 7px;
+}
+
+.caption-job > div b {
+  color: var(--accent);
+  font-size: 9px;
+}
+
+.caption-job > i {
+  align-self: center;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--border);
+}
+
+.caption-job > i em {
+  height: 100%;
+  display: block;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width .2s ease;
+}
+
+.caption-job > button {
+  min-height: 26px;
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.caption-job.is-failed > div strong,
+.caption-item-error {
+  color: var(--danger);
+}
+
 .training-gate span strong {
   font-size: 9px;
 }
@@ -1670,6 +1844,21 @@ select:focus-visible {
 
 .training-asset-caption footer span.missing {
   color: var(--danger);
+}
+
+.training-asset-caption footer > div {
+  flex-shrink: 0;
+  gap: 6px;
+}
+
+.training-asset-caption footer .caption-row-action {
+  border-color: var(--border);
+  background: var(--panel-muted);
+  color: var(--text);
+}
+
+.training-asset-caption .caption-item-error {
+  font-size: 7px;
 }
 
 .local-job-grid {

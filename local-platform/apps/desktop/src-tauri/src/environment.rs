@@ -15,6 +15,7 @@ pub fn inspect_environment(settings: &DesktopSettings) -> DesktopEnvironmentRepo
     let gpus = nvidia_gpus();
     let runtime = inspect_runtime(&settings.runtime_root);
     let generation_assets_ready = has_generation_assets(&settings.model_root);
+    let captioner_ready = has_captioner_component(&settings.runtime_root);
     let mut issues = Vec::new();
     if !os_supported {
         issues.push(issue("windows_version_unsupported", "critical", "当前 Windows 版本不在支持范围", "首版要求 Windows 10 1809 及以后版本或 Windows 11 x64。", "查看系统升级要求"));
@@ -31,10 +32,12 @@ pub fn inspect_environment(settings: &DesktopSettings) -> DesktopEnvironmentRepo
     if runtime.status == "installed_unverified" { issues.push(issue("runtime_unverified", "warning", "本地 Runtime 等待自检", "已发现 Runtime 清单，但尚未记录完整推理和训练自检结果。", "执行环境自检")); }
     if runtime.status == "broken" { issues.push(issue("runtime_broken", "critical", "本地 Runtime 清单损坏", "Runtime 清单不能读取或状态无效，生成和训练保持暂停。", "修复运行环境")); }
     if runtime.status == "ready" && !generation_assets_ready { issues.push(issue("generation_model_missing", "warning", "尚未安装可生成的底模", "Runtime 已通过基础自检，但模型目录缺少完整底模资产，生成和训练保持暂停。", "前往资源安装")); }
+    if runtime.installed && !captioner_ready { issues.push(issue("captioner_missing", "warning", "离线自动打标组件尚未安装", "手动 Caption 仍可使用；安装签名 WD14 组件后可批量自动打标。", "前往资源安装")); }
     let gpu_supported = gpus.iter().any(|gpu| gpu.memory_total_bytes >= MINIMUM_GPU_MEMORY_BYTES);
     let runtime_ready = runtime.status == "ready";
+    let runtime_installed = runtime.installed;
     let low_free_memory = gpus.first().map(|gpu| gpu.memory_free_bytes < 1024 * MIB).unwrap_or(true);
-    let status = if !os_supported || !gpu_supported || runtime.status == "broken" { "blocked" } else if !runtime.installed { "installable" } else if !runtime_ready || !generation_assets_ready || low_free_memory { "degraded" } else { "ready" };
+    let status = if !os_supported || !gpu_supported || runtime.status == "broken" { "blocked" } else if !runtime.installed { "installable" } else if !runtime_ready || !generation_assets_ready || !captioner_ready || low_free_memory { "degraded" } else { "ready" };
     DesktopEnvironmentReport {
         status: status.into(),
         checked_at: Utc::now().to_rfc3339(),
@@ -44,7 +47,7 @@ pub fn inspect_environment(settings: &DesktopSettings) -> DesktopEnvironmentRepo
         gpus,
         disks: system.disks,
         runtime,
-        capabilities: CapabilityView { inference: os_supported && gpu_supported && runtime_ready && generation_assets_ready && !low_free_memory, training: os_supported && gpu_supported && runtime_ready && generation_assets_ready && !low_free_memory, captioning: os_supported && runtime_ready, model_management: true },
+        capabilities: CapabilityView { inference: os_supported && gpu_supported && runtime_ready && generation_assets_ready && !low_free_memory, training: os_supported && gpu_supported && runtime_ready && generation_assets_ready && !low_free_memory, captioning: os_supported && runtime_installed && captioner_ready, model_management: true },
         issues,
     }
 }
@@ -86,6 +89,12 @@ fn has_generation_assets(root: &str) -> bool {
 
 fn contains_safetensors(directory: &Path) -> bool {
     fs::read_dir(directory).ok().into_iter().flatten().filter_map(Result::ok).any(|entry| entry.path().is_file() && entry.path().extension().is_some_and(|extension| extension.to_string_lossy().eq_ignore_ascii_case("safetensors")))
+}
+
+/** 只接受资源安装器写入标记且必需文件完整的 Captioner 版本。 */
+fn has_captioner_component(runtime_root: &str) -> bool {
+    let root = Path::new(runtime_root).join("components").join("captioner");
+    fs::read_dir(root).ok().into_iter().flatten().filter_map(Result::ok).map(|entry| entry.path()).any(|path| path.is_dir() && path.join(".drawhime-resource.json").is_file() && path.join("runner.py").is_file() && path.join("model.onnx").is_file() && path.join("selected_tags.csv").is_file() && path.join("site-packages").join("onnxruntime").join("__init__.py").is_file())
 }
 
 fn issue(code: &str, severity: &str, title: &str, message: &str, action: &str) -> EnvironmentIssue { EnvironmentIssue { code: code.into(), severity: severity.into(), title: title.into(), message: message.into(), action: action.into() } }

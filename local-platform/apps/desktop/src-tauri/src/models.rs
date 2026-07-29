@@ -101,6 +101,7 @@ pub struct DesktopTrainingAssetView {
     pub height: u32,
     pub available: bool,
     pub caption: Option<String>,
+    pub caption_source: Option<String>,
     pub confirmed: bool,
     pub created_at: String,
     pub updated_at: String,
@@ -151,6 +152,52 @@ pub struct DesktopTrainingCaptionUpdateInput {
 #[serde(rename_all = "camelCase")]
 pub struct DesktopTrainingDatasetIdInput {
     pub dataset_id: String,
+}
+
+/** 创建本地离线自动打标任务的参数。 */
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopCaptionJobCreateInput {
+    pub dataset_id: String,
+    pub asset_id: Option<String>,
+    pub general_threshold: f64,
+    pub character_threshold: f64,
+    pub include_character_tags: bool,
+}
+
+/** 离线自动打标任务中的逐图执行状态。 */
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopCaptionJobItemView {
+    pub asset_id: String,
+    pub status: String,
+    pub caption: Option<String>,
+    pub error: Option<String>,
+}
+
+/** SQLite 持久化的离线自动打标任务视图。 */
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopCaptionJobView {
+    pub id: String,
+    pub dataset_id: String,
+    pub asset_id: Option<String>,
+    pub status: String,
+    pub progress: u32,
+    pub total_assets: u32,
+    pub processed_assets: u32,
+    pub succeeded_assets: u32,
+    pub failed_assets: u32,
+    pub skipped_assets: u32,
+    pub general_threshold: f64,
+    pub character_threshold: f64,
+    pub include_character_tags: bool,
+    pub error: Option<String>,
+    pub items: Vec<DesktopCaptionJobItemView>,
+    pub created_at: String,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub updated_at: String,
 }
 
 /** 提交到本机串行调度器的生成参数。 */

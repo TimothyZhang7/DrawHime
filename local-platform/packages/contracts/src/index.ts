@@ -836,6 +836,7 @@ export const desktopTrainingDatasetViewSchema = z.object({
     height: z.number().int().positive(),
     available: z.boolean(),
     caption: z.string().nullable(),
+    captionSource: z.enum(["auto", "manual"]).nullable(),
     confirmed: z.boolean(),
     createdAt: z.string().datetime(),
     updatedAt: z.string().datetime(),
@@ -866,6 +867,46 @@ export const desktopTrainingCaptionUpdateInputSchema = z.object({
 
 /** 桌面端训练集 ID 输入，供确认等幂等命令使用。 */
 export const desktopTrainingDatasetIdInputSchema = z.object({ datasetId: z.string().uuid() });
+
+/** 桌面端离线自动打标任务的创建参数。 */
+export const desktopCaptionJobCreateInputSchema = z.object({
+  datasetId: z.string().uuid(),
+  assetId: z.string().uuid().nullable(),
+  generalThreshold: z.number().min(0.05).max(0.95),
+  characterThreshold: z.number().min(0.05).max(0.99),
+  includeCharacterTags: z.boolean(),
+});
+
+/** 桌面端离线自动打标任务中的逐图状态。 */
+export const desktopCaptionJobItemViewSchema = z.object({
+  assetId: z.string().uuid(),
+  status: z.enum(["queued", "running", "succeeded", "failed", "skipped", "cancelled"]),
+  caption: z.string().nullable(),
+  error: z.string().nullable(),
+});
+
+/** 桌面端持久化离线自动打标任务视图。 */
+export const desktopCaptionJobViewSchema = z.object({
+  id: z.string().uuid(),
+  datasetId: z.string().uuid(),
+  assetId: z.string().uuid().nullable(),
+  status: z.enum(["queued", "running", "succeeded", "failed", "cancelled"]),
+  progress: z.number().int().min(0).max(100),
+  totalAssets: z.number().int().nonnegative(),
+  processedAssets: z.number().int().nonnegative(),
+  succeededAssets: z.number().int().nonnegative(),
+  failedAssets: z.number().int().nonnegative(),
+  skippedAssets: z.number().int().nonnegative(),
+  generalThreshold: z.number().min(0.05).max(0.95),
+  characterThreshold: z.number().min(0.05).max(0.99),
+  includeCharacterTags: z.boolean(),
+  error: z.string().nullable(),
+  items: z.array(desktopCaptionJobItemViewSchema).max(200),
+  createdAt: z.string().datetime(),
+  startedAt: z.string().datetime().nullable(),
+  completedAt: z.string().datetime().nullable(),
+  updatedAt: z.string().datetime(),
+});
 
 /** 单个本地任务的 LoRA 选择和强度。 */
 export const desktopLocalLoraSelectionSchema = z.object({ id: z.string().uuid(), strength: z.number().min(0).max(1.5) });
@@ -1111,6 +1152,9 @@ export type DesktopTrainingDatasetCreateInput = z.infer<typeof desktopTrainingDa
 export type DesktopTrainingImagesAddInput = z.infer<typeof desktopTrainingImagesAddInputSchema>;
 export type DesktopTrainingCaptionUpdateInput = z.infer<typeof desktopTrainingCaptionUpdateInputSchema>;
 export type DesktopTrainingDatasetIdInput = z.infer<typeof desktopTrainingDatasetIdInputSchema>;
+export type DesktopCaptionJobCreateInput = z.infer<typeof desktopCaptionJobCreateInputSchema>;
+export type DesktopCaptionJobItemView = z.infer<typeof desktopCaptionJobItemViewSchema>;
+export type DesktopCaptionJobView = z.infer<typeof desktopCaptionJobViewSchema>;
 export type DesktopLocalJobCreateInput = z.infer<typeof desktopLocalJobCreateInputSchema>;
 export type DesktopLocalJobView = z.infer<typeof desktopLocalJobViewSchema>;
 export type DesktopGallerySyncItem = z.infer<typeof desktopGallerySyncItemSchema>;

@@ -1,5 +1,6 @@
 //! 本模块注册 DrawHime Desktop 本地核心、SQLite 和环境检测命令。
 
+mod captioner;
 mod environment;
 mod generation;
 mod local_model;
@@ -10,7 +11,7 @@ mod scheduler;
 mod storage;
 mod training_dataset;
 
-use models::{DesktopBootstrapView, DesktopEnvironmentReport, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView, DesktopSettings, DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetIdInput, DesktopTrainingDatasetView, DesktopTrainingImagesAddInput, GalleryPublicationInput, GallerySyncItem};
+use models::{DesktopBootstrapView, DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopEnvironmentReport, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView, DesktopSettings, DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetIdInput, DesktopTrainingDatasetView, DesktopTrainingImagesAddInput, GalleryPublicationInput, GallerySyncItem};
 use std::path::PathBuf;
 use storage::DesktopState;
 use tauri::{Manager, State};
@@ -149,6 +150,24 @@ fn desktop_update_training_caption(state: State<'_, DesktopState>, input: Deskto
     state.update_training_caption(input)
 }
 
+/** 持久化创建批量或单图离线打标任务并立即返回。 */
+#[tauri::command]
+fn desktop_create_caption_job(state: State<'_, DesktopState>, input: DesktopCaptionJobCreateInput) -> Result<DesktopCaptionJobView, String> {
+    state.create_caption_job(input)
+}
+
+/** 返回最近的本地离线打标任务。 */
+#[tauri::command]
+fn desktop_list_caption_jobs(state: State<'_, DesktopState>) -> Result<Vec<DesktopCaptionJobView>, String> {
+    state.list_caption_jobs()
+}
+
+/** 幂等取消排队或运行中的本地离线打标任务。 */
+#[tauri::command]
+fn desktop_cancel_caption_job(state: State<'_, DesktopState>, id: String) -> Result<DesktopCaptionJobView, String> {
+    state.cancel_caption_job(&id)
+}
+
 #[tauri::command]
 async fn desktop_confirm_training_dataset(state: State<'_, DesktopState>, input: DesktopTrainingDatasetIdInput) -> Result<DesktopTrainingDatasetView, String> {
     let database_path = state.database_path.clone();
@@ -197,7 +216,7 @@ pub fn run() {
             app.manage(state);
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![desktop_bootstrap, desktop_inspect_environment, desktop_save_settings, desktop_enqueue_gallery_publication, desktop_list_gallery_sync_queue, desktop_load_resource_catalog, desktop_download_resource, desktop_install_resource, desktop_runtime_status, desktop_start_runtime, desktop_stop_runtime, desktop_self_test_runtime, desktop_import_local_model, desktop_list_local_models, desktop_import_local_lora, desktop_list_local_loras, desktop_create_training_dataset, desktop_list_training_datasets, desktop_add_training_images, desktop_update_training_caption, desktop_confirm_training_dataset, desktop_create_local_job, desktop_list_local_jobs, desktop_cancel_local_job])
+        .invoke_handler(tauri::generate_handler![desktop_bootstrap, desktop_inspect_environment, desktop_save_settings, desktop_enqueue_gallery_publication, desktop_list_gallery_sync_queue, desktop_load_resource_catalog, desktop_download_resource, desktop_install_resource, desktop_runtime_status, desktop_start_runtime, desktop_stop_runtime, desktop_self_test_runtime, desktop_import_local_model, desktop_list_local_models, desktop_import_local_lora, desktop_list_local_loras, desktop_create_training_dataset, desktop_list_training_datasets, desktop_add_training_images, desktop_update_training_caption, desktop_create_caption_job, desktop_list_caption_jobs, desktop_cancel_caption_job, desktop_confirm_training_dataset, desktop_create_local_job, desktop_list_local_jobs, desktop_cancel_local_job])
         .run(tauri::generate_context!())
         .expect("DrawHime Desktop 启动失败");
 }

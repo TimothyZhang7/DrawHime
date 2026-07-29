@@ -481,9 +481,15 @@ fn validate_windows_relative_path(path: &Path) -> Result<(), String> {
 }
 
 fn validate_extracted_resource(item: &DesktopResourceManifestItem, staging: &Path) -> Result<(), String> {
-    if item.kind != "runtime" { return Ok(()); }
-    for required in [staging.join("python_embeded").join("python.exe"), staging.join("ComfyUI").join("main.py")] {
-        if !required.is_file() { return Err(format!("Runtime 归档缺少必需文件：{}", required.file_name().unwrap_or_default().to_string_lossy())); }
+    if item.kind == "runtime" {
+        for required in [staging.join("python_embeded").join("python.exe"), staging.join("ComfyUI").join("main.py")] {
+            if !required.is_file() { return Err(format!("Runtime 归档缺少必需文件：{}", required.file_name().unwrap_or_default().to_string_lossy())); }
+        }
+    }
+    if item.kind == "captioner" {
+        for required in [staging.join("runner.py"), staging.join("model.onnx"), staging.join("selected_tags.csv"), staging.join("site-packages").join("onnxruntime").join("__init__.py")] {
+            if !required.is_file() { return Err(format!("Captioner 归档缺少必需文件：{}", required.file_name().unwrap_or_default().to_string_lossy())); }
+        }
     }
     Ok(())
 }
@@ -674,6 +680,42 @@ mod tests {
         assert_eq!(result.status, "installed");
         assert!(installed_resource_matches(&item, &settings));
         assert_eq!(crate::environment::inspect_environment(&settings).runtime.status, "installed_unverified");
+    }
+
+    #[test]
+    fn published_captioner_zip_installs_all_runtime_files() {
+        let Ok(archive_path) = std::env::var("DRAWHIME_CAPTIONER_TEST_ARCHIVE") else { return; };
+        let temporary = tempfile::tempdir().expect("创建 Captioner 安装目录");
+        let item = DesktopResourceManifestItem {
+            id: "captioner.wd-vit-tagger-v3".into(),
+            kind: "captioner".into(),
+            version: "wd-vit-tagger-v3-2.0-ort-1.22.1".into(),
+            os: "windows".into(),
+            arch: std::env::consts::ARCH.into(),
+            file_name: "drawhime-wd-vit-tagger-v3-win-x64.zip".into(),
+            byte_size: 364_125_250,
+            installed_size: 415_737_407,
+            sha256: "f709bca5c0e1a96ed2a0dd584210335471e4aa34a4d3c5b0604149a5b23a71a9".into(),
+            archive: "zip".into(),
+            root_directory: Some("drawhime-wd-vit-tagger-v3".into()),
+            install_directory: None,
+            model_registration: None,
+            required: true,
+            sources: vec![DesktopResourceSource { kind: "mirror".into(), url: "https://www.xanime.ink/local-model-api/v1/desktop/resources/captioner.wd-vit-tagger-v3/content".into() }],
+        };
+        let runtime_root = temporary.path().join("runtime");
+        fs::create_dir_all(runtime_root.join("current")).expect("创建测试 Runtime");
+        fs::write(runtime_root.join("current/runtime-manifest.json"), b"{\"status\":\"ready\"}").expect("写入测试 Runtime 清单");
+        let settings = DesktopSettings { theme_mode: "system".into(), dependency_source: "auto".into(), default_privacy: "private".into(), model_root: temporary.path().join("models").to_string_lossy().into_owned(), output_root: temporary.path().join("outputs").to_string_lossy().into_owned(), runtime_root: runtime_root.to_string_lossy().into_owned(), upload_concurrency: 2, wifi_only: false, bandwidth_limit_kib: None };
+        let result = install_cached_resource(&settings, &item, Path::new(&archive_path), &|_| {}).expect("安装已发布 Captioner");
+        assert_eq!(result.status, "installed");
+        let root = PathBuf::from(result.install_path.expect("读取 Captioner 安装路径"));
+        assert!(root.join("runner.py").is_file());
+        assert!(root.join("model.onnx").is_file());
+        assert!(root.join("selected_tags.csv").is_file());
+        assert!(root.join("site-packages/onnxruntime/__init__.py").is_file());
+        assert!(installed_resource_matches(&item, &settings));
+        assert!(crate::environment::inspect_environment(&settings).capabilities.captioning);
     }
 
     #[test]

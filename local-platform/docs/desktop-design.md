@@ -186,7 +186,7 @@ Runtime 更新不能中断运行中任务；队列空闲后切换。
 5. 只有全部图片具有非空 Caption 且图片数满足范围时才允许确认数据集；确认后才开放训练参数步骤。
 6. 应用重启、页面切换和 Runtime 退出都从 SQLite 恢复当前阶段，禁止依赖前端内存推进训练流程。
 
-首个实现阶段先完成真实图片导入、逐图 Caption 和确认门禁；后续签名 `captioner` 资源接入相同记录，不新建第二套训练集状态。
+真实图片导入、逐图 Caption 和确认门禁已经完成。首个签名 `captioner` 使用 Apache-2.0 的 `SmilingWolf/wd-vit-tagger-v3` v2.0 ONNX 与 MIT 的 ONNX Runtime 1.22.1，默认通用阈值 0.35、角色阈值 0.85；RGBA 合成白底、方形补边、双三次缩放及 RGB→BGR 严格对齐官方示例。批量任务跳过 `caption_source=manual` 的人工 Caption，单图“重新打标”属于用户明确覆盖操作；任务、逐图结果、进度、错误和取消状态全部写入 SQLite，应用重启后继续未完成图片。
 
 Local Scheduler 使用桌面 SQLite 作为唯一事实源。提交命令先固化模型哈希、正负提示词、尺寸、采样器、调度器、步数、CFG、种子与隐私并立即返回；后台 Worker 单卡串行领取。每次执行创建独立 attempt，ComfyUI prompt ID 在提交成功时立刻写入。正常退出时运行中任务回到队列并把本次 attempt 标为 `interrupted`，用户取消则删除对应 prompt 并调用中断接口。产物下载后先校验 PNG 和尺寸，再原子写入作品目录、提交任务终态并在同一事务中加入图库 outbox。
 
@@ -293,6 +293,6 @@ Local Scheduler 使用桌面 SQLite 作为唯一事实源。提交命令先固�
 
 ## 18. 当前实现状态
 
-当前已完成：Tauri 工程、Windows/NVIDIA 基础检测、Windows 10 1809 构建号门禁、持续环境提示、SQLite 设置及升级、主题跟随/手动切换、依赖来源偏好、环境快照、默认图库隐私、图库 outbox、响应式桌面 UI、签名资源清单契约和 API、离线签名工具、8 MiB Range 断点下载、低速切源、SHA-256 隔离、资源进度事件、安全 ZIP/7z 解压、磁盘预检、同卷原子安装、旧版本保留与回滚、Runtime 安装状态回归测试和 NSIS 构建。首个 NVIDIA Runtime、WAI Anima 模型组合、固定公钥、签名清单和主站 Range 镜像已经发布；清单签名、四项资源分片、完整 7z 安装及 NSIS 安装包均已通过真实验证。桌面核心现已支持 ComfyUI 动态回环启动、状态轮询、GPU/节点自检、受控日志、停止回收、safetensors 原子导入、Checkpoint/Anima 工作流、SQLite 本地任务/attempt/产物、串行调度、取消恢复和自动图库 outbox。LoRA 已支持安全导入、类型与触发词管理、单任务最多四个独立强度、任务级不可变快照，以及 Checkpoint/Anima 工作流真实串联；真实 Runtime 生命周期、自带 LoRA 的 512×512 Anima 生成和 NSIS 启动冒烟均已通过。
+当前已完成：Tauri 工程、Windows/NVIDIA 基础检测、Windows 10 1809 构建号门禁、持续环境提示、SQLite 设置及升级、主题跟随/手动切换、依赖来源偏好、环境快照、默认图库隐私、图库 outbox、响应式桌面 UI、签名资源清单契约和 API、离线签名工具、8 MiB Range 断点下载、低速切源、SHA-256 隔离、资源进度事件、安全 ZIP/7z 解压、磁盘预检、同卷原子安装、旧版本保留与回滚、Runtime 安装状态回归测试和 NSIS 构建。首个 NVIDIA Runtime、WAI Anima 模型组合、固定公钥、签名清单和主站 Range 镜像已经发布；清单签名、模型资源分片、完整 7z 安装及 NSIS 安装包均已通过真实验证。桌面核心现已支持 ComfyUI 动态回环启动、状态轮询、GPU/节点自检、受控日志、停止回收、safetensors 原子导入、Checkpoint/Anima 工作流、SQLite 本地任务/attempt/产物、串行调度、取消恢复和自动图库 outbox。LoRA 已支持安全导入、类型与触发词管理、单任务最多四个独立强度、任务级不可变快照，以及 Checkpoint/Anima 工作流真实串联；真实 Runtime 生命周期、自带 LoRA 的 512×512 Anima 生成和 NSIS 启动冒烟均已通过。本地训练集现已支持 5–200 张 PNG/JPEG/WebP 原子导入、内容去重、逐图人工 Caption、文件完整性复核与确认门禁。WD ViT Tagger v3 签名组件、ONNX Runtime 私有依赖、持久化批量/单图打标队列、人工 Caption 保护、取消和重启恢复已经接入 UI；真实动漫图片离线推理、签名 ZIP 安装及公开 Range 首尾分片均已验证。
 
-后续按顺序推进：本地训练集与人工确认 → 签名自动打标资源 → 分阶段 LoRA 训练 Runtime → 网站模型/LoRA 授权下载 → 设备授权与图库上传执行器 → 签名软件更新 → Windows 完整系统矩阵验证。
+后续按顺序推进：分阶段 LoRA 训练 Runtime → 网站模型/LoRA 授权下载 → 设备授权与图库上传执行器 → 签名软件更新 → Windows 完整系统矩阵验证。

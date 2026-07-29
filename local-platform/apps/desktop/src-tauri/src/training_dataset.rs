@@ -96,7 +96,7 @@ pub fn update_caption(database: &Connection, app_data_dir: &Path, input: Desktop
     if caption.as_ref().is_some_and(|value| value.chars().count() > 10_000) { return Err("单张图片 Caption 不能超过 10000 个字符".into()); }
     let now = Utc::now().to_rfc3339();
     let transaction = database.unchecked_transaction().map_err(|error| format!("开启 Caption 事务失败：{error}"))?;
-    if transaction.execute("UPDATE local_training_assets SET caption=?3,confirmed=0,updated_at=?4 WHERE id=?1 AND dataset_id=?2", params![input.asset_id,input.dataset_id,caption,now]).map_err(|error| format!("保存图片 Caption 失败：{error}"))? != 1 { return Err("训练图片不存在".into()); }
+    if transaction.execute("UPDATE local_training_assets SET caption=?3,caption_source='manual',confirmed=0,updated_at=?4 WHERE id=?1 AND dataset_id=?2", params![input.asset_id,input.dataset_id,caption,now]).map_err(|error| format!("保存图片 Caption 失败：{error}"))? != 1 { return Err("训练图片不存在".into()); }
     transaction.execute("UPDATE local_training_assets SET confirmed=0 WHERE dataset_id=?1", [&input.dataset_id]).map_err(|error| format!("重置图片确认状态失败：{error}"))?;
     update_dataset_review_status(&transaction, &input.dataset_id, &now)?;
     transaction.commit().map_err(|error| format!("提交 Caption 事务失败：{error}"))?;
@@ -138,8 +138,8 @@ fn dataset_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<DesktopTraining
 }
 
 fn read_assets(database: &Connection, app_data_dir: &Path, dataset_id: &str) -> Result<Vec<DesktopTrainingAssetView>, String> {
-    let mut statement = database.prepare("SELECT id,file_name,relative_path,sha256,byte_size,width,height,caption,confirmed,created_at,updated_at FROM local_training_assets WHERE dataset_id=?1 ORDER BY created_at ASC,id ASC").map_err(|error| format!("读取训练图片失败：{error}"))?;
-    let rows = statement.query_map([dataset_id], |row| { let relative_path: String = row.get(2)?; let path = app_data_dir.join(relative_path); let byte_size: u64 = row.get(4)?; let available = path.metadata().ok().is_some_and(|metadata| metadata.is_file() && metadata.len() == byte_size); Ok(DesktopTrainingAssetView { id: row.get(0)?, file_name: row.get(1)?, path: path.to_string_lossy().into_owned(), sha256: row.get(3)?, byte_size, width: row.get(5)?, height: row.get(6)?, available, caption: row.get(7)?, confirmed: row.get::<_, i64>(8)? != 0, created_at: row.get(9)?, updated_at: row.get(10)? }) }).map_err(|error| format!("查询训练图片失败：{error}"))?;
+    let mut statement = database.prepare("SELECT id,file_name,relative_path,sha256,byte_size,width,height,caption,caption_source,confirmed,created_at,updated_at FROM local_training_assets WHERE dataset_id=?1 ORDER BY created_at ASC,id ASC").map_err(|error| format!("读取训练图片失败：{error}"))?;
+    let rows = statement.query_map([dataset_id], |row| { let relative_path: String = row.get(2)?; let path = app_data_dir.join(relative_path); let byte_size: u64 = row.get(4)?; let available = path.metadata().ok().is_some_and(|metadata| metadata.is_file() && metadata.len() == byte_size); Ok(DesktopTrainingAssetView { id: row.get(0)?, file_name: row.get(1)?, path: path.to_string_lossy().into_owned(), sha256: row.get(3)?, byte_size, width: row.get(5)?, height: row.get(6)?, available, caption: row.get(7)?, caption_source: row.get(8)?, confirmed: row.get::<_, i64>(9)? != 0, created_at: row.get(10)?, updated_at: row.get(11)? }) }).map_err(|error| format!("查询训练图片失败：{error}"))?;
     rows.collect::<Result<Vec<_>, _>>().map_err(|error| format!("解析训练图片失败：{error}"))
 }
 
