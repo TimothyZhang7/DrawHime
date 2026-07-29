@@ -143,6 +143,8 @@ async function connectCdp(url) {
       const response = await command("Page.captureScreenshot", { format: "png", fromSurface: true });
       return response.data;
     },
+    async setViewport(width, height) { await command("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false, screenWidth: width, screenHeight: height }); },
+    async clearViewport() { await command("Emulation.clearDeviceMetricsOverride", {}); },
     close() { socket.close(); },
   };
 }
@@ -185,6 +187,32 @@ async function captureRepositoryPages(client, directory) {
       await client.evaluate("[...document.querySelectorAll('.desktop-main > div')].find((element) => !element.hidden && element.querySelector('.repository-page'))?.querySelector('.repository-back')?.click()");
     }
     results.push({ page: pageLabel, ...page, detailVisible, screenshots: [listFile, detailFile].filter(Boolean) });
+  }
+  // 仓库列表在应用允许的最小窗口中也必须保留筛选、卡片与返回路径。
+  await client.setViewport(720, 560);
+  try {
+    for (const result of results) {
+      const compact = await client.evaluate(String.raw`(async () => {
+        const label = ${JSON.stringify(result.page)};
+        const navigation = [...document.querySelectorAll('.desktop-sidebar nav button')].find((button) => button.textContent.trim() === label);
+        navigation?.click();
+        await new Promise((resolve) => setTimeout(resolve, 180));
+        let pageRoot = [...document.querySelectorAll('.desktop-main > div')].find((element) => !element.hidden && element.querySelector('.repository-page, .repository-detail'));
+        const back = pageRoot?.querySelector('.repository-back');
+        if (back) back.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        pageRoot = [...document.querySelectorAll('.desktop-main > div')].find((element) => !element.hidden && element.querySelector('.repository-page, .repository-detail'));
+        const toolbar = pageRoot?.querySelector('.repository-toolbar');
+        const card = pageRoot?.querySelector('.repository-card');
+        return { backFound: Boolean(back), horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth, toolbarVisible: Boolean(toolbar?.getClientRects().length), cardOrEmptyVisible: Boolean(card?.getClientRects().length || pageRoot?.querySelector('.repository-empty')?.getClientRects().length) };
+      })()`);
+      const compactFile = result.page === "本地模型" ? "models-compact.png" : "loras-compact.png";
+      await writeFile(path.join(targetDirectory, compactFile), Buffer.from(await client.captureScreenshot(), "base64"));
+      if (compact.horizontalOverflow || !compact.toolbarVisible || !compact.cardOrEmptyVisible) throw new Error(`${result.page} 在 720×560 下布局不可用：${JSON.stringify(compact)}`);
+      result.compact = { ...compact, screenshot: compactFile };
+    }
+  } finally {
+    await client.clearViewport();
   }
   return results;
 }
@@ -232,7 +260,8 @@ async function evaluateAfterInitialReload(client, expression) {
     try { return await client.evaluate(expression); }
     catch (error) {
       lastError = error;
-      if (!String(error).includes("Execution context was destroyed")) throw error;
+      const message = String(error);
+      if (!["Execution context was destroyed", "Inspected target navigated or closed", "Cannot find default execution context"].some((fragment) => message.includes(fragment))) throw error;
       await delay(500);
     }
   }

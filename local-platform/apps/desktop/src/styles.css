@@ -85,7 +85,8 @@ body,
 }
 
 body {
-  min-width: 720px;
+  /* 原生窗口负责最小宽度，页面本身不得因垂直滚动条额外产生横向溢出。 */
+  min-width: 0;
   min-height: 100vh;
   margin: 0;
   overflow-x: hidden;
