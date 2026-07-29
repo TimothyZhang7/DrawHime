@@ -1,4 +1,4 @@
-# 本工作流在 GitHub 官方 Windows 托管主机持续验证桌面端编译、测试、离线 NSIS 打包、安装和启动。
+# 本工作流将日常快速检查与发布前完整 Windows 验收分离，避免每次提交重复构建离线安装包。
 name: Desktop Windows Gate
 
 on:
@@ -14,6 +14,12 @@ on:
       - "local-platform/pnpm-lock.yaml"
       - "local-platform/pnpm-workspace.yaml"
   workflow_dispatch:
+    inputs:
+      full_validation:
+        description: "执行发布前 Release Rust、离线 NSIS 与双系统安装验收"
+        required: true
+        type: boolean
+        default: false
 
 concurrency:
   group: desktop-windows-${{ github.ref }}
@@ -23,8 +29,71 @@ permissions:
   contents: read
 
 jobs:
+  quick-check:
+    name: windows-2022-quick-check
+    runs-on: windows-2022
+    timeout-minutes: 12
+    defaults:
+      run:
+        working-directory: local-platform
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.14.0
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: local-platform/pnpm-lock.yaml
+
+      - name: 安装工作区依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 构建桌面共享契约
+        run: pnpm --filter @drawhime/contracts run build
+
+      - name: 检查桌面 TypeScript
+        run: pnpm --filter @drawhime/desktop run type-check
+
+      - name: 判断 Rust 核心是否变化
+        id: native-change
+        shell: pwsh
+        run: |
+          $before = "${{ github.event.before }}"
+          $nativeChanged = $true
+          if ($before -and $before -notmatch '^0+$') {
+            $changedFiles = @(git diff --name-only $before $env:GITHUB_SHA -- "apps/desktop/src-tauri")
+            $nativeChanged = $changedFiles.Count -gt 0
+          }
+          "changed=$($nativeChanged.ToString().ToLowerInvariant())" | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding UTF8
+
+      - name: 安装 Rust
+        if: steps.native-change.outputs.changed == 'true'
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 恢复 Rust 测试缓存
+        if: steps.native-change.outputs.changed == 'true'
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: local-platform/apps/desktop/src-tauri -> target
+          shared-key: desktop-windows-2022-debug
+          cache-on-failure: true
+
+      - name: 运行受影响的 Rust 测试
+        if: steps.native-change.outputs.changed == 'true'
+        run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
+
   build-installer:
     name: windows-2022-build
+    if: github.event_name == 'workflow_dispatch' && inputs.full_validation
     runs-on: windows-2022
     timeout-minutes: 35
     defaults:
@@ -65,11 +134,8 @@ jobs:
       - name: 安装工作区依赖
         run: pnpm install --frozen-lockfile
 
-      - name: 生成 Prisma Client
-        run: pnpm db:generate
-
-      - name: 构建共享包
-        run: pnpm run build:packages
+      - name: 构建桌面共享契约
+        run: pnpm --filter @drawhime/contracts run build
 
       - name: 检查桌面 TypeScript
         run: pnpm --filter @drawhime/desktop run type-check
@@ -112,6 +178,7 @@ jobs:
   install-validation:
     name: ${{ matrix.os }}-install
     needs: build-installer
+    if: github.event_name == 'workflow_dispatch' && inputs.full_validation
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     strategy:
