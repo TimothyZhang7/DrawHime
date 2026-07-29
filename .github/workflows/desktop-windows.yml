@@ -54,6 +54,9 @@ jobs:
       - name: 安装工作区依赖
         run: pnpm install --frozen-lockfile
 
+      - name: 生成 Prisma Client
+        run: pnpm db:generate
+
       - name: 构建共享包
         run: pnpm run build:packages
 
