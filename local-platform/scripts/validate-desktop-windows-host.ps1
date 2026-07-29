@@ -5,7 +5,8 @@
 param(
   [Parameter(Mandatory = $true)][string]$ExpectedVersion,
   [string]$Installer,
-  [string]$EvidenceDirectory = ".private/desktop-host-validation"
+  [string]$EvidenceDirectory = ".private/desktop-host-validation",
+  [switch]$ExpectNoGpu
 )
 
 Set-StrictMode -Version Latest
@@ -133,12 +134,16 @@ finally {
   if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
 }
 
+$gpuSummary = @(Get-DrawHimeGpuSummary)
+if ($ExpectNoGpu.IsPresent -and $gpuSummary.Count -ne 0) { throw "当前验收机检测到 NVIDIA GPU，不能作为无 GPU 门禁证据" }
+
 $result = [ordered]@{
   checkedAt = [DateTime]::UtcNow.ToString("o")
   os = [ordered]@{ caption = [string]$os.Caption; version = [string]$os.Version; build = $build; architecture = [string]$os.OSArchitecture }
   dpi = [ordered]@{ value = $windowDpi; scalePercent = [math]::Round($windowDpi / 96 * 100); perMonitorV2 = $perMonitorV2 }
   webView2Version = $webViewVersion
-  gpus = @(Get-DrawHimeGpuSummary)
+  gpus = $gpuSummary
+  gpuGate = [ordered]@{ expectedNoNvidiaGpu = [bool]$ExpectNoGpu.IsPresent; detectedCount = $gpuSummary.Count; passed = (-not $ExpectNoGpu.IsPresent) -or $gpuSummary.Count -eq 0 }
   installer = $installerEvidence
   installation = [ordered]@{ version = [string]$installation.DisplayVersion; fileCount = $installedFiles.Count; totalBytes = ($installedFiles | Measure-Object Length -Sum).Sum; containsModelOrTrainer = $false }
   gates = [ordered]@{ supportedWindows = $true; databasePreservedByInstaller = $true; launchAliveTenSeconds = $true; perMonitorV2 = $true; webView2Present = $true }

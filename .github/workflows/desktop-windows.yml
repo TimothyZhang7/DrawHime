@@ -142,7 +142,7 @@ jobs:
           $installer = @(Get-ChildItem -LiteralPath "$env:RUNNER_TEMP/desktop-installer" -File -Filter "*.exe") | Select-Object -First 1
           if (-not $installer) { throw "未找到待验收的 NSIS 安装包" }
           $expectedVersion = (Get-Content -Raw "apps/desktop/src-tauri/tauri.conf.json" | ConvertFrom-Json).version
-          & powershell -NoProfile -ExecutionPolicy Bypass -File "scripts/validate-desktop-windows-host.ps1" -ExpectedVersion $expectedVersion -Installer $installer.FullName -EvidenceDirectory "$env:RUNNER_TEMP/desktop-host-validation"
+          & powershell -NoProfile -ExecutionPolicy Bypass -File "scripts/validate-desktop-windows-host.ps1" -ExpectedVersion $expectedVersion -Installer $installer.FullName -EvidenceDirectory "$env:RUNNER_TEMP/desktop-host-validation" -ExpectNoGpu
           if ($LASTEXITCODE -ne 0) { throw "Windows 主机验收脚本退出码：$LASTEXITCODE" }
           $evidence = @(Get-ChildItem -LiteralPath "$env:RUNNER_TEMP/desktop-host-validation" -File -Filter "*.json") | Select-Object -First 1
           if (-not $evidence) { throw "Windows 主机验收未输出证据文件" }
@@ -151,6 +151,7 @@ jobs:
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value $hostSummary -Encoding UTF8
 
       - name: 验证无 GPU WebView 门禁
+        if: matrix.os == 'windows-2022'
         shell: pwsh
         run: |
           $installation = Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -eq "DrawHime Desktop" } | Select-Object -First 1
