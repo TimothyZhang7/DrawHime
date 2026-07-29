@@ -575,6 +575,16 @@ pub struct GallerySyncItem {
     pub updated_at: String,
 }
 
+/** 当前账号可访问的网站 LoRA 目录项。 */
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopWebsiteLoraView { pub id: String, pub title: String, pub description: String, pub r#type: String, pub model_family: String, pub model_family_name: String, pub trigger_words: Vec<String>, pub owner_display_name: String, pub privacy: String, pub is_owner: bool, pub version_id: String, pub file_name: String, pub sha256: String, pub byte_size: u64, pub installed: bool }
+
+/** 网站 LoRA 断点下载、校验与安装进度。 */
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopWebsiteLoraInstallProgress { pub lora_id: String, pub status: String, pub downloaded_bytes: u64, pub total_bytes: u64, pub bytes_per_second: u64, pub error: Option<String> }
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WindowsSystemProbe {

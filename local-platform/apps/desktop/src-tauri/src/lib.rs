@@ -15,8 +15,9 @@ mod training;
 mod training_dataset;
 mod trainer;
 mod workload;
+mod website_lora;
 
-use models::{DesktopBootstrapView, DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopEnvironmentReport, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView, DesktopSettings, DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetIdInput, DesktopTrainingDatasetView, DesktopTrainingImagesAddInput, DesktopTrainingJobCreateInput, DesktopTrainingJobView, GalleryPublicationInput, GallerySyncItem};
+use models::{DesktopBootstrapView, DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopEnvironmentReport, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView, DesktopSettings, DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetIdInput, DesktopTrainingDatasetView, DesktopTrainingImagesAddInput, DesktopTrainingJobCreateInput, DesktopTrainingJobView, DesktopWebsiteLoraView, GalleryPublicationInput, GallerySyncItem};
 use std::path::PathBuf;
 use storage::DesktopState;
 use tauri::{Manager, State};
@@ -156,6 +157,31 @@ fn desktop_list_local_loras(state: State<'_, DesktopState>) -> Result<Vec<Deskto
     state.list_local_loras()
 }
 
+/** 使用设备会话读取网站 LoRA 目录，原始会话密钥不会进入 WebView。 */
+#[tauri::command]
+async fn desktop_load_website_loras(state: State<'_, DesktopState>) -> Result<Vec<DesktopWebsiteLoraView>, String> {
+    let installed = state.list_local_loras()?.into_iter().map(|item| item.sha256).collect();
+    tauri::async_runtime::spawn_blocking(move || website_lora::load_catalog(&installed)).await.map_err(|error| format!("网站 LoRA 目录任务异常：{error}"))?
+}
+
+/** 断点下载并校验网站 LoRA 后原子导入本机仓库。 */
+#[tauri::command]
+async fn desktop_install_website_lora(app: tauri::AppHandle, state: State<'_, DesktopState>, lora_id: String) -> Result<DesktopLocalLoraView, String> {
+    let settings = state.load_settings()?;
+    let app_data_dir = state.app_data_dir.clone();
+    let installed = state.list_local_loras()?.into_iter().map(|item| item.sha256).collect();
+    let app_for_download = app.clone();
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
+        let downloaded = website_lora::download_and_verify(&app_data_dir, &lora_id, &installed, &app_for_download)?;
+        website_lora::emit_install_state(&app_for_download, &downloaded.view, "installing", None);
+        let registration = local_model::import_local_lora(&settings, DesktopLocalLoraImportInput { title: downloaded.view.title.clone(), r#type: downloaded.view.r#type.clone(), source_path: downloaded.path.to_string_lossy().into_owned(), trigger_words: downloaded.view.trigger_words.clone() })?;
+        Ok::<_, String>((downloaded.view, registration))
+    }).await.map_err(|error| format!("网站 LoRA 安装任务异常：{error}"))??;
+    let view = state.register_local_lora(outcome.1)?;
+    website_lora::emit_install_state(&app, &outcome.0, "installed", None);
+    Ok(view)
+}
+
 #[tauri::command]
 fn desktop_create_training_dataset(state: State<'_, DesktopState>, input: DesktopTrainingDatasetCreateInput) -> Result<DesktopTrainingDatasetView, String> {
     state.create_training_dataset(input)
@@ -267,7 +293,7 @@ pub fn run() {
             app.manage(state);
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![desktop_account_status, desktop_start_authorization, desktop_poll_authorization, desktop_sign_out, desktop_bootstrap, desktop_inspect_environment, desktop_save_settings, desktop_enqueue_gallery_publication, desktop_list_gallery_sync_queue, desktop_load_resource_catalog, desktop_download_resource, desktop_install_resource, desktop_runtime_status, desktop_start_runtime, desktop_stop_runtime, desktop_self_test_runtime, desktop_import_local_model, desktop_list_local_models, desktop_import_local_lora, desktop_list_local_loras, desktop_create_training_dataset, desktop_list_training_datasets, desktop_add_training_images, desktop_update_training_caption, desktop_create_caption_job, desktop_list_caption_jobs, desktop_cancel_caption_job, desktop_confirm_training_dataset, desktop_create_training_job, desktop_list_training_jobs, desktop_cancel_training_job, desktop_create_local_job, desktop_list_local_jobs, desktop_cancel_local_job])
+        .invoke_handler(tauri::generate_handler![desktop_account_status, desktop_start_authorization, desktop_poll_authorization, desktop_sign_out, desktop_bootstrap, desktop_inspect_environment, desktop_save_settings, desktop_enqueue_gallery_publication, desktop_list_gallery_sync_queue, desktop_load_resource_catalog, desktop_download_resource, desktop_install_resource, desktop_runtime_status, desktop_start_runtime, desktop_stop_runtime, desktop_self_test_runtime, desktop_import_local_model, desktop_list_local_models, desktop_import_local_lora, desktop_list_local_loras, desktop_load_website_loras, desktop_install_website_lora, desktop_create_training_dataset, desktop_list_training_datasets, desktop_add_training_images, desktop_update_training_caption, desktop_create_caption_job, desktop_list_caption_jobs, desktop_cancel_caption_job, desktop_confirm_training_dataset, desktop_create_training_job, desktop_list_training_jobs, desktop_cancel_training_job, desktop_create_local_job, desktop_list_local_jobs, desktop_cancel_local_job])
         .run(tauri::generate_context!())
         .expect("DrawHime Desktop 启动失败");
 }

@@ -132,6 +132,19 @@ export async function streamObjectToWritable(objectKey: string, destination: Wri
   }
 }
 
+/** 把对象存储单段闭区间直接写入响应流，供授权客户端稳定断点下载。 */
+export async function streamObjectRangeToWritable(objectKey: string, start: number, endInclusive: number, destination: Writable): Promise<void> {
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(endInclusive) || start < 0 || endInclusive < start) throw new Error("对象存储流式范围不正确");
+  const { client, bucket } = createObjectStorageClient();
+  try {
+    const result = await client.send(new GetObjectCommand({ Bucket: bucket, Key: objectKey, Range: `bytes=${start}-${endInclusive}` }));
+    if (!result.Body) throw new Error("对象存储返回空分片");
+    await pipeline(result.Body as NodeJS.ReadableStream, destination);
+  } finally {
+    client.destroy();
+  }
+}
+
 /** 删除独立对象存储中的指定对象，只供已完成数据库归属校验的业务调用。 */
 export async function deleteObject(objectKey: string): Promise<void> {
   const { client, bucket } = createObjectStorageClient();

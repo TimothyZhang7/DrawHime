@@ -865,6 +865,35 @@ export const desktopLocalLoraImportInputSchema = z.object({
   triggerWords: z.array(z.string().trim().min(1).max(100)).max(50),
 });
 
+/** 桌面端展示的当前账号网站 LoRA 目录，不包含对象存储键。 */
+export const desktopWebsiteLoraViewSchema = z.object({
+  id: z.string().uuid(),
+  title: z.string(),
+  description: z.string(),
+  type: desktopLocalLoraViewSchema.shape.type,
+  modelFamily: z.string(),
+  modelFamilyName: z.string(),
+  triggerWords: z.array(z.string()),
+  ownerDisplayName: z.string(),
+  privacy: desktopGalleryPrivacySchema,
+  isOwner: z.boolean(),
+  versionId: z.string().uuid(),
+  fileName: z.string(),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  byteSize: z.number().int().positive(),
+  installed: z.boolean(),
+});
+
+/** 网站 LoRA 断点下载、校验和安装进度。 */
+export const desktopWebsiteLoraInstallProgressSchema = z.object({
+  loraId: z.string().uuid(),
+  status: z.enum(["downloading", "verifying", "installing", "installed", "failed"]),
+  downloadedBytes: z.number().int().nonnegative(),
+  totalBytes: z.number().int().positive(),
+  bytesPerSecond: z.number().int().nonnegative(),
+  error: z.string().nullable(),
+});
+
 /** 桌面端本地训练集及逐图 Caption 视图。 */
 export const desktopTrainingDatasetViewSchema = z.object({
   id: z.string().uuid(),
@@ -1240,6 +1269,8 @@ export type DesktopAuthorizationApprovalView = z.infer<typeof desktopAuthorizati
 export type DesktopAccountView = z.infer<typeof desktopAccountViewSchema>;
 export type DesktopGalleryUploadCreateRequest = z.infer<typeof desktopGalleryUploadCreateRequestSchema>;
 export type DesktopGalleryUploadView = z.infer<typeof desktopGalleryUploadViewSchema>;
+export type DesktopWebsiteLoraView = z.infer<typeof desktopWebsiteLoraViewSchema>;
+export type DesktopWebsiteLoraInstallProgress = z.infer<typeof desktopWebsiteLoraInstallProgressSchema>;
 export type MainSessionExchangeRequest = z.infer<typeof mainSessionExchangeRequestSchema>;
 export type MainSessionExchangeResponse = z.infer<typeof mainSessionExchangeResponseSchema>;
 export type BillingReservationCreateRequest = z.infer<typeof billingReservationCreateRequestSchema>;

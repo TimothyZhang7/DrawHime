@@ -1351,6 +1351,54 @@ select:focus-visible {
   color: var(--danger);
 }
 
+/* 网站 LoRA 目录突出一键安装、权限和真实断点进度，窄窗口自动收敛列数。 */
+.website-lora-section > header > button,
+.website-lora-grid article > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--accent);
+  color: var(--button-text);
+  font-size: 8px;
+  font-weight: 800;
+}
+
+.website-lora-section > header > button svg,
+.website-lora-grid article > button svg { width: 14px; }
+.website-lora-section > header > button:disabled,
+.website-lora-grid article > button:disabled { cursor: not-allowed; opacity: .55; }
+
+.website-lora-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.website-lora-grid article {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--panel-raised);
+}
+
+.website-lora-grid article > div:first-child { display: flex; align-items: center; gap: 5px; }
+.website-lora-grid article > div:first-child b,
+.website-lora-grid article > div:first-child i { padding: 3px 6px; border-radius: 3px; background: var(--accent-soft); color: var(--accent); font-size: 7px; font-style: normal; }
+.website-lora-grid article > div:first-child i { background: var(--danger-soft); color: var(--danger); }
+.website-lora-grid strong,
+.website-lora-grid span,
+.website-lora-grid > article > small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.website-lora-grid strong { font-size: 10px; }
+.website-lora-grid span,
+.website-lora-grid > article > small { color: var(--muted); font-size: 7px; }
+
 /* 本地训练集使用固定步骤事实源；图片、Caption 和确认状态在紧凑窗口仍保持可操作。 */
 .training-page {
   display: grid;
@@ -2604,6 +2652,7 @@ select:focus-visible {
   .model-import-grid,
   .model-list,
   .lora-library-grid,
+  .website-lora-grid,
   .local-job-grid {
     grid-template-columns: 1fr;
   }

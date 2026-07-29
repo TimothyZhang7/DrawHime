@@ -11,7 +11,7 @@ import type { IncomingMessage } from "node:http";
 import type { ExternalIdentity, Prisma } from "@prisma/client";
 import { loraLibraryCreateRequestSchema, loraLibraryUpdateRequestSchema, loraUploadSessionCreateRequestSchema, type LoraLibraryEntryView, type LoraUploadSessionView } from "@drawhime/contracts";
 import { database } from "@drawhime/database";
-import { deleteObject, getObjectBuffer, putObjectBuffer, putObjectFile, readJsonBody, sendError, sendSuccess, streamObjectToWritable, type ServiceRouter } from "@drawhime/service-runtime";
+import { deleteObject, getObjectBuffer, putObjectBuffer, putObjectFile, readJsonBody, sendError, sendSuccess, streamObjectRangeToWritable, streamObjectToWritable, type ServiceRouter } from "@drawhime/service-runtime";
 import sharp from "sharp";
 
 const maximumLoraBytes = 512 * 1024 * 1024;
@@ -49,15 +49,27 @@ export function registerLoraLibraryRoutes(router: ServiceRouter, findSession: Fi
       const entry = await findDownloadableEntry(params.id, session.externalIdentity);
       const version = entry.versions[0];
       if (!version) throw new LoraLibraryError(404, "lora_file_not_found", "LoRA 模型文件不存在");
-      response.writeHead(200, {
+      const range = parseDownloadRange(request.headers.range, Number(version.byteSize));
+      if (range === "invalid") {
+        response.writeHead(416, { "content-range": `bytes */${version.byteSize}`, "accept-ranges": "bytes", "cache-control": "no-store" });
+        response.end();
+        return;
+      }
+      const start = range?.start ?? 0;
+      const end = range?.end ?? Number(version.byteSize) - 1;
+      response.writeHead(range ? 206 : 200, {
         "content-type": "application/octet-stream",
-        "content-length": String(version.byteSize),
+        "content-length": String(end - start + 1),
         "content-disposition": loraDownloadContentDisposition(version.fileName, entry.id),
         "cache-control": "private, no-store",
         "x-content-type-options": "nosniff",
+        "accept-ranges": "bytes",
+        "etag": `"${version.sha256}"`,
+        ...(range ? { "content-range": `bytes ${start}-${end}/${version.byteSize}` } : {}),
       });
       // 模型文件最大可达 512MB，直接从对象存储流向客户端，避免 API 进程复制整份文件。
-      await streamObjectToWritable(version.objectKey, response);
+      if (range) await streamObjectRangeToWritable(version.objectKey, start, end, response);
+      else await streamObjectToWritable(version.objectKey, response);
     } catch (error) {
       if (!response.headersSent) return sendLibraryError(response, error);
       if (!response.destroyed) response.destroy(error instanceof Error ? error : new Error("LoRA 模型文件下载失败"));
@@ -349,6 +361,18 @@ export function registerLoraLibraryRoutes(router: ServiceRouter, findSession: Fi
     response.writeHead(200, { "content-type": example.artifact.mimeType, "content-length": String(object.body.length), "cache-control": visible ? "public, max-age=86400" : "private, no-store" });
     response.end(object.body);
   });
+}
+
+/** LoRA 下载只接受一个显式或开放结束字节范围。 */
+export function parseDownloadRange(value: string | string[] | undefined, totalBytes: number): { start: number; end: number } | null | "invalid" {
+  if (!value) return null;
+  const text = String(Array.isArray(value) ? value[0] ?? "" : value).trim();
+  const match = /^bytes=(\d+)-(\d*)$/.exec(text);
+  if (!match) return "invalid";
+  const start = Number(match[1]);
+  const end = match[2] ? Number(match[2]) : totalBytes - 1;
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || start > end || end >= totalBytes) return "invalid";
+  return { start, end };
 }
 
 /** 查询公开仓库或当前用户自己的私有条目。 */
