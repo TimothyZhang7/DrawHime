@@ -9,7 +9,7 @@ mod runtime;
 mod scheduler;
 mod storage;
 
-use models::{DesktopBootstrapView, DesktopEnvironmentReport, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView, DesktopSettings, GalleryPublicationInput, GallerySyncItem};
+use models::{DesktopBootstrapView, DesktopEnvironmentReport, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView, DesktopSettings, GalleryPublicationInput, GallerySyncItem};
 use std::path::PathBuf;
 use storage::DesktopState;
 use tauri::{Manager, State};
@@ -111,6 +111,18 @@ fn desktop_list_local_models(state: State<'_, DesktopState>) -> Result<Vec<Deskt
 }
 
 #[tauri::command]
+async fn desktop_import_local_lora(state: State<'_, DesktopState>, input: DesktopLocalLoraImportInput) -> Result<DesktopLocalLoraView, String> {
+    let settings = state.load_settings()?;
+    let registration = tauri::async_runtime::spawn_blocking(move || local_model::import_local_lora(&settings, input)).await.map_err(|error| format!("LoRA 导入任务异常：{error}"))??;
+    state.register_local_lora(registration)
+}
+
+#[tauri::command]
+fn desktop_list_local_loras(state: State<'_, DesktopState>) -> Result<Vec<DesktopLocalLoraView>, String> {
+    state.list_local_loras()
+}
+
+#[tauri::command]
 fn desktop_create_local_job(state: State<'_, DesktopState>, input: DesktopLocalJobCreateInput) -> Result<DesktopLocalJobView, String> {
     state.create_local_job(input)
 }
@@ -147,7 +159,7 @@ pub fn run() {
             app.manage(state);
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![desktop_bootstrap, desktop_inspect_environment, desktop_save_settings, desktop_enqueue_gallery_publication, desktop_list_gallery_sync_queue, desktop_load_resource_catalog, desktop_download_resource, desktop_install_resource, desktop_runtime_status, desktop_start_runtime, desktop_stop_runtime, desktop_self_test_runtime, desktop_import_local_model, desktop_list_local_models, desktop_create_local_job, desktop_list_local_jobs, desktop_cancel_local_job])
+        .invoke_handler(tauri::generate_handler![desktop_bootstrap, desktop_inspect_environment, desktop_save_settings, desktop_enqueue_gallery_publication, desktop_list_gallery_sync_queue, desktop_load_resource_catalog, desktop_download_resource, desktop_install_resource, desktop_runtime_status, desktop_start_runtime, desktop_stop_runtime, desktop_self_test_runtime, desktop_import_local_model, desktop_list_local_models, desktop_import_local_lora, desktop_list_local_loras, desktop_create_local_job, desktop_list_local_jobs, desktop_cancel_local_job])
         .run(tauri::generate_context!())
         .expect("DrawHime Desktop 启动失败");
 }

@@ -41,7 +41,9 @@
 | `desktop_self_test_runtime` | desktop webview | desktop core | 启动或复用本机 Runtime，校验 `/system_stats`、GPU 设备及生成必需节点；成功后原子更新 Runtime 内部自检状态，失败时保留具体原因而不伪造就绪 |
 | `desktop_import_local_model` | desktop webview | desktop core | 校验用户选择的 safetensors、计算 SHA-256、原子复制到受控模型目录并登记 `DesktopLocalModelView`；Anima 同时校验独立 UNet、文本编码器和 VAE，不加载 pickle 权重 |
 | `desktop_list_local_models` | desktop webview | desktop core | 返回当前设备已登记且文件元数据仍匹配的本地底模，不扫描或读取未登记文件内容 |
-| `desktop_create_local_job` | desktop webview | desktop core/local scheduler | 校验模型快照、提示词和参数后持久化创建 `DesktopLocalJobView`；提交立即返回排队状态，后台串行调度不会阻塞页面 |
+| `desktop_import_local_lora` | desktop webview | desktop core | 校验并原子导入单个 safetensors LoRA，固化标题、类型、触发词、SHA-256、字节数和修改时间；同内容幂等复用，不覆盖其他文件 |
+| `desktop_list_local_loras` | desktop webview | desktop core | 返回当前设备已登记 LoRA 及实时文件可用性；本地任务最多选择 4 个不同内容的 LoRA，每个独立设置 0–1.5 强度 |
+| `desktop_create_local_job` | desktop webview | desktop core/local scheduler | 校验模型与最多 4 个 LoRA 快照、提示词和参数后持久化创建 `DesktopLocalJobView`；提交立即返回排队状态，后台串行调度不会阻塞页面 |
 | `desktop_list_local_jobs` | desktop webview | desktop core | 分页前的首版接口返回当前设备最近 100 个本地任务及产物摘要，任务、尝试和错误在应用重启后保留 |
 | `desktop_cancel_local_job` | desktop webview | desktop core/local scheduler | 幂等取消排队任务；运行中任务向当前 ComfyUI prompt 发出删除和中断请求，终态任务保持不变 |
 | `desktop-local-job-updated` | desktop core/local scheduler | desktop webview | 本地任务状态、进度或产物变化事件；载荷为 `DesktopLocalJobView`，刷新页面后仍以 SQLite 为准 |

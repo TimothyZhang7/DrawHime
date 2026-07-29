@@ -16,6 +16,13 @@ const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_JSON_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_IMAGE_BYTES: u64 = 80 * 1024 * 1024;
 
+/** 传入 ComfyUI 工作流的不可变 LoRA 文件与强度快照。 */
+#[derive(Clone)]
+pub struct GenerationLora {
+    pub file_name: String,
+    pub strength: f64,
+}
+
 /** 生成工作流所需的任务与模型快照。 */
 pub struct GenerationRequest {
     pub job_id: String,
@@ -23,6 +30,7 @@ pub struct GenerationRequest {
     pub model_file_name: String,
     pub text_encoder_file_name: Option<String>,
     pub vae_file_name: Option<String>,
+    pub loras: Vec<GenerationLora>,
     pub prompt: String,
     pub negative_prompt: Option<String>,
     pub width: u32,
@@ -162,7 +170,7 @@ fn build_workflow(request: &GenerationRequest) -> Result<Value, String> {
     let negative = request.negative_prompt.as_deref().unwrap_or("").trim();
     let prefix = format!("drawhime_{}", request.job_id.replace('-', ""));
     if request.workflow_kind == "checkpoint" {
-        return Ok(json!({
+        let mut workflow = json!({
             "1": { "class_type": "CheckpointLoaderSimple", "inputs": { "ckpt_name": request.model_file_name } },
             "2": { "class_type": "CLIPTextEncode", "inputs": { "text": positive, "clip": ["1", 1] } },
             "3": { "class_type": "CLIPTextEncode", "inputs": { "text": negative, "clip": ["1", 1] } },
@@ -170,7 +178,9 @@ fn build_workflow(request: &GenerationRequest) -> Result<Value, String> {
             "5": { "class_type": "KSampler", "inputs": { "model": ["1", 0], "seed": request.seed, "steps": request.steps, "cfg": request.cfg, "sampler_name": request.sampler_name, "scheduler": request.scheduler_name, "positive": ["2", 0], "negative": ["3", 0], "latent_image": ["4", 0], "denoise": 1.0 } },
             "6": { "class_type": "VAEDecode", "inputs": { "samples": ["5", 0], "vae": ["1", 2] } },
             "7": { "class_type": "SaveImage", "inputs": { "images": ["6", 0], "filename_prefix": prefix } }
-        }));
+        });
+        attach_loras(&mut workflow, request, "1", 1, "2", "3", "5")?;
+        return Ok(workflow);
     }
     if request.workflow_kind != "anima" {
         return Err("当前模型工作流格式未受支持".into());
@@ -183,7 +193,7 @@ fn build_workflow(request: &GenerationRequest) -> Result<Value, String> {
         .vae_file_name
         .as_deref()
         .ok_or_else(|| "Anima 任务缺少 VAE 快照".to_string())?;
-    Ok(json!({
+    let mut workflow = json!({
         "1": { "class_type": "UNETLoader", "inputs": { "unet_name": request.model_file_name, "weight_dtype": "default" } },
         "2": { "class_type": "CLIPLoader", "inputs": { "clip_name": text_encoder, "type": "stable_diffusion", "device": "default" } },
         "3": { "class_type": "VAELoader", "inputs": { "vae_name": vae } },
@@ -193,7 +203,28 @@ fn build_workflow(request: &GenerationRequest) -> Result<Value, String> {
         "7": { "class_type": "KSampler", "inputs": { "model": ["1", 0], "seed": request.seed, "steps": request.steps, "cfg": request.cfg, "sampler_name": request.sampler_name, "scheduler": request.scheduler_name, "positive": ["4", 0], "negative": ["5", 0], "latent_image": ["6", 0], "denoise": 1.0 } },
         "8": { "class_type": "VAEDecode", "inputs": { "samples": ["7", 0], "vae": ["3", 0] } },
         "9": { "class_type": "SaveImage", "inputs": { "images": ["8", 0], "filename_prefix": prefix } }
-    }))
+    });
+    attach_loras(&mut workflow, request, "1", 0, "4", "5", "7")?;
+    Ok(workflow)
+}
+
+/** 串联最多四个 LoRA，并让正负提示词与采样器共同使用最终模型和 CLIP。 */
+fn attach_loras(workflow: &mut Value, request: &GenerationRequest, base_model_node: &str, base_clip_slot: usize, positive_node: &str, negative_node: &str, sampler_node: &str) -> Result<(), String> {
+    let object = workflow.as_object_mut().ok_or_else(|| "ComfyUI 工作流结构异常".to_string())?;
+    let mut model_input = json!([base_model_node, 0]);
+    let mut clip_input = if request.workflow_kind == "checkpoint" { json!([base_model_node, base_clip_slot]) } else { json!(["2", base_clip_slot]) };
+    for (index, lora) in request.loras.iter().enumerate() {
+        let node_id = (20 + index).to_string();
+        object.insert(node_id.clone(), json!({ "class_type": "LoraLoader", "inputs": { "model": model_input, "clip": clip_input, "lora_name": lora.file_name, "strength_model": lora.strength, "strength_clip": lora.strength } }));
+        model_input = json!([node_id, 0]);
+        clip_input = json!([node_id, 1]);
+    }
+    if !request.loras.is_empty() {
+        object.get_mut(positive_node).and_then(|node| node.get_mut("inputs")).and_then(Value::as_object_mut).ok_or_else(|| "正面提示词节点结构异常".to_string())?.insert("clip".into(), clip_input.clone());
+        object.get_mut(negative_node).and_then(|node| node.get_mut("inputs")).and_then(Value::as_object_mut).ok_or_else(|| "负面提示词节点结构异常".to_string())?.insert("clip".into(), clip_input);
+        object.get_mut(sampler_node).and_then(|node| node.get_mut("inputs")).and_then(Value::as_object_mut).ok_or_else(|| "采样器节点结构异常".to_string())?.insert("model".into(), model_input);
+    }
+    Ok(())
 }
 
 fn first_output_image(item: &Value) -> Option<&Value> {
@@ -334,6 +365,21 @@ mod tests {
     }
 
     #[test]
+    fn multiple_loras_are_chained_into_model_and_both_conditionings() {
+        let mut request = test_request("anima");
+        request.loras = vec![
+            GenerationLora { file_name: "character.safetensors".into(), strength: 0.8 },
+            GenerationLora { file_name: "style.safetensors".into(), strength: 0.55 },
+        ];
+        let workflow = build_workflow(&request).expect("构建多 LoRA 工作流");
+        assert_eq!(workflow["20"]["inputs"]["model"], json!(["1", 0]));
+        assert_eq!(workflow["21"]["inputs"]["model"], json!(["20", 0]));
+        assert_eq!(workflow["4"]["inputs"]["clip"], json!(["21", 1]));
+        assert_eq!(workflow["5"]["inputs"]["clip"], json!(["21", 1]));
+        assert_eq!(workflow["7"]["inputs"]["model"], json!(["21", 0]));
+    }
+
+    #[test]
     fn real_anima_runtime_generates_verified_png() {
         let Ok(runtime_root) = std::env::var("DRAWHIME_GENERATION_TEST_RUNTIME_ROOT") else { return; };
         let Ok(model_root) = std::env::var("DRAWHIME_GENERATION_TEST_MODEL_ROOT") else { return; };
@@ -343,7 +389,9 @@ mod tests {
         let controller = RuntimeController::new();
         controller.self_test(&settings, temporary.path()).expect("真实 Runtime 自检");
         let endpoint = controller.endpoint().expect("读取 Runtime 端点");
-        let result = generate_image(&endpoint, GenerationRequest { job_id: Uuid::new_v4().to_string(), workflow_kind: "anima".into(), model_file_name: "animeBulldozer_anima.safetensors".into(), text_encoder_file_name: Some("qwen_3_06b_base.safetensors".into()), vae_file_name: Some("qwen_image_vae.safetensors".into()), prompt: "masterpiece, best quality, 1girl, solo, blue hair, white background".into(), negative_prompt: Some("worst quality, low quality, blurry, bad anatomy".into()), width: 512, height: 512, steps: 4, cfg: 4.0, sampler_name: "euler".into(), scheduler_name: "normal".into(), seed: 20260729, output_root, runtime_output_root: temporary.path().join("runtime-state").join("comfy-output") }, |_| Ok(()), || false).map_err(|failure| match failure { GenerationFailure::Cancelled => "生成被取消".to_string(), GenerationFailure::Failed(error) => error }).expect("真实 Anima 生图");
+        // 设置真实 LoRA 文件名时，同一集成测试同时覆盖 Runtime 的 LoraLoader 链路。
+        let loras = std::env::var("DRAWHIME_GENERATION_TEST_LORA_FILE").ok().map(|file_name| vec![GenerationLora { file_name, strength: 0.8 }]).unwrap_or_default();
+        let result = generate_image(&endpoint, GenerationRequest { job_id: Uuid::new_v4().to_string(), workflow_kind: "anima".into(), model_file_name: "animeBulldozer_anima.safetensors".into(), text_encoder_file_name: Some("qwen_3_06b_base.safetensors".into()), vae_file_name: Some("qwen_image_vae.safetensors".into()), loras, prompt: "masterpiece, best quality, 1girl, solo, blue hair, white background".into(), negative_prompt: Some("worst quality, low quality, blurry, bad anatomy".into()), width: 512, height: 512, steps: 4, cfg: 4.0, sampler_name: "euler".into(), scheduler_name: "normal".into(), seed: 20260729, output_root, runtime_output_root: temporary.path().join("runtime-state").join("comfy-output") }, |_| Ok(()), || false).map_err(|failure| match failure { GenerationFailure::Cancelled => "生成被取消".to_string(), GenerationFailure::Failed(error) => error }).expect("真实 Anima 生图");
         assert!(Path::new(&result.path).is_file());
         assert_eq!((result.width, result.height), (512, 512));
         assert_eq!(result.sha256.len(), 64);
@@ -357,6 +405,7 @@ mod tests {
             model_file_name: "model.safetensors".into(),
             text_encoder_file_name: Some("clip.safetensors".into()),
             vae_file_name: Some("vae.safetensors".into()),
+            loras: Vec::new(),
             prompt: "subject".into(),
             negative_prompt: Some("bad anatomy".into()),
             width: 512,

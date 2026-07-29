@@ -54,6 +54,40 @@ pub struct DesktopLocalModelImportInput {
     pub vae_source_path: Option<String>,
 }
 
+/** 已登记的本机 LoRA 视图。 */
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopLocalLoraView {
+    pub id: String,
+    pub title: String,
+    pub r#type: String,
+    pub file_name: String,
+    pub sha256: String,
+    pub byte_size: u64,
+    pub trigger_words: Vec<String>,
+    pub available: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/** 从本地文件导入 LoRA 的输入。 */
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopLocalLoraImportInput {
+    pub title: String,
+    pub r#type: String,
+    pub source_path: String,
+    pub trigger_words: Vec<String>,
+}
+
+/** 本地任务选择的单个 LoRA 强度。 */
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopLocalLoraSelectionInput {
+    pub id: String,
+    pub strength: f64,
+}
+
 /** 提交到本机串行调度器的生成参数。 */
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -68,6 +102,7 @@ pub struct DesktopLocalJobCreateInput {
     pub sampler_name: String,
     pub scheduler_name: String,
     pub seed: Option<u32>,
+    pub loras: Vec<DesktopLocalLoraSelectionInput>,
     pub privacy: String,
 }
 
@@ -94,6 +129,19 @@ pub struct DesktopLocalArtifactView {
     pub mime_type: String,
     pub width: u32,
     pub height: u32,
+}
+
+/** 本地任务固化的 LoRA 内容与强度快照。 */
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopLocalJobLoraView {
+    pub id: String,
+    pub title: String,
+    pub r#type: String,
+    pub file_name: String,
+    pub sha256: String,
+    pub strength: f64,
+    pub trigger_words: Vec<String>,
 }
 
 /** 本地任务每次 Runtime 执行的持久审计记录。 */
@@ -125,6 +173,7 @@ pub struct DesktopLocalJobView {
     pub privacy: String,
     pub runtime_prompt_id: Option<String>,
     pub error: Option<String>,
+    pub loras: Vec<DesktopLocalJobLoraView>,
     pub attempts: Vec<DesktopLocalJobAttemptView>,
     pub artifact: Option<DesktopLocalArtifactView>,
     pub created_at: String,

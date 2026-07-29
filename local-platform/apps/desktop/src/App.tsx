@@ -1,20 +1,21 @@
 /**
  * 本文件实现桌面生成、任务、模型、Runtime、资源、环境、图库同步和本地设置的响应式工作区。
  */
-import type { DesktopBootstrapView, DesktopEnvironmentReport, DesktopGallerySyncItem, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView, DesktopSettings } from "@drawhime/contracts";
-import { Activity, AlertTriangle, CheckCircle2, Cpu, Database, Download, FlaskConical, FolderCog, Gauge, HardDrive, Image, Images, LoaderCircle, MemoryStick, Monitor, Moon, PackageCheck, PackageOpen, Play, Power, RefreshCw, Settings2, ShieldCheck, Sun, UploadCloud, X } from "lucide-react";
+import type { DesktopBootstrapView, DesktopEnvironmentReport, DesktopGallerySyncItem, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView, DesktopSettings } from "@drawhime/contracts";
+import { Activity, AlertTriangle, CheckCircle2, Cpu, Database, Download, FlaskConical, FolderCog, Gauge, HardDrive, Image, Images, Layers3, LoaderCircle, MemoryStick, Monitor, Moon, PackageCheck, PackageOpen, Play, Power, RefreshCw, Settings2, ShieldCheck, Sun, UploadCloud, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { cancelDesktopLocalJob, createDesktopLocalJob, downloadDesktopResource, importDesktopLocalModel, inspectDesktopEnvironment, installDesktopResource, listDesktopGallerySyncQueue, listDesktopLocalJobs, listDesktopLocalModels, listenDesktopLocalJobUpdates, listenDesktopResourceInstallProgress, listenDesktopResourceProgress, loadDesktopBootstrap, loadDesktopResourceCatalog, loadDesktopRuntimeStatus, saveDesktopSettings, selfTestDesktopRuntime, startDesktopRuntime, stopDesktopRuntime } from "./desktop-api";
+import { cancelDesktopLocalJob, createDesktopLocalJob, downloadDesktopResource, importDesktopLocalLora, importDesktopLocalModel, inspectDesktopEnvironment, installDesktopResource, listDesktopGallerySyncQueue, listDesktopLocalJobs, listDesktopLocalLoras, listDesktopLocalModels, listenDesktopLocalJobUpdates, listenDesktopResourceInstallProgress, listenDesktopResourceProgress, loadDesktopBootstrap, loadDesktopResourceCatalog, loadDesktopRuntimeStatus, saveDesktopSettings, selfTestDesktopRuntime, startDesktopRuntime, stopDesktopRuntime } from "./desktop-api";
 
-type DesktopPage = "generate" | "jobs" | "models" | "overview" | "environment" | "resources" | "sync" | "settings";
+type DesktopPage = "generate" | "jobs" | "models" | "loras" | "overview" | "environment" | "resources" | "sync" | "settings";
 
 const navigation = [
   { id: "generate" as const, label: "本地生成", Icon: Images },
   { id: "jobs" as const, label: "任务记录", Icon: Image },
   { id: "models" as const, label: "本地模型", Icon: Database },
+  { id: "loras" as const, label: "LoRA 仓库", Icon: Layers3 },
   { id: "overview" as const, label: "本机概览", Icon: Gauge },
   { id: "environment" as const, label: "环境检测", Icon: Cpu },
   { id: "resources" as const, label: "资源安装", Icon: PackageOpen },
@@ -31,6 +32,7 @@ export function App() {
   const [resourceProgress, setResourceProgress] = useState<Record<string, DesktopResourceDownloadView>>({});
   const [installProgress, setInstallProgress] = useState<Record<string, DesktopResourceInstallView>>({});
   const [models, setModels] = useState<DesktopLocalModelView[]>([]);
+  const [loras, setLoras] = useState<DesktopLocalLoraView[]>([]);
   const [jobs, setJobs] = useState<DesktopLocalJobView[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -43,7 +45,7 @@ export function App() {
   const lastEnvironmentCheckAt = useRef(0);
   const bootstrapReady = bootstrap !== null;
 
-  useEffect(() => { void loadDesktopBootstrap().then(async (state) => { lastEnvironmentCheckAt.current = Date.now(); setBootstrap(state); const [nextQueue, catalog, nextModels, nextJobs] = await Promise.all([listDesktopGallerySyncQueue(), loadDesktopResourceCatalog(), listDesktopLocalModels(), listDesktopLocalJobs()]); setQueue(nextQueue); setResourceCatalog(catalog); setModels(nextModels); setJobs(nextJobs); }).catch((error) => setMessage(errorMessage(error))).finally(() => setLoading(false)); }, []);
+  useEffect(() => { void loadDesktopBootstrap().then(async (state) => { lastEnvironmentCheckAt.current = Date.now(); setBootstrap(state); const [nextQueue, catalog, nextModels, nextJobs, nextLoras] = await Promise.all([listDesktopGallerySyncQueue(), loadDesktopResourceCatalog(), listDesktopLocalModels(), listDesktopLocalJobs(), listDesktopLocalLoras()]); setQueue(nextQueue); setResourceCatalog(catalog); setModels(nextModels); setJobs(nextJobs); setLoras(nextLoras); }).catch((error) => setMessage(errorMessage(error))).finally(() => setLoading(false)); }, []);
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     void listenDesktopResourceProgress((progress) => setResourceProgress((current) => ({ ...current, [progress.resourceId]: progress }))).then((dispose) => { unlisten = dispose; }).catch((error) => setMessage(errorMessage(error)));
@@ -166,6 +168,11 @@ export function App() {
     setMessage(`模型“${model.displayName}”已完成校验并导入`);
     void recheck(true);
   };
+  /** LoRA 导入完成后按 ID 更新本地仓库，不重建生成页以保留用户输入。 */
+  const loraImported = (lora: DesktopLocalLoraView) => {
+    setLoras((current) => [lora, ...current.filter((item) => item.id !== lora.id)]);
+    setMessage(`LoRA“${lora.title}”已完成校验并导入`);
+  };
   const jobCreated = (job: DesktopLocalJobView) => {
     setJobs((current) => [job, ...current.filter((item) => item.id !== job.id)]);
     setMessage("本地任务已进入持久队列");
@@ -183,9 +190,10 @@ export function App() {
       <header className="desktop-topbar"><div className="desktop-title"><span>本地模型工作站</span><strong>{pageTitle(page)}</strong></div><div className="topbar-actions"><div className="theme-switch" aria-label="界面主题">{(["system", "dark", "light"] as const).map((mode) => { const Icon = mode === "system" ? Monitor : mode === "dark" ? Moon : Sun; return <button key={mode} className={bootstrap.settings.themeMode === mode ? "active" : ""} aria-label={themeModeLabel(mode)} title={themeModeLabel(mode)} disabled={themeSaving} onClick={() => void changeTheme(mode)}><Icon /></button>; })}</div><button className="recheck-button" onClick={() => void recheck()} disabled={checking}>{checking ? <LoaderCircle className="spin" /> : <RefreshCw />}<span>重新检测</span></button></div></header>
       {bootstrap.environment.status !== "ready" && critical && <section className={`environment-banner is-${critical.severity}`}><AlertTriangle /><div><strong>{critical.title}</strong><span>{critical.message}</span></div><button onClick={() => setPage("environment")}>查看环境详情</button></section>}
       {message && <div className="desktop-notice">{message}<button onClick={() => setMessage("")}>×</button></div>}
-      <div hidden={page !== "generate"}><GeneratePage models={models} defaultPrivacy={bootstrap.settings.defaultPrivacy} onCreated={jobCreated} onError={setMessage} /></div>
+      <div hidden={page !== "generate"}><GeneratePage models={models} loras={loras} defaultPrivacy={bootstrap.settings.defaultPrivacy} onCreated={jobCreated} onError={setMessage} /></div>
       <div hidden={page !== "jobs"}><JobsPage jobs={jobs} onCancel={(id) => void cancelJob(id)} /></div>
       <div hidden={page !== "models"}><ModelsPage models={models} onImported={modelImported} onError={setMessage} /></div>
+      <div hidden={page !== "loras"}><LorasPage loras={loras} onImported={loraImported} onError={setMessage} /></div>
       <div hidden={page !== "overview"}><OverviewPage state={bootstrap} runtimeBusy={runtimeBusy} onRuntimeAction={(action) => void controlRuntime(action)} /></div>
       <div hidden={page !== "environment"}><EnvironmentPage report={bootstrap.environment} /></div>
       <div hidden={page !== "resources"}><ResourcesPage catalog={resourceCatalog} progress={resourceProgress} installProgress={installProgress} loading={catalogLoading} bulkBusy={resourceBulkBusy} onReload={() => void reloadResourceCatalog()} onInstallRequired={() => void installRequiredResources()} onDownload={(resourceId) => void downloadResource(resourceId)} onInstall={(resourceId) => void installResource(resourceId)} /></div>
@@ -196,11 +204,13 @@ export function App() {
 }
 
 /** 本地生成页在页面切换时保持表单实例，提交后立即返回任务而不等待 Runtime。 */
-function GeneratePage({ models, defaultPrivacy, onCreated, onError }: { models: DesktopLocalModelView[]; defaultPrivacy: DesktopSettings["defaultPrivacy"]; onCreated: (job: DesktopLocalJobView) => void; onError: (message: string) => void }) {
-  const [form, setForm] = useState<DesktopLocalJobCreateInput>({ modelId: "", prompt: "", negativePrompt: null, width: 1024, height: 1024, steps: 20, cfg: 5, samplerName: "euler", schedulerName: "normal", seed: null, privacy: defaultPrivacy });
+function GeneratePage({ models, loras, defaultPrivacy, onCreated, onError }: { models: DesktopLocalModelView[]; loras: DesktopLocalLoraView[]; defaultPrivacy: DesktopSettings["defaultPrivacy"]; onCreated: (job: DesktopLocalJobView) => void; onError: (message: string) => void }) {
+  const [form, setForm] = useState<DesktopLocalJobCreateInput>({ modelId: "", prompt: "", negativePrompt: null, width: 1024, height: 1024, steps: 20, cfg: 5, samplerName: "euler", schedulerName: "normal", seed: null, loras: [], privacy: defaultPrivacy });
   const [busy, setBusy] = useState(false);
   const availableModels = models.filter((model) => model.available);
+  const availableLoras = loras.filter((lora) => lora.available);
   useEffect(() => { if (!availableModels.some((model) => model.id === form.modelId)) setForm((current) => ({ ...current, modelId: availableModels[0]?.id || "" })); }, [models]);
+  useEffect(() => { setForm((current) => ({ ...current, loras: current.loras.filter((selection) => availableLoras.some((lora) => lora.id === selection.id)) })); }, [loras]);
   const submit = async () => {
     if (!form.modelId || !form.prompt.trim() || busy) return;
     setBusy(true);
@@ -209,12 +219,20 @@ function GeneratePage({ models, defaultPrivacy, onCreated, onError }: { models: 
     finally { setBusy(false); }
   };
   const chooseSize = (value: string) => { const [width, height] = value.split("x").map(Number); setForm({ ...form, width, height }); };
-  return <div className="desktop-page generate-layout"><section className="section-card generation-form"><header><div><span>LOCAL GENERATION</span><h2>本地生成</h2></div><small>任务提交后由 SQLite 队列后台执行</small></header>{availableModels.length === 0 ? <div className="resource-unconfigured"><Database /><div><strong>尚无可用底模</strong><span>先在“本地模型”导入 safetensors，或在“资源安装”下载网站发布模型。</span></div></div> : <><div className="generation-grid"><label><span>底模</span><select value={form.modelId} onChange={(event) => setForm({ ...form, modelId: event.target.value })}>{availableModels.map((model) => <option key={model.id} value={model.id}>{model.displayName} · {model.family}</option>)}</select></label><label><span>输出尺寸</span><select value={`${form.width}x${form.height}`} onChange={(event) => chooseSize(event.target.value)}><option value="1024x1024">1:1 · 1024 × 1024</option><option value="1024x1536">2:3 · 1024 × 1536</option><option value="1536x1024">3:2 · 1536 × 1024</option><option value="864x1536">9:16 · 864 × 1536</option><option value="1536x864">16:9 · 1536 × 864</option></select></label><label><span>采样步数</span><input type="number" min={1} max={50} value={form.steps} onChange={(event) => setForm({ ...form, steps: Number(event.target.value) })} /></label><label><span>CFG</span><input type="number" min={0.1} max={20} step={0.1} value={form.cfg} onChange={(event) => setForm({ ...form, cfg: Number(event.target.value) })} /></label><label><span>采样器</span><select value={form.samplerName} onChange={(event) => setForm({ ...form, samplerName: event.target.value as DesktopLocalJobCreateInput["samplerName"] })}><option value="euler">Euler</option><option value="euler_ancestral">Euler Ancestral</option></select></label><label><span>调度器</span><select value={form.schedulerName} onChange={(event) => setForm({ ...form, schedulerName: event.target.value as DesktopLocalJobCreateInput["schedulerName"] })}><option value="normal">Normal</option><option value="simple">Simple</option></select></label><label><span>种子</span><input type="number" min={0} max={2147483647} placeholder="留空随机" value={form.seed ?? ""} onChange={(event) => setForm({ ...form, seed: event.target.value ? Number(event.target.value) : null })} /></label><label><span>图库权限</span><select value={form.privacy} onChange={(event) => setForm({ ...form, privacy: event.target.value as DesktopLocalJobCreateInput["privacy"] })}><option value="private">私有</option><option value="public">公开</option></select></label></div><label className="prompt-field"><span>提示词</span><textarea value={form.prompt} onChange={(event) => setForm({ ...form, prompt: event.target.value })} placeholder="描述希望生成的画面" /></label><label className="prompt-field negative"><span>负面提示词</span><textarea value={form.negativePrompt || ""} onChange={(event) => setForm({ ...form, negativePrompt: event.target.value || null })} placeholder="可选；与正面提示词独立进入 negative conditioning" /></label><footer><button disabled={busy || !form.modelId || !form.prompt.trim()} onClick={() => void submit()}>{busy ? <LoaderCircle className="spin" /> : <Play />}{busy ? "正在创建任务" : "提交本地任务"}</button></footer></>}</section></div>;
+  /** 选择与强度始终写回同一个任务表单，最多四个且不重复。 */
+  const toggleLora = (id: string) => setForm((current) => {
+    const selected = current.loras.some((item) => item.id === id);
+    if (selected) return { ...current, loras: current.loras.filter((item) => item.id !== id) };
+    if (current.loras.length >= 4) { onError("每个任务最多选择 4 个 LoRA"); return current; }
+    return { ...current, loras: [...current.loras, { id, strength: 0.8 }] };
+  });
+  const changeLoraStrength = (id: string, strength: number) => setForm((current) => ({ ...current, loras: current.loras.map((item) => item.id === id ? { ...item, strength } : item) }));
+  return <div className="desktop-page generate-layout"><section className="section-card generation-form"><header><div><span>LOCAL GENERATION</span><h2>本地生成</h2></div><small>任务提交后由 SQLite 队列后台执行</small></header>{availableModels.length === 0 ? <div className="resource-unconfigured"><Database /><div><strong>尚无可用底模</strong><span>先在“本地模型”导入 safetensors，或在“资源安装”下载网站发布模型。</span></div></div> : <><div className="generation-grid"><label><span>底模</span><select value={form.modelId} onChange={(event) => setForm({ ...form, modelId: event.target.value })}>{availableModels.map((model) => <option key={model.id} value={model.id}>{model.displayName} · {model.family}</option>)}</select></label><label><span>输出尺寸</span><select value={`${form.width}x${form.height}`} onChange={(event) => chooseSize(event.target.value)}><option value="1024x1024">1:1 · 1024 × 1024</option><option value="1024x1536">2:3 · 1024 × 1536</option><option value="1536x1024">3:2 · 1536 × 1024</option><option value="864x1536">9:16 · 864 × 1536</option><option value="1536x864">16:9 · 1536 × 864</option></select></label><label><span>采样步数</span><input type="number" min={1} max={50} value={form.steps} onChange={(event) => setForm({ ...form, steps: Number(event.target.value) })} /></label><label><span>CFG</span><input type="number" min={0.1} max={20} step={0.1} value={form.cfg} onChange={(event) => setForm({ ...form, cfg: Number(event.target.value) })} /></label><label><span>采样器</span><select value={form.samplerName} onChange={(event) => setForm({ ...form, samplerName: event.target.value as DesktopLocalJobCreateInput["samplerName"] })}><option value="euler">Euler</option><option value="euler_ancestral">Euler Ancestral</option></select></label><label><span>调度器</span><select value={form.schedulerName} onChange={(event) => setForm({ ...form, schedulerName: event.target.value as DesktopLocalJobCreateInput["schedulerName"] })}><option value="normal">Normal</option><option value="simple">Simple</option></select></label><label><span>种子</span><input type="number" min={0} max={2147483647} placeholder="留空随机" value={form.seed ?? ""} onChange={(event) => setForm({ ...form, seed: event.target.value ? Number(event.target.value) : null })} /></label><label><span>图库权限</span><select value={form.privacy} onChange={(event) => setForm({ ...form, privacy: event.target.value as DesktopLocalJobCreateInput["privacy"] })}><option value="private">私有</option><option value="public">公开</option></select></label></div>{availableLoras.length > 0 && <section className="generation-loras"><header><div><strong>叠加 LoRA</strong><span>最多 4 个，每个任务固化文件与强度快照</span></div><b>{form.loras.length}/4</b></header><div>{availableLoras.map((lora) => { const selection = form.loras.find((item) => item.id === lora.id); return <article key={lora.id} className={selection ? "selected" : ""}><button type="button" onClick={() => toggleLora(lora.id)}><i>{selection ? <CheckCircle2 /> : <Layers3 />}</i><span><strong>{lora.title}</strong><small>{loraTypeLabel(lora.type)} · {lora.triggerWords.join(", ") || "无触发词"}</small></span></button>{selection && <label><span>强度</span><input type="number" min={0} max={1.5} step={0.05} value={selection.strength} onChange={(event) => changeLoraStrength(lora.id, Number(event.target.value))} /></label>}</article>; })}</div></section>}<label className="prompt-field"><span>提示词</span><textarea value={form.prompt} onChange={(event) => setForm({ ...form, prompt: event.target.value })} placeholder="描述希望生成的画面" /></label><label className="prompt-field negative"><span>负面提示词</span><textarea value={form.negativePrompt || ""} onChange={(event) => setForm({ ...form, negativePrompt: event.target.value || null })} placeholder="可选；与正面提示词独立进入 negative conditioning" /></label><footer><button disabled={busy || !form.modelId || !form.prompt.trim()} onClick={() => void submit()}>{busy ? <LoaderCircle className="spin" /> : <Play />}{busy ? "正在创建任务" : "提交本地任务"}</button></footer></>}</section></div>;
 }
 
 /** 任务页从 SQLite 视图渲染，成功产物使用 Tauri 受控 asset URL 延迟加载。 */
 function JobsPage({ jobs, onCancel }: { jobs: DesktopLocalJobView[]; onCancel: (id: string) => void }) {
-  return <div className="desktop-page"><section className="section-card"><header><div><span>LOCAL JOBS</span><h2>任务记录</h2></div><small>{jobs.length} 项</small></header>{jobs.length ? <div className="local-job-grid">{jobs.map((job) => <article key={job.id}><div className="local-job-preview">{job.artifact ? <img loading="lazy" src={convertFileSrc(job.artifact.path)} alt={job.prompt.slice(0, 80)} /> : <div><Image /><span>{localJobStatusLabel(job.status)}</span><b>{job.progress}%</b></div>}</div><div className="local-job-copy"><strong>{job.prompt}</strong><span>{job.modelDisplayName} · {job.parameters.width}×{job.parameters.height} · Seed {job.parameters.seed}</span>{job.error && <small>{job.error}</small>}</div>{["queued", "running"].includes(job.status) && <button title="取消任务" onClick={() => onCancel(job.id)}><X /></button>}</article>)}</div> : <div className="empty-block">尚未提交本地生成任务</div>}</section></div>;
+  return <div className="desktop-page"><section className="section-card"><header><div><span>LOCAL JOBS</span><h2>任务记录</h2></div><small>{jobs.length} 项</small></header>{jobs.length ? <div className="local-job-grid">{jobs.map((job) => <article key={job.id}><div className="local-job-preview">{job.artifact ? <img loading="lazy" src={convertFileSrc(job.artifact.path)} alt={job.prompt.slice(0, 80)} /> : <div><Image /><span>{localJobStatusLabel(job.status)}</span><b>{job.progress}%</b></div>}</div><div className="local-job-copy"><strong>{job.prompt}</strong><span>{job.modelDisplayName} · {job.loras.length} 个 LoRA · {job.parameters.width}×{job.parameters.height} · Seed {job.parameters.seed}</span>{job.error && <small>{job.error}</small>}</div>{["queued", "running"].includes(job.status) && <button title="取消任务" onClick={() => onCancel(job.id)}><X /></button>}</article>)}</div> : <div className="empty-block">尚未提交本地生成任务</div>}</section></div>;
 }
 
 /** 模型页通过原生文件选择器导入，不要求用户把绝对路径手工复制到程序外部。 */
@@ -233,6 +251,30 @@ function ModelsPage({ models, onImported, onError }: { models: DesktopLocalModel
   };
   const ready = form.displayName.trim() && form.family.trim() && form.modelSourcePath && (form.workflowKind === "checkpoint" || (form.textEncoderSourcePath && form.vaeSourcePath));
   return <div className="desktop-page model-layout"><section className="section-card model-import"><header><div><span>MODEL IMPORT</span><h2>导入本地底模</h2></div><small>仅 safetensors · 自动哈希 · 原子复制</small></header><div className="model-import-grid"><label><span>显示名称</span><input value={form.displayName} onChange={(event) => setForm({ ...form, displayName: event.target.value })} /></label><label><span>模型系列</span><input value={form.family} onChange={(event) => setForm({ ...form, family: event.target.value })} /></label><label><span>工作流格式</span><select value={form.workflowKind} onChange={(event) => { const workflowKind = event.target.value as DesktopLocalModelImportInput["workflowKind"]; setForm({ ...form, workflowKind, textEncoderSourcePath: workflowKind === "anima" ? form.textEncoderSourcePath : null, vaeSourcePath: workflowKind === "anima" ? form.vaeSourcePath : null }); }}><option value="anima">Anima · UNet + CLIP + VAE</option><option value="checkpoint">Checkpoint · 单文件</option></select></label><FilePicker label={form.workflowKind === "anima" ? "UNet 文件" : "Checkpoint 文件"} value={form.modelSourcePath} onPick={() => void chooseFile("modelSourcePath")} />{form.workflowKind === "anima" && <><FilePicker label="文本编码器" value={form.textEncoderSourcePath || ""} onPick={() => void chooseFile("textEncoderSourcePath")} /><FilePicker label="VAE 文件" value={form.vaeSourcePath || ""} onPick={() => void chooseFile("vaeSourcePath")} /></>}</div><footer><button disabled={!ready || busy} onClick={() => void submit()}>{busy ? <LoaderCircle className="spin" /> : <Download />}{busy ? "正在校验并导入" : "导入模型"}</button></footer></section><section className="section-card"><header><div><span>REGISTERED MODELS</span><h2>已登记模型</h2></div><small>{models.length} 个</small></header>{models.length ? <div className="model-list">{models.map((model) => <article key={model.id} className={model.available ? "is-ready" : "is-missing"}><Database /><div><strong>{model.displayName}</strong><span>{model.family} · {model.workflowKind === "anima" ? "Anima" : "Checkpoint"} · {formatResourceBytes(model.byteSize)}</span><small>{model.modelFileName} · {model.modelSha256.slice(0, 12)}</small></div><b>{model.available ? "可用" : "文件已变化"}</b></article>)}</div> : <div className="empty-block">当前设备尚未登记模型</div>}</section></div>;
+}
+
+/** LoRA 仓库通过原生文件选择器导入真实权重，并保留类型与触发词供任务选择。 */
+function LorasPage({ loras, onImported, onError }: { loras: DesktopLocalLoraView[]; onImported: (lora: DesktopLocalLoraView) => void; onError: (message: string) => void }) {
+  const [form, setForm] = useState<DesktopLocalLoraImportInput>({ title: "", type: "style", sourcePath: "", triggerWords: [] });
+  const [triggerText, setTriggerText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const chooseFile = async () => {
+    try { const selected = await open({ multiple: false, directory: false, filters: [{ name: "safetensors LoRA", extensions: ["safetensors"] }] }); if (typeof selected === "string") setForm((current) => ({ ...current, sourcePath: selected })); }
+    catch (error) { onError(errorMessage(error)); }
+  };
+  const submit = async () => {
+    if (busy || !form.title.trim() || !form.sourcePath) return;
+    setBusy(true);
+    try {
+      const triggerWords = triggerText.split(/[,，\n]/).map((word) => word.trim()).filter(Boolean);
+      const lora = await importDesktopLocalLora({ ...form, title: form.title.trim(), triggerWords });
+      onImported(lora);
+      setForm((current) => ({ ...current, title: "", sourcePath: "", triggerWords: [] }));
+      setTriggerText("");
+    } catch (error) { onError(errorMessage(error)); }
+    finally { setBusy(false); }
+  };
+  return <div className="desktop-page lora-layout"><section className="section-card model-import"><header><div><span>LORA IMPORT</span><h2>导入本机 LoRA</h2></div><small>内容哈希去重 · 受控目录保存</small></header><div className="model-import-grid"><label><span>标题</span><input maxLength={191} value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} /></label><label><span>类型</span><select value={form.type} onChange={(event) => setForm({ ...form, type: event.target.value as DesktopLocalLoraImportInput["type"] })}>{["style", "character", "concept", "clothing", "pose", "other"].map((type) => <option key={type} value={type}>{loraTypeLabel(type)}</option>)}</select></label><label><span>触发词</span><input value={triggerText} onChange={(event) => setTriggerText(event.target.value)} placeholder="多个触发词使用逗号分隔" /></label><FilePicker label="LoRA 文件" value={form.sourcePath} onPick={() => void chooseFile()} /></div><footer><button disabled={busy || !form.title.trim() || !form.sourcePath} onClick={() => void submit()}>{busy ? <LoaderCircle className="spin" /> : <Download />}{busy ? "正在校验并导入" : "导入 LoRA"}</button></footer></section><section className="section-card"><header><div><span>LOCAL LORA LIBRARY</span><h2>已登记 LoRA</h2></div><small>{loras.length} 个</small></header>{loras.length ? <div className="lora-library-grid">{loras.map((lora) => <article key={lora.id} className={lora.available ? "is-ready" : "is-missing"}><div><Layers3 /><b>{loraTypeLabel(lora.type)}</b></div><strong>{lora.title}</strong><span>{lora.triggerWords.join(", ") || "无触发词"}</span><small>{lora.fileName} · {formatResourceBytes(lora.byteSize)} · {lora.sha256.slice(0, 12)}</small><i>{lora.available ? "可用" : "文件已变化"}</i></article>)}</div> : <div className="empty-block">当前设备尚未登记 LoRA</div>}</section></div>;
 }
 
 /** 原生文件选择字段只展示已选路径，不允许网页侧直接读取文件内容。 */
@@ -285,7 +327,9 @@ function CapabilityCard({ label, ready, text }: { label: string; ready: boolean;
 function Metric({ Icon, label, value }: { Icon: typeof Cpu; label: string; value: string }) { return <article><Icon /><span><small>{label}</small><strong>{value}</strong></span></article>; }
 /** 环境状态印章突出当前是否可执行 GPU 任务。 */
 function StatusSeal({ status }: { status: DesktopEnvironmentReport["status"] }) { return <div className={`status-seal is-${status}`}><span>ENV</span><strong>{status === "ready" ? "READY" : status.toUpperCase()}</strong></div>; }
-function pageTitle(page: DesktopPage): string { return { generate: "本地生成", jobs: "任务记录", models: "本地模型", overview: "本机概览", environment: "环境检测", resources: "资源安装", sync: "图库同步", settings: "本地设置" }[page]; }
+function pageTitle(page: DesktopPage): string { return { generate: "本地生成", jobs: "任务记录", models: "本地模型", loras: "LoRA 仓库", overview: "本机概览", environment: "环境检测", resources: "资源安装", sync: "图库同步", settings: "本地设置" }[page]; }
+/** LoRA 类型统一使用中文外显，数据库和契约仍保存稳定英文枚举。 */
+function loraTypeLabel(type: string): string { return { style: "画风", character: "角色", concept: "概念", clothing: "服装", pose: "姿势", other: "其他" }[type] || type; }
 function runtimeLabel(status: DesktopEnvironmentReport["runtime"]["status"]): string { return { not_installed: "未安装", installed_unverified: "等待自检", ready: "运行正常", broken: "需要修复" }[status]; }
 function syncStatusLabel(status: DesktopGallerySyncItem["status"]): string { return { queued: "等待上传", waiting_network: "等待网络", waiting_auth: "等待登录", uploading: "上传中", committing: "正在提交", synced: "已同步", privacy_pending: "权限待同步", paused: "已暂停", failed_retryable: "等待重试", failed_final: "同步失败", remote_deleted: "网页已删除" }[status]; }
 /** 主题选项使用简短中文标签供按钮标题和辅助技术读取。 */

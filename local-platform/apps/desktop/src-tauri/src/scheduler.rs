@@ -1,10 +1,11 @@
 //! 本模块实现 SQLite 为事实源的本地单卡串行调度器，负责任务恢复、取消、ComfyUI 执行和产物入队。
 
 use crate::{
-    generation::{self, GenerationFailure, GenerationRequest, GenerationResult},
+    generation::{self, GenerationFailure, GenerationLora, GenerationRequest, GenerationResult},
     models::{
         DesktopLocalArtifactView, DesktopLocalJobAttemptView, DesktopLocalJobCreateInput,
-        DesktopLocalJobParametersView, DesktopLocalJobView, DesktopSettings,
+        DesktopLocalJobLoraView, DesktopLocalJobParametersView, DesktopLocalJobView,
+        DesktopLocalLoraSelectionInput, DesktopSettings,
     },
     runtime::RuntimeController,
 };
@@ -52,6 +53,22 @@ struct LocalJobExecution {
     scheduler_name: String,
     seed: u32,
     privacy: String,
+    loras: Vec<LocalJobLoraExecution>,
+}
+
+/** 调度器执行期间使用的任务级 LoRA 文件快照。 */
+#[derive(Clone)]
+struct LocalJobLoraExecution {
+    id: String,
+    title: String,
+    r#type: String,
+    file_name: String,
+    relative_path: String,
+    sha256: String,
+    byte_size: u64,
+    modified_ms: u64,
+    strength: f64,
+    trigger_words: Vec<String>,
 }
 
 impl LocalScheduler {
@@ -113,7 +130,8 @@ pub fn create_job(
     input: DesktopLocalJobCreateInput,
 ) -> Result<DesktopLocalJobView, String> {
     validate_job_input(&input)?;
-    let model = database.query_row("SELECT display_name,workflow_kind,model_file_name,model_relative_path,model_sha256,byte_size,model_modified_ms,text_encoder_file_name,text_encoder_relative_path,vae_file_name,vae_relative_path FROM local_models WHERE id=?1", [&input.model_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?, row.get::<_, String>(4)?, row.get::<_, u64>(5)?, row.get::<_, u64>(6)?, row.get::<_, Option<String>>(7)?, row.get::<_, Option<String>>(8)?, row.get::<_, Option<String>>(9)?, row.get::<_, Option<String>>(10)?))).optional().map_err(|error| format!("读取任务底模失败：{error}"))?.ok_or_else(|| "所选本地模型不存在".to_string())?;
+    let transaction = database.transaction().map_err(|error| format!("开启本地任务事务失败：{error}"))?;
+    let model = transaction.query_row("SELECT display_name,workflow_kind,model_file_name,model_relative_path,model_sha256,byte_size,model_modified_ms,text_encoder_file_name,text_encoder_relative_path,vae_file_name,vae_relative_path FROM local_models WHERE id=?1", [&input.model_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?, row.get::<_, String>(4)?, row.get::<_, u64>(5)?, row.get::<_, u64>(6)?, row.get::<_, Option<String>>(7)?, row.get::<_, Option<String>>(8)?, row.get::<_, Option<String>>(9)?, row.get::<_, Option<String>>(10)?))).optional().map_err(|error| format!("读取任务底模失败：{error}"))?.ok_or_else(|| "所选本地模型不存在".to_string())?;
     validate_model_snapshot(
         settings,
         &model.3,
@@ -123,10 +141,16 @@ pub fn create_job(
         model.10.as_deref(),
         &model.1,
     )?;
+    let loras = selected_lora_snapshots(&transaction, settings, &input.loras)?;
     let id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
     let seed = input.seed.unwrap_or_else(random_seed);
-    database.execute("INSERT INTO local_jobs (id,status,progress,prompt,negative_prompt,model_id,model_display_name,workflow_kind,model_file_name,model_relative_path,model_sha256,text_encoder_file_name,vae_file_name,width,height,steps,cfg,sampler_name,scheduler_name,seed,privacy,created_at,updated_at) VALUES (?1,'queued',0,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?20)", params![id, input.prompt.trim(), input.negative_prompt.as_deref().map(str::trim).filter(|value| !value.is_empty()), input.model_id, model.0, model.1, model.2, model.3, model.4, model.7, model.9, input.width, input.height, input.steps, input.cfg, input.sampler_name, input.scheduler_name, seed, input.privacy, now]).map_err(|error| format!("创建本地任务失败：{error}"))?;
+    transaction.execute("INSERT INTO local_jobs (id,status,progress,prompt,negative_prompt,model_id,model_display_name,workflow_kind,model_file_name,model_relative_path,model_sha256,text_encoder_file_name,vae_file_name,width,height,steps,cfg,sampler_name,scheduler_name,seed,privacy,created_at,updated_at) VALUES (?1,'queued',0,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?20)", params![id, input.prompt.trim(), input.negative_prompt.as_deref().map(str::trim).filter(|value| !value.is_empty()), input.model_id, model.0, model.1, model.2, model.3, model.4, model.7, model.9, input.width, input.height, input.steps, input.cfg, input.sampler_name, input.scheduler_name, seed, input.privacy, now]).map_err(|error| format!("创建本地任务失败：{error}"))?;
+    for (sequence, lora) in loras.iter().enumerate() {
+        let trigger_words_json = serde_json::to_string(&lora.trigger_words).map_err(|error| format!("序列化任务 LoRA 触发词失败：{error}"))?;
+        transaction.execute("INSERT INTO local_job_loras (job_id,sequence,lora_id,title,type,file_name,relative_path,sha256,byte_size,modified_ms,strength,trigger_words_json) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)", params![id, sequence, lora.id, lora.title, lora.r#type, lora.file_name, lora.relative_path, lora.sha256, lora.byte_size, lora.modified_ms, lora.strength, trigger_words_json]).map_err(|error| format!("保存任务 LoRA 快照失败：{error}"))?;
+    }
+    transaction.commit().map_err(|error| format!("提交本地任务事务失败：{error}"))?;
     read_job(database, &id)?.ok_or_else(|| "本地任务创建后不存在".into())
 }
 
@@ -142,6 +166,7 @@ pub fn list_jobs(database: &Connection) -> Result<Vec<DesktopLocalJobView>, Stri
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| format!("解析本地任务列表失败：{error}"))?;
     for job in &mut jobs {
+        job.loras = read_job_loras(database, &job.id)?;
         job.attempts = read_attempts(database, &job.id)?;
     }
     Ok(jobs)
@@ -230,6 +255,7 @@ fn execute_job(
     let outcome = (|| {
         let settings = load_settings(database)?;
         validate_execution_model(database, &settings, &job)?;
+        validate_execution_loras(&settings, &job.loras)?;
         runtime
             .self_test(&settings, app_data_dir)
             .map_err(GenerationFailure::Failed)?;
@@ -242,6 +268,7 @@ fn execute_job(
             model_file_name: job.model_file_name.clone(),
             text_encoder_file_name: job.text_encoder_file_name.clone(),
             vae_file_name: job.vae_file_name.clone(),
+            loras: job.loras.iter().map(|lora| GenerationLora { file_name: lora.file_name.clone(), strength: lora.strength }).collect(),
             prompt: job.prompt.clone(),
             negative_prompt: job.negative_prompt.clone(),
             width: job.width,
@@ -338,7 +365,9 @@ fn execution_from_transaction(
     transaction: &Transaction<'_>,
     id: &str,
 ) -> Result<LocalJobExecution, String> {
-    transaction.query_row("SELECT j.id,j.workflow_kind,j.model_file_name,j.model_relative_path,j.model_sha256,m.byte_size,m.model_modified_ms,j.text_encoder_file_name,j.vae_file_name,j.prompt,j.negative_prompt,j.width,j.height,j.steps,j.cfg,j.sampler_name,j.scheduler_name,j.seed,j.privacy FROM local_jobs j JOIN local_models m ON m.id=j.model_id WHERE j.id=?1", [id], |row| Ok(LocalJobExecution { id: row.get(0)?, attempt_id: String::new(), workflow_kind: row.get(1)?, model_file_name: row.get(2)?, model_relative_path: row.get(3)?, model_sha256: row.get(4)?, model_byte_size: row.get(5)?, model_modified_ms: row.get(6)?, text_encoder_file_name: row.get(7)?, vae_file_name: row.get(8)?, prompt: row.get(9)?, negative_prompt: row.get(10)?, width: row.get(11)?, height: row.get(12)?, steps: row.get(13)?, cfg: row.get(14)?, sampler_name: row.get(15)?, scheduler_name: row.get(16)?, seed: row.get(17)?, privacy: row.get(18)? })).map_err(|error| format!("读取任务执行快照失败：{error}"))
+    let mut job = transaction.query_row("SELECT j.id,j.workflow_kind,j.model_file_name,j.model_relative_path,j.model_sha256,m.byte_size,m.model_modified_ms,j.text_encoder_file_name,j.vae_file_name,j.prompt,j.negative_prompt,j.width,j.height,j.steps,j.cfg,j.sampler_name,j.scheduler_name,j.seed,j.privacy FROM local_jobs j JOIN local_models m ON m.id=j.model_id WHERE j.id=?1", [id], |row| Ok(LocalJobExecution { id: row.get(0)?, attempt_id: String::new(), workflow_kind: row.get(1)?, model_file_name: row.get(2)?, model_relative_path: row.get(3)?, model_sha256: row.get(4)?, model_byte_size: row.get(5)?, model_modified_ms: row.get(6)?, text_encoder_file_name: row.get(7)?, vae_file_name: row.get(8)?, prompt: row.get(9)?, negative_prompt: row.get(10)?, width: row.get(11)?, height: row.get(12)?, steps: row.get(13)?, cfg: row.get(14)?, sampler_name: row.get(15)?, scheduler_name: row.get(16)?, seed: row.get(17)?, privacy: row.get(18)?, loras: Vec::new() })).map_err(|error| format!("读取任务执行快照失败：{error}"))?;
+    job.loras = execution_loras(transaction, id)?;
+    Ok(job)
 }
 
 fn validate_job_input(input: &DesktopLocalJobCreateInput) -> Result<(), String> {
@@ -370,7 +399,26 @@ fn validate_job_input(input: &DesktopLocalJobCreateInput) -> Result<(), String> 
     if !matches!(input.privacy.as_str(), "public" | "private") {
         return Err("图库权限不正确".into());
     }
+    if input.loras.len() > 4 || input.loras.iter().any(|lora| !(0.0..=1.5).contains(&lora.strength) || !lora.strength.is_finite()) {
+        return Err("LoRA 最多选择 4 个，强度必须在 0–1.5 之间".into());
+    }
+    let unique_ids = input.loras.iter().map(|lora| lora.id.as_str()).collect::<std::collections::HashSet<_>>();
+    if unique_ids.len() != input.loras.len() { return Err("同一 LoRA 不能重复选择".into()); }
     Ok(())
+}
+
+/** 在创建任务的同一事务中读取并校验 LoRA，标题变化不会改写历史任务快照。 */
+fn selected_lora_snapshots(transaction: &Transaction<'_>, settings: &DesktopSettings, selections: &[DesktopLocalLoraSelectionInput]) -> Result<Vec<LocalJobLoraExecution>, String> {
+    let mut snapshots = Vec::with_capacity(selections.len());
+    let mut content_hashes = std::collections::HashSet::new();
+    for selection in selections {
+        let lora = transaction.query_row("SELECT id,title,type,file_name,relative_path,sha256,byte_size,modified_ms,trigger_words_json FROM local_loras WHERE id=?1", [&selection.id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?, row.get::<_, String>(4)?, row.get::<_, String>(5)?, row.get::<_, u64>(6)?, row.get::<_, u64>(7)?, row.get::<_, String>(8)?))).optional().map_err(|error| format!("读取所选 LoRA 失败：{error}"))?.ok_or_else(|| "所选 LoRA 不存在".to_string())?;
+        if !content_hashes.insert(lora.5.clone()) { return Err("不能选择内容相同的多个 LoRA".into()); }
+        validate_lora_snapshot(settings, &lora.4, lora.6, lora.7)?;
+        let trigger_words = serde_json::from_str(&lora.8).map_err(|error| format!("解析 LoRA 触发词失败：{error}"))?;
+        snapshots.push(LocalJobLoraExecution { id: lora.0, title: lora.1, r#type: lora.2, file_name: lora.3, relative_path: lora.4, sha256: lora.5, byte_size: lora.6, modified_ms: lora.7, strength: selection.strength, trigger_words });
+    }
+    Ok(snapshots)
 }
 
 fn validate_model_snapshot(
@@ -404,6 +452,16 @@ fn validate_model_snapshot(
     Ok(())
 }
 
+/** 校验 LoRA 仍是创建任务时登记的同一文件，禁止静默使用被替换的权重。 */
+fn validate_lora_snapshot(settings: &DesktopSettings, relative_path: &str, byte_size: u64, modified_ms: u64) -> Result<(), String> {
+    let path = controlled_join(Path::new(&settings.model_root), relative_path)?;
+    let metadata = path.metadata().map_err(|_| "LoRA 文件不存在，请重新导入".to_string())?;
+    if !metadata.is_file() || metadata.len() != byte_size || metadata_modified_ms(&metadata)? != modified_ms {
+        return Err("LoRA 文件已变化，请重新导入后提交".into());
+    }
+    Ok(())
+}
+
 fn validate_execution_model(
     database: &Connection,
     settings: &DesktopSettings,
@@ -429,6 +487,14 @@ fn validate_execution_model(
     .map_err(GenerationFailure::Failed)
 }
 
+/** 任务领取后再次校验全部 LoRA 快照，排队期间被替换的文件不会进入 Runtime。 */
+fn validate_execution_loras(settings: &DesktopSettings, loras: &[LocalJobLoraExecution]) -> Result<(), GenerationFailure> {
+    for lora in loras {
+        validate_lora_snapshot(settings, &lora.relative_path, lora.byte_size, lora.modified_ms).map_err(GenerationFailure::Failed)?;
+    }
+    Ok(())
+}
+
 fn controlled_join(root: &Path, relative: &str) -> Result<PathBuf, String> {
     let path = Path::new(relative);
     if path.is_absolute()
@@ -451,9 +517,32 @@ fn read_job(database: &Connection, id: &str) -> Result<Option<DesktopLocalJobVie
         .optional()
         .map_err(|error| format!("读取本地任务失败：{error}"))?;
     if let Some(job) = &mut job {
+        job.loras = read_job_loras(database, id)?;
         job.attempts = read_attempts(database, id)?;
     }
     Ok(job)
+}
+
+/** 读取任务创建时固化的 LoRA 外显与强度，不回查可变标题。 */
+fn read_job_loras(database: &Connection, job_id: &str) -> Result<Vec<DesktopLocalJobLoraView>, String> {
+    let mut statement = database.prepare("SELECT lora_id,title,type,file_name,sha256,strength,trigger_words_json FROM local_job_loras WHERE job_id=?1 ORDER BY sequence ASC").map_err(|error| format!("读取任务 LoRA 快照失败：{error}"))?;
+    let rows = statement.query_map([job_id], |row| {
+        let trigger_words_json: String = row.get(6)?;
+        let trigger_words = serde_json::from_str(&trigger_words_json).map_err(|error| rusqlite::Error::FromSqlConversionFailure(6, rusqlite::types::Type::Text, Box::new(error)))?;
+        Ok(DesktopLocalJobLoraView { id: row.get(0)?, title: row.get(1)?, r#type: row.get(2)?, file_name: row.get(3)?, sha256: row.get(4)?, strength: row.get(5)?, trigger_words })
+    }).map_err(|error| format!("查询任务 LoRA 快照失败：{error}"))?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|error| format!("解析任务 LoRA 快照失败：{error}"))
+}
+
+/** 调度领取时读取包含文件元数据的 LoRA 执行快照。 */
+fn execution_loras(transaction: &Transaction<'_>, job_id: &str) -> Result<Vec<LocalJobLoraExecution>, String> {
+    let mut statement = transaction.prepare("SELECT lora_id,title,type,file_name,relative_path,sha256,byte_size,modified_ms,strength,trigger_words_json FROM local_job_loras WHERE job_id=?1 ORDER BY sequence ASC").map_err(|error| format!("读取执行 LoRA 快照失败：{error}"))?;
+    let rows = statement.query_map([job_id], |row| {
+        let trigger_words_json: String = row.get(9)?;
+        let trigger_words = serde_json::from_str(&trigger_words_json).map_err(|error| rusqlite::Error::FromSqlConversionFailure(9, rusqlite::types::Type::Text, Box::new(error)))?;
+        Ok(LocalJobLoraExecution { id: row.get(0)?, title: row.get(1)?, r#type: row.get(2)?, file_name: row.get(3)?, relative_path: row.get(4)?, sha256: row.get(5)?, byte_size: row.get(6)?, modified_ms: row.get(7)?, strength: row.get(8)?, trigger_words })
+    }).map_err(|error| format!("查询执行 LoRA 快照失败：{error}"))?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|error| format!("解析执行 LoRA 快照失败：{error}"))
 }
 
 fn read_attempts(
@@ -517,6 +606,7 @@ fn job_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<DesktopLocalJobView
         privacy: row.get(15)?,
         runtime_prompt_id: row.get(16)?,
         error: row.get(17)?,
+        loras: Vec::new(),
         attempts: Vec::new(),
         artifact,
         created_at: row.get(18)?,
@@ -589,7 +679,7 @@ fn random_seed() -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::{DesktopState, LocalModelRegistration};
+    use crate::storage::{DesktopState, LocalLoraRegistration, LocalModelRegistration};
 
     #[test]
     fn job_validation_keeps_dimensions_aligned_and_conditioning_separate() {
@@ -604,6 +694,7 @@ mod tests {
             sampler_name: "euler".into(),
             scheduler_name: "normal".into(),
             seed: Some(1),
+            loras: Vec::new(),
             privacy: "private".into(),
         };
         assert!(validate_job_input(&input).is_ok());
@@ -642,6 +733,11 @@ mod tests {
                 vae_sha256: None,
             })
             .expect("登记模型");
+        let lora_path = Path::new(&settings.model_root).join("loras").join("style.safetensors");
+        fs::create_dir_all(lora_path.parent().expect("LoRA 父目录")).expect("创建 LoRA 目录");
+        fs::write(&lora_path, b"registered-lora").expect("写入登记 LoRA");
+        let lora_metadata = lora_path.metadata().expect("读取 LoRA 元数据");
+        let lora = state.register_local_lora(LocalLoraRegistration { title: "测试画风".into(), r#type: "style".into(), file_name: "style.safetensors".into(), relative_path: "loras/style.safetensors".into(), sha256: "b".repeat(64), byte_size: lora_metadata.len(), modified_ms: metadata_modified_ms(&lora_metadata).expect("读取 LoRA 修改时间"), trigger_words: vec!["test_style".into()] }).expect("登记 LoRA");
         let input = DesktopLocalJobCreateInput {
             model_id: model.id,
             prompt: "subject".into(),
@@ -653,11 +749,17 @@ mod tests {
             sampler_name: "euler".into(),
             scheduler_name: "normal".into(),
             seed: Some(7),
+            loras: vec![DesktopLocalLoraSelectionInput { id: lora.id, strength: 0.75 }],
             privacy: "private".into(),
         };
         let mut database = state.database.lock().expect("锁定数据库");
         let created = create_job(&mut database, &settings, input).expect("创建持久任务");
         assert_eq!(created.status, "queued");
+        assert_eq!(created.loras.len(), 1);
+        assert_eq!(created.loras[0].title, "测试画风");
+        assert_eq!(created.loras[0].strength, 0.75);
+        database.execute("UPDATE local_loras SET title='新标题' WHERE id=?1", [&created.loras[0].id]).expect("更新 LoRA 标题");
+        assert_eq!(read_job(&database, &created.id).expect("重读任务").expect("任务存在").loras[0].title, "测试画风");
         assert_eq!(list_jobs(&database).expect("读取任务").len(), 1);
         assert_eq!(
             cancel_job(&database, &created.id).expect("取消任务").status,

@@ -1,8 +1,8 @@
 //! 本模块负责把用户已有 safetensors 原子导入受控模型目录，并返回可审计的哈希登记信息。
 
 use crate::{
-    models::{DesktopLocalModelImportInput, DesktopSettings},
-    storage::LocalModelRegistration,
+    models::{DesktopLocalLoraImportInput, DesktopLocalModelImportInput, DesktopSettings},
+    storage::{LocalLoraRegistration, LocalModelRegistration},
 };
 use sha2::{Digest, Sha256};
 use std::{
@@ -16,12 +16,24 @@ use uuid::Uuid;
 const MAX_MODEL_BYTES: u64 = 100 * 1024 * 1024 * 1024;
 const MAX_SAFETENSORS_HEADER_BYTES: u64 = 100 * 1024 * 1024;
 
-struct ImportedAsset {
-    file_name: String,
-    relative_path: String,
-    sha256: String,
-    byte_size: u64,
-    modified_ms: u64,
+pub(crate) struct ImportedAsset {
+    pub file_name: String,
+    pub relative_path: String,
+    pub sha256: String,
+    pub byte_size: u64,
+    pub modified_ms: u64,
+}
+
+/** 校验 LoRA 元数据并复用相同的 safetensors 原子导入链路。 */
+pub fn import_local_lora(settings: &DesktopSettings, input: DesktopLocalLoraImportInput) -> Result<LocalLoraRegistration, String> {
+    let title = input.title.trim();
+    if title.is_empty() || title.chars().count() > 191 { return Err("LoRA 标题长度必须是 1–191 个字符".into()); }
+    if !matches!(input.r#type.as_str(), "style" | "character" | "concept" | "clothing" | "pose" | "other") { return Err("LoRA 类型不正确".into()); }
+    if input.trigger_words.len() > 50 || input.trigger_words.iter().any(|word| word.trim().is_empty() || word.trim().chars().count() > 100) { return Err("LoRA 触发词最多 50 个，每个长度必须是 1–100 个字符".into()); }
+    let mut keys = std::collections::HashSet::new();
+    let trigger_words = input.trigger_words.into_iter().map(|word| word.trim().to_owned()).filter(|word| keys.insert(word.to_lowercase())).collect::<Vec<_>>();
+    let asset = import_asset(Path::new(&input.source_path), Path::new(&settings.model_root), "loras")?;
+    Ok(LocalLoraRegistration { title: title.into(), r#type: input.r#type, file_name: asset.file_name, relative_path: asset.relative_path, sha256: asset.sha256, byte_size: asset.byte_size, modified_ms: asset.modified_ms, trigger_words })
 }
 
 /** 校验输入组合并导入底模及 Anima 必需的独立文本编码器和 VAE。 */
@@ -96,7 +108,7 @@ pub fn import_local_model(
     })
 }
 
-fn import_asset(source: &Path, model_root: &Path, category: &str) -> Result<ImportedAsset, String> {
+pub(crate) fn import_asset(source: &Path, model_root: &Path, category: &str) -> Result<ImportedAsset, String> {
     validate_source(source)?;
     let original_name = source
         .file_name()

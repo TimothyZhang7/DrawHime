@@ -1050,6 +1050,120 @@ select:focus-visible {
   min-height: 76px;
 }
 
+/* 生成页 LoRA 选择器同时展示类型、触发词和独立强度，选择状态不依赖悬浮。 */
+.generation-loras {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--panel-muted);
+}
+
+.generation-loras > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.generation-loras > header strong,
+.generation-loras > header span {
+  display: block;
+}
+
+.generation-loras > header strong {
+  font-size: 9px;
+}
+
+.generation-loras > header span,
+.generation-loras > header b {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 7px;
+}
+
+.generation-loras > div {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.generation-loras article {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 7px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--panel-raised);
+}
+
+.generation-loras article.selected {
+  border-color: var(--accent-border);
+  box-shadow: inset 3px 0 var(--accent);
+}
+
+.generation-loras article > button {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+
+.generation-loras article > button i,
+.generation-loras article > button span {
+  min-width: 0;
+}
+
+.generation-loras article > button svg {
+  width: 15px;
+  color: var(--accent);
+}
+
+.generation-loras article > button strong,
+.generation-loras article > button small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.generation-loras article > button strong {
+  font-size: 8px;
+}
+
+.generation-loras article > button small {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 7px;
+}
+
+.generation-loras article > label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 7px;
+}
+
+.generation-loras article > label input {
+  width: 58px;
+  height: 30px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--control);
+  color: var(--text);
+}
+
 .generation-form > footer,
 .model-import > footer {
   display: flex;
@@ -1159,6 +1273,75 @@ select:focus-visible {
 }
 
 .model-list .is-missing b {
+  color: var(--danger);
+}
+
+/* 本机 LoRA 仓库使用紧凑资料卡，文件异常时保持清晰的红色终态。 */
+.lora-library-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.lora-library-grid article {
+  position: relative;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--panel-raised);
+}
+
+.lora-library-grid article > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.lora-library-grid svg {
+  width: 17px;
+  color: var(--accent);
+}
+
+.lora-library-grid b {
+  padding: 3px 6px;
+  border-radius: 3px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 7px;
+}
+
+.lora-library-grid strong,
+.lora-library-grid span,
+.lora-library-grid small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lora-library-grid strong {
+  font-size: 10px;
+}
+
+.lora-library-grid span,
+.lora-library-grid small {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 7px;
+}
+
+.lora-library-grid article > i {
+  display: block;
+  margin-top: 9px;
+  color: var(--success);
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.lora-library-grid .is-missing > i {
   color: var(--danger);
 }
 
@@ -1618,8 +1801,10 @@ select:focus-visible {
   }
 
   .generation-grid,
+  .generation-loras > div,
   .model-import-grid,
   .model-list,
+  .lora-library-grid,
   .local-job-grid {
     grid-template-columns: 1fr;
   }

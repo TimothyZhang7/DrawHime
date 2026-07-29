@@ -1,6 +1,6 @@
 //! 本模块管理桌面端独立 SQLite、目录设置和图库同步队列，不连接网页或独立平台数据库。
 
-use crate::models::{DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalModelView, DesktopSettings, GalleryPublicationInput, GallerySyncItem};
+use crate::models::{DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraView, DesktopLocalModelView, DesktopSettings, GalleryPublicationInput, GallerySyncItem};
 use crate::runtime::RuntimeController;
 use crate::scheduler::LocalScheduler;
 use chrono::Utc;
@@ -28,8 +28,10 @@ impl DesktopState {
             CREATE TABLE IF NOT EXISTS environment_snapshots (id INTEGER PRIMARY KEY AUTOINCREMENT, report_json TEXT NOT NULL, checked_at TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS gallery_sync_queue (id TEXT PRIMARY KEY, local_task_id TEXT NOT NULL, artifact_path TEXT NOT NULL, artifact_sha256 TEXT NOT NULL, privacy TEXT NOT NULL, status TEXT NOT NULL, uploaded_bytes INTEGER NOT NULL DEFAULT 0, retry_count INTEGER NOT NULL DEFAULT 0, gallery_item_id TEXT, last_error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(local_task_id, artifact_sha256));
             CREATE TABLE IF NOT EXISTS local_models (id TEXT PRIMARY KEY, display_name TEXT NOT NULL, family TEXT NOT NULL, workflow_kind TEXT NOT NULL, model_file_name TEXT NOT NULL, model_relative_path TEXT NOT NULL, model_sha256 TEXT NOT NULL, byte_size INTEGER NOT NULL, model_modified_ms INTEGER NOT NULL, text_encoder_file_name TEXT, text_encoder_relative_path TEXT, text_encoder_sha256 TEXT, vae_file_name TEXT, vae_relative_path TEXT, vae_sha256 TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(model_sha256, workflow_kind));
+            CREATE TABLE IF NOT EXISTS local_loras (id TEXT PRIMARY KEY, title TEXT NOT NULL, type TEXT NOT NULL, file_name TEXT NOT NULL, relative_path TEXT NOT NULL, sha256 TEXT NOT NULL UNIQUE, byte_size INTEGER NOT NULL, modified_ms INTEGER NOT NULL, trigger_words_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS local_jobs (id TEXT PRIMARY KEY, status TEXT NOT NULL, progress INTEGER NOT NULL, prompt TEXT NOT NULL, negative_prompt TEXT, model_id TEXT NOT NULL, model_display_name TEXT NOT NULL, workflow_kind TEXT NOT NULL, model_file_name TEXT NOT NULL, model_relative_path TEXT NOT NULL, model_sha256 TEXT NOT NULL, text_encoder_file_name TEXT, vae_file_name TEXT, width INTEGER NOT NULL, height INTEGER NOT NULL, steps INTEGER NOT NULL, cfg REAL NOT NULL, sampler_name TEXT NOT NULL, scheduler_name TEXT NOT NULL, seed INTEGER NOT NULL, privacy TEXT NOT NULL, runtime_prompt_id TEXT, error TEXT, cancel_requested INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, started_at TEXT, completed_at TEXT, updated_at TEXT NOT NULL, FOREIGN KEY(model_id) REFERENCES local_models(id));
             CREATE TABLE IF NOT EXISTS local_job_attempts (id TEXT PRIMARY KEY, job_id TEXT NOT NULL, attempt_number INTEGER NOT NULL, status TEXT NOT NULL, runtime_prompt_id TEXT, error TEXT, started_at TEXT NOT NULL, completed_at TEXT, UNIQUE(job_id,attempt_number), FOREIGN KEY(job_id) REFERENCES local_jobs(id));
+            CREATE TABLE IF NOT EXISTS local_job_loras (job_id TEXT NOT NULL, sequence INTEGER NOT NULL, lora_id TEXT NOT NULL, title TEXT NOT NULL, type TEXT NOT NULL, file_name TEXT NOT NULL, relative_path TEXT NOT NULL, sha256 TEXT NOT NULL, byte_size INTEGER NOT NULL, modified_ms INTEGER NOT NULL, strength REAL NOT NULL, trigger_words_json TEXT NOT NULL, PRIMARY KEY(job_id,sequence), UNIQUE(job_id,lora_id), FOREIGN KEY(job_id) REFERENCES local_jobs(id), FOREIGN KEY(lora_id) REFERENCES local_loras(id));
             CREATE TABLE IF NOT EXISTS local_artifacts (id TEXT PRIMARY KEY, job_id TEXT NOT NULL UNIQUE, path TEXT NOT NULL, sha256 TEXT NOT NULL, byte_size INTEGER NOT NULL, mime_type TEXT NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY(job_id) REFERENCES local_jobs(id));
             CREATE INDEX IF NOT EXISTS gallery_sync_status_idx ON gallery_sync_queue(status, created_at);
             CREATE INDEX IF NOT EXISTS local_jobs_status_idx ON local_jobs(status, created_at);").map_err(|error| format!("初始化桌面数据库失败：{error}"))?;
@@ -38,6 +40,11 @@ impl DesktopState {
         connection.execute("UPDATE local_jobs SET status='queued', progress=0, runtime_prompt_id=NULL, started_at=NULL, updated_at=?1 WHERE status='running'", [&recovery_time]).map_err(|error| format!("恢复中断的本地任务失败：{error}"))?;
         ensure_column(&connection, "desktop_settings", "theme_mode", "TEXT NOT NULL DEFAULT 'system'")?;
         ensure_column(&connection, "desktop_settings", "dependency_source", "TEXT NOT NULL DEFAULT 'auto'")?;
+        ensure_column(&connection, "local_job_loras", "relative_path", "TEXT NOT NULL DEFAULT ''")?;
+        ensure_column(&connection, "local_job_loras", "byte_size", "INTEGER NOT NULL DEFAULT 0")?;
+        ensure_column(&connection, "local_job_loras", "modified_ms", "INTEGER NOT NULL DEFAULT 0")?;
+        // 旧开发版本已经生成的 LoRA 快照补齐文件元数据，避免升级后任务失去可执行性。
+        connection.execute("UPDATE local_job_loras SET relative_path=COALESCE(NULLIF(relative_path,''),(SELECT relative_path FROM local_loras WHERE id=local_job_loras.lora_id)),byte_size=CASE WHEN byte_size=0 THEN COALESCE((SELECT byte_size FROM local_loras WHERE id=local_job_loras.lora_id),0) ELSE byte_size END,modified_ms=CASE WHEN modified_ms=0 THEN COALESCE((SELECT modified_ms FROM local_loras WHERE id=local_job_loras.lora_id),0) ELSE modified_ms END", []).map_err(|error| format!("补齐任务 LoRA 快照失败：{error}"))?;
         let model_root = app_data_dir.join("models");
         let runtime_root = app_data_dir.join("runtime");
         let output_root = picture_dir.join("DrawHime");
@@ -137,6 +144,33 @@ impl DesktopState {
         rows.collect::<Result<Vec<_>, _>>().map_err(|error| format!("解析本地模型列表失败：{error}"))
     }
 
+    /** 按内容哈希幂等登记本机 LoRA。 */
+    pub fn register_local_lora(&self, lora: LocalLoraRegistration) -> Result<DesktopLocalLoraView, String> {
+        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        let existing: Option<String> = database.query_row("SELECT id FROM local_loras WHERE sha256=?1", [&lora.sha256], |row| row.get(0)).optional().map_err(|error| format!("查询本地 LoRA 失败：{error}"))?;
+        let id = existing.unwrap_or_else(|| Uuid::new_v4().to_string());
+        let now = Utc::now().to_rfc3339();
+        let trigger_words_json = serde_json::to_string(&lora.trigger_words).map_err(|error| format!("序列化 LoRA 触发词失败：{error}"))?;
+        database.execute("INSERT INTO local_loras (id,title,type,file_name,relative_path,sha256,byte_size,modified_ms,trigger_words_json,created_at,updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?10) ON CONFLICT(sha256) DO UPDATE SET title=excluded.title,type=excluded.type,file_name=excluded.file_name,relative_path=excluded.relative_path,byte_size=excluded.byte_size,modified_ms=excluded.modified_ms,trigger_words_json=excluded.trigger_words_json,updated_at=excluded.updated_at", params![id,lora.title,lora.r#type,lora.file_name,lora.relative_path,lora.sha256,lora.byte_size,lora.modified_ms,trigger_words_json,now]).map_err(|error| format!("登记本地 LoRA 失败：{error}"))?;
+        drop(database);
+        self.local_lora(&id)?.ok_or_else(|| "本地 LoRA 登记后不存在".into())
+    }
+
+    /** 返回当前设备全部已登记 LoRA 和实时文件可用性。 */
+    pub fn list_local_loras(&self) -> Result<Vec<DesktopLocalLoraView>, String> {
+        let settings = self.load_settings()?;
+        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        let mut statement = database.prepare("SELECT id,title,type,file_name,relative_path,sha256,byte_size,modified_ms,trigger_words_json,created_at,updated_at FROM local_loras ORDER BY updated_at DESC").map_err(|error| format!("读取本地 LoRA 列表失败：{error}"))?;
+        let rows = statement.query_map([], |row| local_lora_from_row(row, &settings.model_root)).map_err(|error| format!("查询本地 LoRA 列表失败：{error}"))?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|error| format!("解析本地 LoRA 列表失败：{error}"))
+    }
+
+    fn local_lora(&self, id: &str) -> Result<Option<DesktopLocalLoraView>, String> {
+        let settings = self.load_settings()?;
+        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        database.query_row("SELECT id,title,type,file_name,relative_path,sha256,byte_size,modified_ms,trigger_words_json,created_at,updated_at FROM local_loras WHERE id=?1", [id], |row| local_lora_from_row(row, &settings.model_root)).optional().map_err(|error| format!("读取本地 LoRA 失败：{error}"))
+    }
+
     /** 创建持久任务后唤醒串行调度器，提交线程不等待生成完成。 */
     pub fn create_local_job(&self, input: DesktopLocalJobCreateInput) -> Result<DesktopLocalJobView, String> {
         let scheduler = self.scheduler.as_ref().ok_or_else(|| "本地调度器尚未启动".to_string())?;
@@ -199,6 +233,18 @@ pub struct LocalModelRegistration {
     pub vae_sha256: Option<String>,
 }
 
+/** 已完成安全复制、等待写入 SQLite 的 LoRA 记录。 */
+pub struct LocalLoraRegistration {
+    pub title: String,
+    pub r#type: String,
+    pub file_name: String,
+    pub relative_path: String,
+    pub sha256: String,
+    pub byte_size: u64,
+    pub modified_ms: u64,
+    pub trigger_words: Vec<String>,
+}
+
 fn local_model_from_row(row: &rusqlite::Row<'_>, model_root: &str) -> rusqlite::Result<DesktopLocalModelView> {
     let relative_path: String = row.get(5)?;
     let expected_size: u64 = row.get(7)?;
@@ -210,6 +256,17 @@ fn local_model_from_row(row: &rusqlite::Row<'_>, model_root: &str) -> rusqlite::
     let primary_available = metadata.as_ref().is_some_and(|value| value.is_file() && value.len() == expected_size && modified_millis(value).ok() == Some(expected_modified_ms));
     let components_available = workflow_kind != "anima" || (text_relative_path.as_ref().is_some_and(|path| Path::new(model_root).join(path).is_file()) && vae_relative_path.as_ref().is_some_and(|path| Path::new(model_root).join(path).is_file()));
     Ok(DesktopLocalModelView { id: row.get(0)?, display_name: row.get(1)?, family: row.get(2)?, workflow_kind, model_file_name: row.get(4)?, model_sha256: row.get(6)?, byte_size: expected_size, text_encoder_file_name: row.get(9)?, vae_file_name: row.get(11)?, available: primary_available && components_available, created_at: row.get(13)?, updated_at: row.get(14)? })
+}
+
+fn local_lora_from_row(row: &rusqlite::Row<'_>, model_root: &str) -> rusqlite::Result<DesktopLocalLoraView> {
+    let relative_path: String = row.get(4)?;
+    let expected_size: u64 = row.get(6)?;
+    let expected_modified_ms: u64 = row.get(7)?;
+    let metadata = Path::new(model_root).join(relative_path).metadata().ok();
+    let trigger_words_json: String = row.get(8)?;
+    let trigger_words = serde_json::from_str(&trigger_words_json).map_err(|error| rusqlite::Error::FromSqlConversionFailure(8, rusqlite::types::Type::Text, Box::new(error)))?;
+    let available = metadata.as_ref().is_some_and(|value| value.is_file() && value.len() == expected_size && modified_millis(value).ok() == Some(expected_modified_ms));
+    Ok(DesktopLocalLoraView { id: row.get(0)?, title: row.get(1)?, r#type: row.get(2)?, file_name: row.get(3)?, sha256: row.get(5)?, byte_size: expected_size, trigger_words, available, created_at: row.get(9)?, updated_at: row.get(10)? })
 }
 
 fn gallery_item_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<GallerySyncItem> { Ok(GallerySyncItem { id: row.get(0)?, local_task_id: row.get(1)?, artifact_path: row.get(2)?, artifact_sha256: row.get(3)?, privacy: row.get(4)?, status: row.get(5)?, uploaded_bytes: row.get(6)?, retry_count: row.get(7)?, gallery_item_id: row.get(8)?, last_error: row.get(9)?, created_at: row.get(10)?, updated_at: row.get(11)? }) }

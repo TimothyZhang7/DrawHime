@@ -797,6 +797,31 @@ export const desktopLocalModelImportInputSchema = z.object({
   vaeSourcePath: z.string().min(1).nullable(),
 });
 
+/** 桌面端本机 LoRA 的可用视图。 */
+export const desktopLocalLoraViewSchema = z.object({
+  id: z.string().uuid(),
+  title: z.string().min(1),
+  type: z.enum(["style", "character", "concept", "clothing", "pose", "other"]),
+  fileName: z.string().min(1),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  byteSize: z.number().int().positive(),
+  triggerWords: z.array(z.string().min(1)).max(50),
+  available: z.boolean(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+
+/** 桌面端导入 LoRA 的用户输入。 */
+export const desktopLocalLoraImportInputSchema = z.object({
+  title: z.string().trim().min(1).max(191),
+  type: desktopLocalLoraViewSchema.shape.type,
+  sourcePath: z.string().min(1),
+  triggerWords: z.array(z.string().trim().min(1).max(100)).max(50),
+});
+
+/** 单个本地任务的 LoRA 选择和强度。 */
+export const desktopLocalLoraSelectionSchema = z.object({ id: z.string().uuid(), strength: z.number().min(0).max(1.5) });
+
 /** 桌面端本地生成任务创建参数。 */
 export const desktopLocalJobCreateInputSchema = z.object({
   modelId: z.string().uuid(),
@@ -809,6 +834,7 @@ export const desktopLocalJobCreateInputSchema = z.object({
   samplerName: z.enum(["euler", "euler_ancestral"]),
   schedulerName: z.enum(["normal", "simple"]),
   seed: z.number().int().min(0).max(2147483647).nullable(),
+  loras: z.array(desktopLocalLoraSelectionSchema).max(4).refine((items) => new Set(items.map((item) => item.id)).size === items.length, "同一 LoRA 不能重复选择"),
   privacy: desktopGalleryPrivacySchema,
 });
 
@@ -826,6 +852,7 @@ export const desktopLocalJobViewSchema = z.object({
   privacy: desktopGalleryPrivacySchema,
   runtimePromptId: z.string().nullable(),
   error: z.string().nullable(),
+  loras: z.array(z.object({ id: z.string().uuid(), title: z.string(), type: desktopLocalLoraViewSchema.shape.type, fileName: z.string(), sha256: z.string().regex(/^[a-f0-9]{64}$/), strength: z.number().min(0).max(1.5), triggerWords: z.array(z.string()) })),
   attempts: z.array(z.object({ id: z.string().uuid(), attemptNumber: z.number().int().positive(), status: z.enum(["running", "succeeded", "failed", "cancelled", "interrupted"]), runtimePromptId: z.string().nullable(), error: z.string().nullable(), startedAt: z.string().datetime(), completedAt: z.string().datetime().nullable() })),
   artifact: z.object({ path: z.string(), sha256: z.string().regex(/^[a-f0-9]{64}$/), byteSize: z.number().int().positive(), mimeType: z.string(), width: z.number().int().positive(), height: z.number().int().positive() }).nullable(),
   createdAt: z.string().datetime(),
@@ -1028,6 +1055,9 @@ export type DesktopResourceInstallView = z.infer<typeof desktopResourceInstallVi
 export type DesktopRuntimeStatusView = z.infer<typeof desktopRuntimeStatusViewSchema>;
 export type DesktopLocalModelView = z.infer<typeof desktopLocalModelViewSchema>;
 export type DesktopLocalModelImportInput = z.infer<typeof desktopLocalModelImportInputSchema>;
+export type DesktopLocalLoraView = z.infer<typeof desktopLocalLoraViewSchema>;
+export type DesktopLocalLoraImportInput = z.infer<typeof desktopLocalLoraImportInputSchema>;
+export type DesktopLocalLoraSelection = z.infer<typeof desktopLocalLoraSelectionSchema>;
 export type DesktopLocalJobCreateInput = z.infer<typeof desktopLocalJobCreateInputSchema>;
 export type DesktopLocalJobView = z.infer<typeof desktopLocalJobViewSchema>;
 export type DesktopGallerySyncItem = z.infer<typeof desktopGallerySyncItemSchema>;
