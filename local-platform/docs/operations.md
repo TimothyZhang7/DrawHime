@@ -48,6 +48,17 @@ node scripts/deploy-production.mjs --target web
 
 文档独立修改不重启运行服务；完成链接、Markdown、diff、提交和公开同步检查即可。训练 Runtime 变化使用 `node scripts/deploy-training-runtime.mjs --dry-run` 后再正式部署，不与平台部署命令混用。
 
+桌面应用更新先构建 NSIS，再使用私有签名目录准备并原子发布；`--dry-run` 只校验安装包、版本、契约、公钥和目标配置，不改本地清单或生产文件：
+
+```powershell
+node scripts/set-desktop-version.mjs X.Y.Z
+pnpm --filter @drawhime/desktop run tauri:build
+node scripts/publish-desktop-application-update.mjs prepare --installer INSTALLER.exe --version X.Y.Z --minimum-version X.Y.Z --release-notes "版本说明" --dry-run
+node scripts/publish-desktop-application-update.mjs publish --installer INSTALLER.exe --version X.Y.Z --minimum-version X.Y.Z --release-notes "版本说明"
+```
+
+发布脚本固定执行安装包大小/SHA-256、共享契约、Ed25519 私钥与桌面内置公钥一致性检查；生产端先上传临时文件并备份旧信封，只在资源落盘后原子切换清单，回环 API 未读到新资源时自动恢复旧信封。应用更新资源发布不重启 API，也不接触数据库、模型、LoRA、训练集、任务、媒体或钱包。
+
 可选目标：`web`、`admin`、`api`、`scheduler`、`gpu-agent`、`inference-worker`、`training-worker`、`artifact-service`、`source`、`all`。单服务目标只上传共享包与对应 app，只构建和重启该 PM2 进程；`api` 额外执行 Prisma 生成、生产迁移和标签种子，其他服务不触碰数据库。前端目标直接上传本机构建产物，不在生产机安装依赖。
 
 ## 生产队列规则
@@ -75,6 +86,7 @@ node scripts/deploy-production.mjs --target web
 | 公开导出 README 整文件比较被相对链接差异阻断 | 只核验本次新增片段；对公开目录必须保留的路径适配建立明确允许差异 |
 | GitHub 首次推送出现 443 连接超时 | 保留本地提交，最多三次递增退避重试；成功后核对远端 SHA，连续失败才报告网络阻塞 |
 | 本地执行 Prisma 校验提示缺少 `DATABASE_URL` | 校验和 Client 生成使用明确的回环开发占位连接串；不得读取或回显生产数据库凭证，部署脚本继续使用自身受控环境 |
+| Windows PowerShell 继承 PowerShell 7 的 `PSModulePath` 后找不到 `Get-FileHash` | 更新辅助脚本使用 `System.Security.Cryptography.SHA256` 和文件流计算哈希，不依赖 PowerShell 模块自动加载；必须在该继承环境执行一次真实升级 |
 
 ## 失败分支
 

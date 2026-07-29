@@ -240,7 +240,14 @@ fn launch_record(
     [Parameter(Mandatory=$true)][string]$ResultPath
 )
 Start-Sleep -Seconds 2
-$actualSha256 = (Get-FileHash -LiteralPath $Installer -Algorithm SHA256).Hash.ToLowerInvariant()
+$stream = [System.IO.File]::OpenRead($Installer)
+try {
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    $actualSha256 = [System.BitConverter]::ToString($sha256.ComputeHash($stream)).Replace('-', '').ToLowerInvariant()
+} finally {
+    if ($sha256) { $sha256.Dispose() }
+    $stream.Dispose()
+}
 if ($actualSha256 -ne $ExpectedSha256.ToLowerInvariant()) {
     '97' | Set-Content -LiteralPath $ResultPath -Encoding ascii
     exit 97

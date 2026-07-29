@@ -213,7 +213,7 @@ echo '${serviceTarget} 增量部署验证完成'
 /** 只同步部署脚本、配置样例和文档，不安装依赖、不构建也不重启服务。 */
 function deploySourceOnly() {
   run(process.execPath, ["--check", "scripts/deploy-production.mjs"]);
-  const items = ["AGENTS.md", "README.md", "configs", "deploy", "docs", "scripts", "ecosystem.config.example.cjs"];
+  const items = ["AGENTS.md", "README.md", "package.json", "configs", "deploy", "docs", "scripts", "ecosystem.config.example.cjs"];
   try {
     run("tar", ["-czf", archive, "--exclude=.env", "--exclude=.private", "-C", root, ...items]);
     run("ssh", [...sshArguments, "-p", port, host, `cat > '${remoteArchive}'`], { input: readFileSync(archive) });
@@ -231,8 +231,8 @@ TMP=/tmp/drawhime-local-source-${stamp}
 BACKUP="$ROOT/backups/source-${stamp}"
 mkdir -p "$TMP" "$BACKUP"
 tar -xzf '${remoteArchive}' -C "$TMP"
-tar -C "$ROOT" -czf "$BACKUP/source-before.tar.gz" --ignore-failed-read AGENTS.md README.md configs deploy docs scripts ecosystem.config.example.cjs || true
-for item in AGENTS.md README.md configs deploy docs scripts ecosystem.config.example.cjs; do
+tar -C "$ROOT" -czf "$BACKUP/source-before.tar.gz" --ignore-failed-read AGENTS.md README.md package.json configs deploy docs scripts ecosystem.config.example.cjs || true
+for item in AGENTS.md README.md package.json configs deploy docs scripts ecosystem.config.example.cjs; do
   if [ -e "$TMP/$item" ]; then rm -rf "$ROOT/$item"; cp -a "$TMP/$item" "$ROOT/$item"; fi
 done
 node --check "$ROOT/scripts/deploy-production.mjs"
