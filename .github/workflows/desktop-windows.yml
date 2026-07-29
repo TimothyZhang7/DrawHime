@@ -1,0 +1,77 @@
+# 本工作流在 GitHub 官方 Windows 托管主机持续验证桌面端编译、测试和离线 NSIS 打包。
+name: Desktop Windows Gate
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/desktop-windows.yml"
+      - "local-platform/apps/desktop/**"
+      - "local-platform/packages/contracts/**"
+      - "local-platform/package.json"
+      - "local-platform/pnpm-lock.yaml"
+      - "local-platform/pnpm-workspace.yaml"
+  workflow_dispatch:
+
+concurrency:
+  group: desktop-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  desktop:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    defaults:
+      run:
+        working-directory: local-platform
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@v4
+
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.14.0
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: local-platform/pnpm-lock.yaml
+
+      - name: 安装 Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 安装工作区依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 构建共享包
+        run: pnpm run build:packages
+
+      - name: 检查桌面 TypeScript
+        run: pnpm --filter @drawhime/desktop run type-check
+
+      - name: 运行桌面 Rust 测试
+        run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
+
+      - name: 构建 WebView2 离线 NSIS
+        run: pnpm --filter @drawhime/desktop run tauri:build
+
+      - name: 校验安装包边界
+        shell: powershell
+        run: |
+          $installers = @(Get-ChildItem "apps/desktop/src-tauri/target/release/bundle/nsis" -Filter "*_x64-setup.exe")
+          if ($installers.Count -ne 1) { throw "应当只生成一个 x64 NSIS 安装包" }
+          $installer = $installers[0]
+          if ($installer.Length -lt 150MB) { throw "安装包缺少 WebView2 离线载荷" }
+          $summary = "### ${{ matrix.os }}`n- 安装包：$($installer.Name)`n- 字节数：$($installer.Length)`n- SHA-256：$((Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant())"
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value $summary -Encoding UTF8
