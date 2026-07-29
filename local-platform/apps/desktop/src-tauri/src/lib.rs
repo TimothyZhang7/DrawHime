@@ -16,9 +16,11 @@ mod training_dataset;
 mod trainer;
 mod workload;
 mod website_lora;
+mod website_media;
+mod website_model;
 mod software_update;
 
-use models::{DesktopBootstrapView, DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopEnvironmentReport, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopOfflineUpdateImportInput, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView, DesktopSettings, DesktopSoftwareUpdateView, DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetIdInput, DesktopTrainingDatasetView, DesktopTrainingImagesAddInput, DesktopTrainingJobCreateInput, DesktopTrainingJobView, DesktopWebsiteLoraView, GalleryPublicationInput, GallerySyncItem};
+use models::{DesktopBootstrapView, DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopEnvironmentReport, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopOfflineUpdateImportInput, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView, DesktopSettings, DesktopSoftwareUpdateView, DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetIdInput, DesktopTrainingDatasetView, DesktopTrainingImagesAddInput, DesktopTrainingJobCreateInput, DesktopTrainingJobView, DesktopWebsiteLoraView, DesktopWebsiteModelView, GalleryPublicationInput, GallerySyncItem};
 use std::path::PathBuf;
 use storage::DesktopState;
 use tauri::{Manager, State};
@@ -161,8 +163,16 @@ fn desktop_list_local_loras(state: State<'_, DesktopState>) -> Result<Vec<Deskto
 /** 使用设备会话读取网站 LoRA 目录，原始会话密钥不会进入 WebView。 */
 #[tauri::command]
 async fn desktop_load_website_loras(state: State<'_, DesktopState>) -> Result<Vec<DesktopWebsiteLoraView>, String> {
+    let app_data_dir = state.app_data_dir.clone();
     let installed = state.list_local_loras()?.into_iter().map(|item| item.sha256).collect();
-    tauri::async_runtime::spawn_blocking(move || website_lora::load_catalog(&installed)).await.map_err(|error| format!("网站 LoRA 目录任务异常：{error}"))?
+    tauri::async_runtime::spawn_blocking(move || website_lora::load_catalog(&app_data_dir, &installed)).await.map_err(|error| format!("网站 LoRA 目录任务异常：{error}"))?
+}
+
+/** 使用设备会话读取网站底模目录并缓存封面，不向 WebView 暴露会话密钥。 */
+#[tauri::command]
+async fn desktop_load_website_models(state: State<'_, DesktopState>) -> Result<Vec<DesktopWebsiteModelView>, String> {
+    let app_data_dir = state.app_data_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || website_model::load_catalog(&app_data_dir)).await.map_err(|error| format!("网站底模目录任务异常：{error}"))?
 }
 
 /** 断点下载并校验网站 LoRA 后原子导入本机仓库。 */
@@ -347,7 +357,7 @@ pub fn run() {
             app.manage(state);
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![desktop_account_status, desktop_start_authorization, desktop_poll_authorization, desktop_sign_out, desktop_bootstrap, desktop_inspect_environment, desktop_save_settings, desktop_enqueue_gallery_publication, desktop_list_gallery_sync_queue, desktop_load_resource_catalog, desktop_download_resource, desktop_install_resource, desktop_runtime_status, desktop_start_runtime, desktop_stop_runtime, desktop_self_test_runtime, desktop_import_local_model, desktop_list_local_models, desktop_import_local_lora, desktop_list_local_loras, desktop_load_website_loras, desktop_install_website_lora, desktop_software_update_status, desktop_download_software_update, desktop_import_offline_update, desktop_apply_software_update, desktop_rollback_software_update, desktop_create_training_dataset, desktop_list_training_datasets, desktop_add_training_images, desktop_update_training_caption, desktop_create_caption_job, desktop_list_caption_jobs, desktop_cancel_caption_job, desktop_confirm_training_dataset, desktop_create_training_job, desktop_list_training_jobs, desktop_cancel_training_job, desktop_create_local_job, desktop_list_local_jobs, desktop_cancel_local_job])
+        .invoke_handler(tauri::generate_handler![desktop_account_status, desktop_start_authorization, desktop_poll_authorization, desktop_sign_out, desktop_bootstrap, desktop_inspect_environment, desktop_save_settings, desktop_enqueue_gallery_publication, desktop_list_gallery_sync_queue, desktop_load_resource_catalog, desktop_download_resource, desktop_install_resource, desktop_runtime_status, desktop_start_runtime, desktop_stop_runtime, desktop_self_test_runtime, desktop_import_local_model, desktop_list_local_models, desktop_import_local_lora, desktop_list_local_loras, desktop_load_website_models, desktop_load_website_loras, desktop_install_website_lora, desktop_software_update_status, desktop_download_software_update, desktop_import_offline_update, desktop_apply_software_update, desktop_rollback_software_update, desktop_create_training_dataset, desktop_list_training_datasets, desktop_add_training_images, desktop_update_training_caption, desktop_create_caption_job, desktop_list_caption_jobs, desktop_cancel_caption_job, desktop_confirm_training_dataset, desktop_create_training_job, desktop_list_training_jobs, desktop_cancel_training_job, desktop_create_local_job, desktop_list_local_jobs, desktop_cancel_local_job])
         .run(tauri::generate_context!())
         .expect("DrawHime Desktop 启动失败");
 }

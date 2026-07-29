@@ -9,6 +9,7 @@ import path from "node:path";
 const argumentsMap = parseArguments(process.argv.slice(2));
 const executable = requiredArgument(argumentsMap, "executable");
 const evidencePath = argumentsMap.get("evidence") || null;
+const screenshotDirectory = argumentsMap.get("screenshot-directory") || null;
 const expectNoGpu = argumentsMap.has("expect-no-gpu");
 const port = await reservePort();
 const userDataDirectory = path.join(process.env.TEMP || process.cwd(), `drawhime-webview-probe-${process.pid}-${port}`);
@@ -25,6 +26,7 @@ try {
   try {
     const result = await evaluateAfterInitialReload(client, buildProbeExpression());
     validateProbe(result, expectNoGpu);
+    const repositoryEvidence = screenshotDirectory ? await captureRepositoryPages(client, screenshotDirectory) : null;
     const evidence = {
       checkedAt: new Date().toISOString(),
       targetTitle: result.documentTitle,
@@ -34,6 +36,7 @@ try {
       bannerText: result.bannerText,
       navigationPages: result.navigationPages,
       coreSubmissionBlocked: result.coreSubmissionError.includes("本地生成当前不可用"),
+      repositoryEvidence,
     };
     if (evidencePath) {
       await mkdir(path.dirname(path.resolve(evidencePath)), { recursive: true });
@@ -106,7 +109,7 @@ async function waitForWebViewTarget(port, childProcess) {
   throw new Error("45 秒内未取得 WebView2 调试目标");
 }
 
-/** 建立最小 CDP 客户端，只开放本次 UI 验收需要的 Runtime.evaluate。 */
+/** 建立最小 CDP 客户端，只开放本次 UI 验收需要的页面求值与截图命令。 */
 async function connectCdp(url) {
   const socket = new WebSocket(url);
   await new Promise((resolve, reject) => {
@@ -136,8 +139,54 @@ async function connectCdp(url) {
       if (response.exceptionDetails) throw new Error(response.exceptionDetails.text || "WebView 探针执行异常");
       return response.result.value;
     },
+    async captureScreenshot() {
+      const response = await command("Page.captureScreenshot", { format: "png", fromSurface: true });
+      return response.data;
+    },
     close() { socket.close(); },
   };
+}
+
+/** 逐页验证仓库筛选、卡片或空状态和详情返回逻辑，并保存 WebView 内容截图。 */
+async function captureRepositoryPages(client, directory) {
+  const targetDirectory = path.resolve(directory);
+  await mkdir(targetDirectory, { recursive: true });
+  const results = [];
+  for (const pageLabel of ["本地模型", "LoRA 仓库"]) {
+    const page = await client.evaluate(String.raw`(async () => {
+      const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+      const navigation = [...document.querySelectorAll('.desktop-sidebar nav button')].find((button) => button.textContent.trim() === ${JSON.stringify(pageLabel)});
+      if (!navigation) throw new Error('未找到仓库导航');
+      navigation.click();
+      await delay(400);
+      const pageRoot = [...document.querySelectorAll('.desktop-main > div')].find((element) => !element.hidden && element.querySelector('.repository-page'));
+      const toolbar = pageRoot?.querySelector('.repository-toolbar');
+      const cards = [...(pageRoot?.querySelectorAll('.repository-card') || [])];
+      const empty = pageRoot?.querySelector('.repository-empty');
+      if (!toolbar || (!cards.length && !empty)) throw new Error('仓库页面缺少筛选栏、卡片或空状态');
+      return { cardCount: cards.length, emptyVisible: Boolean(empty), horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth };
+    })()`);
+    if (page.horizontalOverflow) throw new Error(`${pageLabel} 页面发生横向溢出`);
+    const baseName = pageLabel === "本地模型" ? "models" : "loras";
+    const listFile = `${baseName}-list.png`;
+    await writeFile(path.join(targetDirectory, listFile), Buffer.from(await client.captureScreenshot(), "base64"));
+    let detailVisible = false;
+    let detailFile = null;
+    if (page.cardCount > 0) {
+      detailVisible = await client.evaluate(String.raw`(async () => {
+        const pageRoot = [...document.querySelectorAll('.desktop-main > div')].find((element) => !element.hidden && element.querySelector('.repository-page'));
+        pageRoot?.querySelector('.repository-card')?.click();
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        return Boolean(pageRoot?.querySelector('.repository-detail-hero'));
+      })()`);
+      if (!detailVisible) throw new Error(`${pageLabel} 卡片未打开详情页`);
+      detailFile = `${baseName}-detail.png`;
+      await writeFile(path.join(targetDirectory, detailFile), Buffer.from(await client.captureScreenshot(), "base64"));
+      await client.evaluate("[...document.querySelectorAll('.desktop-main > div')].find((element) => !element.hidden && element.querySelector('.repository-page'))?.querySelector('.repository-back')?.click()");
+    }
+    results.push({ page: pageLabel, ...page, detailVisible, screenshots: [listFile, detailFile].filter(Boolean) });
+  }
+  return results;
 }
 
 /** 在真实 React 页面中遍历全部导航，检查横幅与只读能力状态，并验证核心提交门禁。 */

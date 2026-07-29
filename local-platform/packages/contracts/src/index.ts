@@ -727,6 +727,15 @@ function desktopSemanticVersion(value: string): [number, number, number] | null 
   return parts.length === 3 && parts.every((part) => Number.isSafeInteger(part) && part >= 0) ? [parts[0]!, parts[1]!, parts[2]!] : null;
 }
 
+/** 签名模型资源用于把同组文件组合成一个可用底模。 */
+export const desktopResourceModelRegistrationSchema = z.object({
+  groupId: z.string().regex(/^[a-z0-9][a-z0-9._-]{1,127}$/),
+  displayName: z.string().min(1).max(191),
+  family: z.string().min(1).max(100),
+  workflowKind: z.enum(["checkpoint", "anima"]),
+  role: z.enum(["primary", "text_encoder", "vae"]),
+});
+
 /** 签名清单内单个可安装资源的不可变描述。 */
 export const desktopResourceManifestItemSchema = z.object({
   id: z.string().regex(/^[a-z0-9][a-z0-9._-]{1,127}$/),
@@ -743,13 +752,7 @@ export const desktopResourceManifestItemSchema = z.object({
   /** 原始模型文件只允许写入 ComfyUI 已登记的固定类别目录。 */
   installDirectory: z.enum(["checkpoints", "diffusion_models", "text_encoders", "vae", "loras"]).nullable().optional(),
   /** 同组资源全部安装后用于自动登记本地底模的签名元数据。 */
-  modelRegistration: z.object({
-    groupId: z.string().regex(/^[a-z0-9][a-z0-9._-]{1,127}$/),
-    displayName: z.string().min(1).max(191),
-    family: z.string().min(1).max(100),
-    workflowKind: z.enum(["checkpoint", "anima"]),
-    role: z.enum(["primary", "text_encoder", "vae"]),
-  }).nullable().optional(),
+  modelRegistration: desktopResourceModelRegistrationSchema.nullable().optional(),
   /** application 资源专用的更新说明和最低可直接升级版本。 */
   applicationUpdate: z.object({
     minimumVersion: z.string().regex(/^\d+\.\d+\.\d+$/),
@@ -814,6 +817,8 @@ export const desktopResourceCatalogViewSchema = z.object({
     installed: z.boolean(),
     installPath: z.string().nullable(),
     sourceKinds: z.array(desktopResourceSourceSchema.shape.kind),
+    /** 底模资源用于在仓库页合并同组文件并提供一键安装。 */
+    modelRegistration: desktopResourceModelRegistrationSchema.nullable().optional(),
   })),
 });
 
@@ -917,6 +922,23 @@ export const desktopWebsiteLoraViewSchema = z.object({
   sha256: z.string().regex(/^[a-f0-9]{64}$/),
   byteSize: z.number().int().positive(),
   installed: z.boolean(),
+  /** 已由桌面核心鉴权下载到应用数据目录的封面文件。 */
+  coverPath: z.string().nullable(),
+});
+
+/** 桌面端展示的网站底模仓库条目，封面只返回本机缓存路径。 */
+export const desktopWebsiteModelViewSchema = z.object({
+  id: z.string(),
+  displayName: z.string(),
+  description: z.string(),
+  family: z.string(),
+  familyName: z.string(),
+  modelFileName: z.string(),
+  runtimeFormat: z.string(),
+  usageGuide: z.string(),
+  sourceLinks: z.array(z.object({ label: z.string(), url: z.string().url() })).max(8),
+  parameters: z.object({ steps: z.number(), cfg: z.number(), sampler: z.string(), scheduler: z.string(), samplingMaxEdge: z.number(), maxEdge: z.number() }),
+  coverPath: z.string().nullable(),
 });
 
 /** 网站 LoRA 断点下载、校验和安装进度。 */
@@ -1322,6 +1344,7 @@ export type DesktopGalleryUploadCreateRequest = z.infer<typeof desktopGalleryUpl
 export type DesktopGalleryUploadView = z.infer<typeof desktopGalleryUploadViewSchema>;
 export type DesktopWebsiteLoraView = z.infer<typeof desktopWebsiteLoraViewSchema>;
 export type DesktopWebsiteLoraInstallProgress = z.infer<typeof desktopWebsiteLoraInstallProgressSchema>;
+export type DesktopWebsiteModelView = z.infer<typeof desktopWebsiteModelViewSchema>;
 export type DesktopSoftwareUpdateView = z.infer<typeof desktopSoftwareUpdateViewSchema>;
 export type DesktopOfflineUpdateImportInput = z.infer<typeof desktopOfflineUpdateImportInputSchema>;
 export type MainSessionExchangeRequest = z.infer<typeof mainSessionExchangeRequestSchema>;

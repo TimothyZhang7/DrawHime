@@ -530,6 +530,7 @@ pub struct DesktopResourceCatalogItemView {
     pub installed: bool,
     pub install_path: Option<String>,
     pub source_kinds: Vec<String>,
+    pub model_registration: Option<DesktopResourceModelRegistration>,
 }
 
 /** 桌面界面展示的已验签资源目录。 */
@@ -596,13 +597,29 @@ pub struct GallerySyncItem {
 /** 当前账号可访问的网站 LoRA 目录项。 */
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DesktopWebsiteLoraView { pub id: String, pub title: String, pub description: String, pub r#type: String, pub model_family: String, pub model_family_name: String, pub trigger_words: Vec<String>, pub owner_display_name: String, pub privacy: String, pub is_owner: bool, pub version_id: String, pub file_name: String, pub sha256: String, pub byte_size: u64, pub installed: bool }
+pub struct DesktopWebsiteLoraView { pub id: String, pub title: String, pub description: String, pub r#type: String, pub model_family: String, pub model_family_name: String, pub trigger_words: Vec<String>, pub owner_display_name: String, pub privacy: String, pub is_owner: bool, pub version_id: String, pub file_name: String, pub sha256: String, pub byte_size: u64, pub installed: bool, pub cover_path: Option<String> }
+
+/** 桌面端网站底模仓库视图；远端封面已转换为受控本机缓存路径。 */
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopWebsiteModelView { pub id: String, pub display_name: String, pub description: String, pub family: String, pub family_name: String, pub model_file_name: String, pub runtime_format: String, pub usage_guide: String, pub source_links: Vec<DesktopWebsiteSourceLink>, pub parameters: DesktopWebsiteModelParameters, pub cover_path: Option<String> }
+
+/** 网站底模来源链接只包含可公开展示的站点名称和 HTTPS 地址。 */
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopWebsiteSourceLink { pub label: String, pub url: String }
+
+/** 网站底模详情中的推荐采样参数。 */
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopWebsiteModelParameters { pub steps: f64, pub cfg: f64, pub sampler: String, pub scheduler: String, pub sampling_max_edge: f64, pub max_edge: f64 }
 
 /** 网站 LoRA 断点下载、校验与安装进度。 */
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DesktopWebsiteLoraInstallProgress { pub lora_id: String, pub status: String, pub downloaded_bytes: u64, pub total_bytes: u64, pub bytes_per_second: u64, pub error: Option<String> }
 
+/** PowerShell 一次性采集的 Windows 系统与显卡硬件探针结果。 */
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WindowsSystemProbe {
@@ -613,6 +630,9 @@ pub struct WindowsSystemProbe {
     pub total_memory_bytes: Option<u64>,
     pub available_memory_bytes: Option<u64>,
     pub virtual_total_bytes: Option<u64>,
+    /** WMI 可见的 NVIDIA 适配器用于区分无显卡和驱动不可用。 */
+    #[serde(default)]
+    pub nvidia_adapter_names: Vec<String>,
     #[serde(default)]
     pub disks: Vec<DiskView>,
 }

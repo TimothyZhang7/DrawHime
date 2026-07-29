@@ -1,5 +1,5 @@
 /** 本文件封装 WebView 到 Tauri 本地核心的受类型约束命令。 */
-import type { DesktopAccountView, DesktopAuthorizationRequestView, DesktopAuthorizationStartRequest, DesktopBootstrapView, DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopEnvironmentReport, DesktopGalleryPrivacy, DesktopGallerySyncItem, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopOfflineUpdateImportInput, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView, DesktopSettings, DesktopSettingsUpdate, DesktopSoftwareUpdateView, DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetIdInput, DesktopTrainingDatasetView, DesktopTrainingImagesAddInput, DesktopTrainingJobCreateInput, DesktopTrainingJobView, DesktopWebsiteLoraInstallProgress, DesktopWebsiteLoraView } from "@drawhime/contracts";
+import type { DesktopAccountView, DesktopAuthorizationRequestView, DesktopAuthorizationStartRequest, DesktopBootstrapView, DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopEnvironmentReport, DesktopGalleryPrivacy, DesktopGallerySyncItem, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopOfflineUpdateImportInput, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView, DesktopSettings, DesktopSettingsUpdate, DesktopSoftwareUpdateView, DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetIdInput, DesktopTrainingDatasetView, DesktopTrainingImagesAddInput, DesktopTrainingJobCreateInput, DesktopTrainingJobView, DesktopWebsiteLoraInstallProgress, DesktopWebsiteLoraView, DesktopWebsiteModelView } from "@drawhime/contracts";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
@@ -55,6 +55,9 @@ export function importDesktopLocalLora(input: DesktopLocalLoraImportInput): Prom
 export function listDesktopLocalLoras(): Promise<DesktopLocalLoraView[]> { return invoke("desktop_list_local_loras"); }
 /** 读取当前账号可访问的网站 LoRA 目录。 */
 export function loadDesktopWebsiteLoras(): Promise<DesktopWebsiteLoraView[]> { return invoke("desktop_load_website_loras"); }
+
+/** 读取主站底模仓库和已缓存封面，不把设备会话暴露给页面。 */
+export function loadDesktopWebsiteModels(): Promise<DesktopWebsiteModelView[]> { return invoke("desktop_load_website_models"); }
 /** 断点下载、校验并安装一个网站 LoRA。 */
 export function installDesktopWebsiteLora(loraId: string): Promise<DesktopLocalLoraView> { return invoke("desktop_install_website_lora", { loraId }); }
 /** 监听网站 LoRA 下载、校验和安装进度。 */

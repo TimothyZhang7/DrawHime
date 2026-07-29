@@ -1,14 +1,15 @@
 /**
  * 本文件实现桌面生成、任务、模型、Runtime、资源、环境、图库同步和本地设置的响应式工作区。
  */
-import type { DesktopAccountView, DesktopBootstrapView, DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopEnvironmentReport, DesktopGallerySyncItem, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView, DesktopSettings, DesktopSoftwareUpdateView, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetView, DesktopTrainingJobCreateInput, DesktopTrainingJobView, DesktopWebsiteLoraInstallProgress, DesktopWebsiteLoraView } from "@drawhime/contracts";
+import type { DesktopAccountView, DesktopBootstrapView, DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopEnvironmentReport, DesktopGallerySyncItem, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraView, DesktopLocalModelView, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView, DesktopSettings, DesktopSoftwareUpdateView, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetView, DesktopTrainingJobCreateInput, DesktopTrainingJobView, DesktopWebsiteLoraInstallProgress, DesktopWebsiteLoraView, DesktopWebsiteModelView } from "@drawhime/contracts";
 import { Activity, AlertTriangle, BookOpenCheck, CheckCircle2, CircleUserRound, Cpu, Database, Download, FlaskConical, FolderCog, FolderPlus, Gauge, HardDrive, Image, Images, Layers3, LoaderCircle, MemoryStick, Monitor, Moon, PackageCheck, PackageOpen, Play, Power, RefreshCw, Save, Settings2, ShieldCheck, Sun, Tags, Upload, UploadCloud, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { addDesktopTrainingImages, applyDesktopSoftwareUpdate, cancelDesktopCaptionJob, cancelDesktopLocalJob, cancelDesktopTrainingJob, confirmDesktopTrainingDataset, createDesktopCaptionJob, createDesktopLocalJob, createDesktopTrainingDataset, createDesktopTrainingJob, downloadDesktopResource, downloadDesktopSoftwareUpdate, importDesktopLocalLora, importDesktopLocalModel, importDesktopOfflineUpdate, inspectDesktopEnvironment, installDesktopResource, installDesktopWebsiteLora, listDesktopCaptionJobs, listDesktopGallerySyncQueue, listDesktopLocalJobs, listDesktopLocalLoras, listDesktopLocalModels, listDesktopTrainingDatasets, listDesktopTrainingJobs, listenDesktopCaptionJobUpdates, listenDesktopGallerySyncUpdates, listenDesktopLocalJobUpdates, listenDesktopResourceInstallProgress, listenDesktopResourceProgress, listenDesktopTrainingJobUpdates, listenDesktopWebsiteLoraProgress, loadDesktopAccountStatus, loadDesktopBootstrap, loadDesktopResourceCatalog, loadDesktopRuntimeStatus, loadDesktopSoftwareUpdateStatus, loadDesktopWebsiteLoras, rollbackDesktopSoftwareUpdate, saveDesktopSettings, selfTestDesktopRuntime, startDesktopRuntime, stopDesktopRuntime, updateDesktopTrainingCaption } from "./desktop-api";
+import { addDesktopTrainingImages, applyDesktopSoftwareUpdate, cancelDesktopCaptionJob, cancelDesktopLocalJob, cancelDesktopTrainingJob, confirmDesktopTrainingDataset, createDesktopCaptionJob, createDesktopLocalJob, createDesktopTrainingDataset, createDesktopTrainingJob, downloadDesktopResource, downloadDesktopSoftwareUpdate, importDesktopOfflineUpdate, inspectDesktopEnvironment, installDesktopResource, installDesktopWebsiteLora, listDesktopCaptionJobs, listDesktopGallerySyncQueue, listDesktopLocalJobs, listDesktopLocalLoras, listDesktopLocalModels, listDesktopTrainingDatasets, listDesktopTrainingJobs, listenDesktopCaptionJobUpdates, listenDesktopGallerySyncUpdates, listenDesktopLocalJobUpdates, listenDesktopResourceInstallProgress, listenDesktopResourceProgress, listenDesktopTrainingJobUpdates, listenDesktopWebsiteLoraProgress, loadDesktopAccountStatus, loadDesktopBootstrap, loadDesktopResourceCatalog, loadDesktopRuntimeStatus, loadDesktopSoftwareUpdateStatus, loadDesktopWebsiteLoras, loadDesktopWebsiteModels, rollbackDesktopSoftwareUpdate, saveDesktopSettings, selfTestDesktopRuntime, startDesktopRuntime, stopDesktopRuntime, updateDesktopTrainingCaption } from "./desktop-api";
 import { AccountPage } from "./AccountPage";
+import { LoraRepositoryPage, ModelRepositoryPage } from "./RepositoryPages";
 
 type DesktopPage = "generate" | "jobs" | "models" | "loras" | "training" | "overview" | "environment" | "resources" | "updates" | "sync" | "account" | "settings";
 
@@ -37,6 +38,7 @@ export function App() {
   const [installProgress, setInstallProgress] = useState<Record<string, DesktopResourceInstallView>>({});
   const [models, setModels] = useState<DesktopLocalModelView[]>([]);
   const [loras, setLoras] = useState<DesktopLocalLoraView[]>([]);
+  const [websiteModels, setWebsiteModels] = useState<DesktopWebsiteModelView[]>([]);
   const [websiteLoras, setWebsiteLoras] = useState<DesktopWebsiteLoraView[]>([]);
   const [websiteLoraProgress, setWebsiteLoraProgress] = useState<Record<string, DesktopWebsiteLoraInstallProgress>>({});
   const [softwareUpdate, setSoftwareUpdate] = useState<DesktopSoftwareUpdateView | null>(null);
@@ -51,13 +53,14 @@ export function App() {
   const [themeSaving, setThemeSaving] = useState(false);
   const [runtimeBusy, setRuntimeBusy] = useState(false);
   const [resourceBulkBusy, setResourceBulkBusy] = useState(false);
+  const [modelGroupBusy, setModelGroupBusy] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const environmentCheckRunning = useRef(false);
   const lastEnvironmentCheckAt = useRef(0);
   const captionDatasetRefresh = useRef<number | null>(null);
   const bootstrapReady = bootstrap !== null;
 
-  useEffect(() => { void loadDesktopBootstrap().then(async (state) => { lastEnvironmentCheckAt.current = Date.now(); setBootstrap(state); const accountRequest = loadDesktopAccountStatus().catch((): DesktopAccountView => ({ status: "offline", identity: null, expiresAt: null, message: "账号服务当前未连接；全部本地功能继续可用" })); const [nextQueue, catalog, nextModels, nextJobs, nextLoras, nextTrainingDatasets, nextCaptionJobs, nextTrainingJobs, nextAccount] = await Promise.all([listDesktopGallerySyncQueue(), loadDesktopResourceCatalog(), listDesktopLocalModels(), listDesktopLocalJobs(), listDesktopLocalLoras(), listDesktopTrainingDatasets(), listDesktopCaptionJobs(), listDesktopTrainingJobs(), accountRequest]); setQueue(nextQueue); setResourceCatalog(catalog); setModels(nextModels); setJobs(nextJobs); setLoras(nextLoras); setTrainingDatasets(nextTrainingDatasets); setCaptionJobs(nextCaptionJobs); setTrainingJobs(nextTrainingJobs); setAccount(nextAccount); if (nextAccount.status === "connected") setWebsiteLoras(await loadDesktopWebsiteLoras().catch(() => [])); }).catch((error) => setMessage(errorMessage(error))).finally(() => setLoading(false)); }, []);
+  useEffect(() => { void loadDesktopBootstrap().then(async (state) => { lastEnvironmentCheckAt.current = Date.now(); setBootstrap(state); const accountRequest = loadDesktopAccountStatus().catch((): DesktopAccountView => ({ status: "offline", identity: null, expiresAt: null, message: "账号服务当前未连接；全部本地功能继续可用" })); const [nextQueue, catalog, nextModels, nextJobs, nextLoras, nextTrainingDatasets, nextCaptionJobs, nextTrainingJobs, nextAccount] = await Promise.all([listDesktopGallerySyncQueue(), loadDesktopResourceCatalog(), listDesktopLocalModels(), listDesktopLocalJobs(), listDesktopLocalLoras(), listDesktopTrainingDatasets(), listDesktopCaptionJobs(), listDesktopTrainingJobs(), accountRequest]); setQueue(nextQueue); setResourceCatalog(catalog); setModels(nextModels); setJobs(nextJobs); setLoras(nextLoras); setTrainingDatasets(nextTrainingDatasets); setCaptionJobs(nextCaptionJobs); setTrainingJobs(nextTrainingJobs); setAccount(nextAccount); if (nextAccount.status === "connected") void Promise.all([loadDesktopWebsiteModels().catch(() => []), loadDesktopWebsiteLoras().catch(() => [])]).then(([remoteModels, remoteLoras]) => { setWebsiteModels(remoteModels); setWebsiteLoras(remoteLoras); }); }).catch((error) => setMessage(errorMessage(error))).finally(() => setLoading(false)); }, []);
   useEffect(() => { void loadDesktopSoftwareUpdateStatus().then(setSoftwareUpdate).catch((error) => setMessage(errorMessage(error))); }, []);
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -189,6 +192,34 @@ export function App() {
     } finally { setResourceBulkBusy(false); }
   };
 
+  /** 仓库刷新并行读取本机登记、签名资源与主站元数据，任一远端失败不清空本机条目。 */
+  const refreshRepositories = async () => {
+    setCatalogLoading(true);
+    try {
+      const remoteModels = account.status === "connected" ? loadDesktopWebsiteModels().catch(() => websiteModels) : Promise.resolve([]);
+      const remoteLoras = account.status === "connected" ? loadDesktopWebsiteLoras().catch(() => websiteLoras) : Promise.resolve([]);
+      const [catalog, nextModels, nextLoras, nextWebsiteModels, nextWebsiteLoras] = await Promise.all([loadDesktopResourceCatalog(), listDesktopLocalModels(), listDesktopLocalLoras(), remoteModels, remoteLoras]);
+      setResourceCatalog(catalog); setModels(nextModels); setLoras(nextLoras); setWebsiteModels(nextWebsiteModels); setWebsiteLoras(nextWebsiteLoras); setMessage("模型与 LoRA 仓库已刷新");
+    } catch (error) { setMessage(errorMessage(error)); }
+    finally { setCatalogLoading(false); }
+  };
+
+  /** 底模仓库按签名组顺序完成断点下载、校验与安装，任一文件失败即停止。 */
+  const installModelGroup = async (groupId: string, resourceIds: string[]) => {
+    if (modelGroupBusy || !resourceCatalog?.configured) return;
+    setModelGroupBusy(groupId);
+    try {
+      for (const resourceId of resourceIds) {
+        const resource = resourceCatalog.resources.find((item) => item.id === resourceId);
+        if (!resource || resource.installed) continue;
+        if (!resource.downloaded && !(await downloadResource(resourceId))) return;
+        if (!(await installResource(resourceId))) return;
+      }
+      const [nextModels, nextCatalog] = await Promise.all([listDesktopLocalModels(), loadDesktopResourceCatalog()]);
+      setModels(nextModels); setResourceCatalog(nextCatalog); setMessage("底模文件已安装并完成本地登记");
+    } finally { setModelGroupBusy(null); }
+  };
+
   /** Runtime 控制始终等待本地核心返回真实状态，自检成功后同步刷新环境能力门禁。 */
   const controlRuntime = async (action: "start" | "stop" | "selfTest") => {
     if (runtimeBusy) return;
@@ -251,15 +282,15 @@ export function App() {
       {message && <div className="desktop-notice">{message}<button onClick={() => setMessage("")}>×</button></div>}
       <div hidden={page !== "generate"}><GeneratePage models={models} loras={loras} inferenceReady={bootstrap.environment.capabilities.inference} defaultPrivacy={bootstrap.settings.defaultPrivacy} onCreated={jobCreated} onError={setMessage} /></div>
       <div hidden={page !== "jobs"}><JobsPage jobs={jobs} onCancel={(id) => void cancelJob(id)} /></div>
-      <div hidden={page !== "models"}><ModelsPage models={models} onImported={modelImported} onError={setMessage} /></div>
-      <div hidden={page !== "loras"}><LorasPage loras={loras} websiteLoras={websiteLoras} websiteProgress={websiteLoraProgress} accountConnected={account.status === "connected"} onReloadWebsite={() => void loadDesktopWebsiteLoras().then(setWebsiteLoras).catch((error) => setMessage(errorMessage(error)))} onInstallWebsite={(id) => void installWebsiteLora(id)} onImported={loraImported} onError={setMessage} /></div>
+      <div hidden={page !== "models"}><ModelRepositoryPage models={models} websiteModels={websiteModels} catalog={resourceCatalog} downloadProgress={resourceProgress} installProgress={installProgress} accountConnected={account.status === "connected"} modelRoot={bootstrap.settings.modelRoot} busyGroupId={modelGroupBusy} onRefresh={() => void refreshRepositories()} onInstallGroup={(groupId, resourceIds) => void installModelGroup(groupId, resourceIds)} onImported={modelImported} onOpenSettings={() => setPage("settings")} onError={setMessage} /></div>
+      <div hidden={page !== "loras"}><LoraRepositoryPage loras={loras} websiteLoras={websiteLoras} progress={websiteLoraProgress} accountConnected={account.status === "connected"} modelRoot={bootstrap.settings.modelRoot} onRefresh={() => void refreshRepositories()} onInstall={(id) => void installWebsiteLora(id)} onImported={loraImported} onError={setMessage} /></div>
       <div hidden={page !== "training"}><TrainingPage datasets={trainingDatasets} captionJobs={captionJobs} trainingJobs={trainingJobs} models={models} captioningReady={bootstrap.environment.capabilities.captioning} trainingReady={bootstrap.environment.capabilities.training} onUpdated={trainingDatasetUpdated} onCaptionJobUpdated={captionJobUpdated} onTrainingJobUpdated={trainingJobUpdated} onOpenResources={() => setPage("resources")} onError={setMessage} /></div>
       <div hidden={page !== "overview"}><OverviewPage state={bootstrap} runtimeBusy={runtimeBusy} onRuntimeAction={(action) => void controlRuntime(action)} /></div>
       <div hidden={page !== "environment"}><EnvironmentPage report={bootstrap.environment} /></div>
       <div hidden={page !== "resources"}><ResourcesPage catalog={resourceCatalog} progress={resourceProgress} installProgress={installProgress} loading={catalogLoading} bulkBusy={resourceBulkBusy} onReload={() => void reloadResourceCatalog()} onInstallRequired={() => void installRequiredResources()} onDownload={(resourceId) => void downloadResource(resourceId)} onInstall={(resourceId) => void installResource(resourceId)} /></div>
       <div hidden={page !== "updates"}><UpdatesPage value={softwareUpdate} onChanged={setSoftwareUpdate} onError={setMessage} /></div>
       <div hidden={page !== "sync"}><SyncPage items={queue} /></div>
-      <div hidden={page !== "account"}><AccountPage account={account} onChanged={(next) => { setAccount(next); if (next.status === "connected") void loadDesktopWebsiteLoras().then(setWebsiteLoras).catch(() => undefined); else setWebsiteLoras([]); }} onError={setMessage} /></div>
+      <div hidden={page !== "account"}><AccountPage account={account} onChanged={(next) => { setAccount(next); if (next.status === "connected") void Promise.all([loadDesktopWebsiteModels(), loadDesktopWebsiteLoras()]).then(([remoteModels, remoteLoras]) => { setWebsiteModels(remoteModels); setWebsiteLoras(remoteLoras); }).catch((error) => setMessage(errorMessage(error))); else { setWebsiteModels([]); setWebsiteLoras([]); } }} onError={setMessage} /></div>
       <div hidden={page !== "settings"}><SettingsPage value={bootstrap.settings} onSaved={(settings) => { setBootstrap((current) => current ? { ...current, settings } : current); setMessage("本地设置已保存"); void reloadResourceCatalog(); }} onError={setMessage} /></div>
     </main>
   </div>;
@@ -295,48 +326,6 @@ function GeneratePage({ models, loras, inferenceReady, defaultPrivacy, onCreated
 /** 任务页从 SQLite 视图渲染，成功产物使用 Tauri 受控 asset URL 延迟加载。 */
 function JobsPage({ jobs, onCancel }: { jobs: DesktopLocalJobView[]; onCancel: (id: string) => void }) {
   return <div className="desktop-page"><section className="section-card"><header><div><span>LOCAL JOBS</span><h2>任务记录</h2></div><small>{jobs.length} 项</small></header>{jobs.length ? <div className="local-job-grid">{jobs.map((job) => <article key={job.id}><div className="local-job-preview">{job.artifact ? <img loading="lazy" src={convertFileSrc(job.artifact.path)} alt={job.prompt.slice(0, 80)} /> : <div><Image /><span>{localJobStatusLabel(job.status)}</span><b>{job.progress}%</b></div>}</div><div className="local-job-copy"><strong>{job.prompt}</strong><span>{job.modelDisplayName} · {job.loras.length} 个 LoRA · {job.parameters.width}×{job.parameters.height} · Seed {job.parameters.seed}</span>{job.error && <small>{job.error}</small>}</div>{["queued", "running"].includes(job.status) && <button title="取消任务" onClick={() => onCancel(job.id)}><X /></button>}</article>)}</div> : <div className="empty-block">尚未提交本地生成任务</div>}</section></div>;
-}
-
-/** 模型页通过原生文件选择器导入，不要求用户把绝对路径手工复制到程序外部。 */
-function ModelsPage({ models, onImported, onError }: { models: DesktopLocalModelView[]; onImported: (model: DesktopLocalModelView) => void; onError: (message: string) => void }) {
-  const [form, setForm] = useState<DesktopLocalModelImportInput>({ displayName: "", family: "anima", workflowKind: "anima", modelSourcePath: "", textEncoderSourcePath: null, vaeSourcePath: null });
-  const [busy, setBusy] = useState(false);
-  const chooseFile = async (field: "modelSourcePath" | "textEncoderSourcePath" | "vaeSourcePath") => {
-    try { const selected = await open({ multiple: false, directory: false, filters: [{ name: "safetensors 模型", extensions: ["safetensors"] }] }); if (typeof selected === "string") setForm((current) => ({ ...current, [field]: selected })); }
-    catch (error) { onError(errorMessage(error)); }
-  };
-  const submit = async () => {
-    setBusy(true);
-    try { const model = await importDesktopLocalModel(form); onImported(model); setForm((current) => ({ ...current, displayName: "", modelSourcePath: "", textEncoderSourcePath: null, vaeSourcePath: null })); }
-    catch (error) { onError(errorMessage(error)); }
-    finally { setBusy(false); }
-  };
-  const ready = form.displayName.trim() && form.family.trim() && form.modelSourcePath && (form.workflowKind === "checkpoint" || (form.textEncoderSourcePath && form.vaeSourcePath));
-  return <div className="desktop-page model-layout"><section className="section-card model-import"><header><div><span>MODEL IMPORT</span><h2>导入本地底模</h2></div><small>仅 safetensors · 自动哈希 · 原子复制</small></header><div className="model-import-grid"><label><span>显示名称</span><input value={form.displayName} onChange={(event) => setForm({ ...form, displayName: event.target.value })} /></label><label><span>模型系列</span><input value={form.family} onChange={(event) => setForm({ ...form, family: event.target.value })} /></label><label><span>工作流格式</span><select value={form.workflowKind} onChange={(event) => { const workflowKind = event.target.value as DesktopLocalModelImportInput["workflowKind"]; setForm({ ...form, workflowKind, textEncoderSourcePath: workflowKind === "anima" ? form.textEncoderSourcePath : null, vaeSourcePath: workflowKind === "anima" ? form.vaeSourcePath : null }); }}><option value="anima">Anima · UNet + CLIP + VAE</option><option value="checkpoint">Checkpoint · 单文件</option></select></label><FilePicker label={form.workflowKind === "anima" ? "UNet 文件" : "Checkpoint 文件"} value={form.modelSourcePath} onPick={() => void chooseFile("modelSourcePath")} />{form.workflowKind === "anima" && <><FilePicker label="文本编码器" value={form.textEncoderSourcePath || ""} onPick={() => void chooseFile("textEncoderSourcePath")} /><FilePicker label="VAE 文件" value={form.vaeSourcePath || ""} onPick={() => void chooseFile("vaeSourcePath")} /></>}</div><footer><button disabled={!ready || busy} onClick={() => void submit()}>{busy ? <LoaderCircle className="spin" /> : <Download />}{busy ? "正在校验并导入" : "导入模型"}</button></footer></section><section className="section-card"><header><div><span>REGISTERED MODELS</span><h2>已登记模型</h2></div><small>{models.length} 个</small></header>{models.length ? <div className="model-list">{models.map((model) => <article key={model.id} className={model.available ? "is-ready" : "is-missing"}><Database /><div><strong>{model.displayName}</strong><span>{model.family} · {model.workflowKind === "anima" ? "Anima" : "Checkpoint"} · {formatResourceBytes(model.byteSize)}</span><small>{model.modelFileName} · {model.modelSha256.slice(0, 12)}</small></div><b>{model.available ? "可用" : "文件已变化"}</b></article>)}</div> : <div className="empty-block">当前设备尚未登记模型</div>}</section></div>;
-}
-
-/** LoRA 仓库通过原生文件选择器导入真实权重，并保留类型与触发词供任务选择。 */
-function LorasPage({ loras, websiteLoras, websiteProgress, accountConnected, onReloadWebsite, onInstallWebsite, onImported, onError }: { loras: DesktopLocalLoraView[]; websiteLoras: DesktopWebsiteLoraView[]; websiteProgress: Record<string, DesktopWebsiteLoraInstallProgress>; accountConnected: boolean; onReloadWebsite: () => void; onInstallWebsite: (id: string) => void; onImported: (lora: DesktopLocalLoraView) => void; onError: (message: string) => void }) {
-  const [form, setForm] = useState<DesktopLocalLoraImportInput>({ title: "", type: "style", sourcePath: "", triggerWords: [] });
-  const [triggerText, setTriggerText] = useState("");
-  const [busy, setBusy] = useState(false);
-  const chooseFile = async () => {
-    try { const selected = await open({ multiple: false, directory: false, filters: [{ name: "safetensors LoRA", extensions: ["safetensors"] }] }); if (typeof selected === "string") setForm((current) => ({ ...current, sourcePath: selected })); }
-    catch (error) { onError(errorMessage(error)); }
-  };
-  const submit = async () => {
-    if (busy || !form.title.trim() || !form.sourcePath) return;
-    setBusy(true);
-    try {
-      const triggerWords = triggerText.split(/[,，\n]/).map((word) => word.trim()).filter(Boolean);
-      const lora = await importDesktopLocalLora({ ...form, title: form.title.trim(), triggerWords });
-      onImported(lora);
-      setForm((current) => ({ ...current, title: "", sourcePath: "", triggerWords: [] }));
-      setTriggerText("");
-    } catch (error) { onError(errorMessage(error)); }
-    finally { setBusy(false); }
-  };
-  return <div className="desktop-page lora-layout"><section className="section-card website-lora-section"><header><div><span>WEBSITE LORA</span><h2>网站 LoRA 仓库</h2></div><button onClick={onReloadWebsite} disabled={!accountConnected}><RefreshCw />刷新目录</button></header>{!accountConnected ? <div className="resource-unconfigured"><CircleUserRound /><div><strong>连接账号后可一键安装</strong><span>公开 LoRA 与当前账号私有 LoRA 都会按权限显示，设备会话不会进入页面。</span></div></div> : websiteLoras.length ? <div className="website-lora-grid">{websiteLoras.map((lora) => { const progress = websiteProgress[lora.id]; const running = progress && ["downloading", "verifying", "installing"].includes(progress.status); const percent = progress ? Math.min(100, Math.round(progress.downloadedBytes / progress.totalBytes * 100)) : 0; return <article key={lora.id}><div><b>{loraTypeLabel(lora.type)}</b>{lora.privacy === "private" && <i>私有</i>}</div><strong>{lora.title}</strong><span>{lora.modelFamilyName} · {lora.ownerDisplayName}</span><small>{lora.triggerWords.join(", ") || "无触发词"}</small>{progress && <div className="resource-progress"><i style={{ width: `${percent}%` }} /><small>{websiteLoraProgressLabel(progress)} · {percent}%{progress.bytesPerSecond ? ` · ${formatResourceBytes(progress.bytesPerSecond)}/s` : ""}</small></div>}<button disabled={lora.installed || Boolean(running)} onClick={() => onInstallWebsite(lora.id)}>{running ? <LoaderCircle className="spin" /> : lora.installed ? <CheckCircle2 /> : <Download />}{lora.installed ? "已安装" : running ? websiteLoraProgressLabel(progress) : `安装 · ${formatResourceBytes(lora.byteSize)}`}</button></article>; })}</div> : <div className="empty-block">当前账号没有可下载的 LoRA</div>}</section><section className="section-card model-import"><header><div><span>LORA IMPORT</span><h2>导入本机 LoRA</h2></div><small>内容哈希去重 · 受控目录保存</small></header><div className="model-import-grid"><label><span>标题</span><input maxLength={191} value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} /></label><label><span>类型</span><select value={form.type} onChange={(event) => setForm({ ...form, type: event.target.value as DesktopLocalLoraImportInput["type"] })}>{["style", "character", "concept", "clothing", "pose", "other"].map((type) => <option key={type} value={type}>{loraTypeLabel(type)}</option>)}</select></label><label><span>触发词</span><input value={triggerText} onChange={(event) => setTriggerText(event.target.value)} placeholder="多个触发词使用逗号分隔" /></label><FilePicker label="LoRA 文件" value={form.sourcePath} onPick={() => void chooseFile()} /></div><footer><button disabled={busy || !form.title.trim() || !form.sourcePath} onClick={() => void submit()}>{busy ? <LoaderCircle className="spin" /> : <Download />}{busy ? "正在校验并导入" : "导入 LoRA"}</button></footer></section><section className="section-card"><header><div><span>LOCAL LORA LIBRARY</span><h2>已登记 LoRA</h2></div><small>{loras.length} 个</small></header>{loras.length ? <div className="lora-library-grid">{loras.map((lora) => <article key={lora.id} className={lora.available ? "is-ready" : "is-missing"}><div><Layers3 /><b>{loraTypeLabel(lora.type)}</b></div><strong>{lora.title}</strong><span>{lora.triggerWords.join(", ") || "无触发词"}</span><small>{lora.fileName} · {formatResourceBytes(lora.byteSize)} · {lora.sha256.slice(0, 12)}</small><i>{lora.available ? "可用" : "文件已变化"}</i></article>)}</div> : <div className="empty-block">当前设备尚未登记 LoRA</div>}</section></div>;
 }
 
 /** LoRA 训练页统一管理真实训练集、离线自动打标、人工 Caption 与确认门禁。 */
@@ -474,9 +463,6 @@ function TrainingAssetRow({ datasetId, asset, captionItem, captioningReady, capt
   return <article className={asset.available ? "" : "is-missing"}><div className="training-asset-image">{asset.available ? <img loading="lazy" src={convertFileSrc(asset.path)} alt={asset.fileName} /> : <div><AlertTriangle /><span>文件缺失</span></div>}<span>{asset.width}×{asset.height}</span></div><div className="training-asset-caption"><header><strong>{asset.fileName}</strong><small>{asset.sha256.slice(0, 12)} · {formatResourceBytes(asset.byteSize)}</small></header><textarea value={caption} onChange={(event) => setCaption(event.target.value)} placeholder="使用英文逗号分隔准确标签；人工保存后批量任务不会改写" /><footer><span className={asset.available ? asset.confirmed ? "confirmed" : "pending" : "missing"}>{asset.available ? asset.confirmed ? "已确认" : `${sourceText}${captionItem ? ` · ${captionItemStatusLabel(captionItem.status)}` : ""}` : "文件缺失或已变化"}</span><div><button className="caption-row-action" disabled={!captioningReady || captionJobActive || busy || !asset.available} onClick={onRetag}><Tags />重新打标</button><button disabled={!changed || busy} onClick={() => void save()}>{busy ? <LoaderCircle className="spin" /> : <Save />}{busy ? "保存中" : "保存 Caption"}</button></div></footer>{captionItem?.error && <small className="caption-item-error">{captionItem.error}</small>}</div></article>;
 }
 
-/** 原生文件选择字段只展示已选路径，不允许网页侧直接读取文件内容。 */
-function FilePicker({ label, value, onPick }: { label: string; value: string; onPick: () => void }) { return <label className="file-picker"><span>{label}</span><div><input readOnly value={value} placeholder="选择 .safetensors 文件" /><button onClick={onPick}>选择</button></div></label>; }
-
 /** 总览页只展示真实检测与本地数据，不模拟未接入的生成结果。 */
 function OverviewPage({ state, runtimeBusy, onRuntimeAction }: { state: DesktopBootstrapView; runtimeBusy: boolean; onRuntimeAction: (action: "start" | "stop" | "selfTest") => void }) {
   const gpu = state.environment.gpus[0];
@@ -539,7 +525,10 @@ function SettingsPage({ value, onSaved, onError }: { value: DesktopSettings; onS
 }
 
 /** 目录输入保持明确文本，保存时由本地核心创建并验证写权限。 */
-function PathField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) { return <label className="path-field"><span>{label}</span><input value={value} onChange={(event) => onChange(event.target.value)} /></label>; }
+function PathField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  const choose = async () => { const selected = await open({ directory: true, multiple: false, defaultPath: value }); if (typeof selected === "string") onChange(selected); };
+  return <label className="path-field"><span>{label}</span><div><input value={value} onChange={(event) => onChange(event.target.value)} /><button type="button" onClick={() => void choose()}><FolderCog />选择目录</button></div><small>默认保存在 DrawHime 应用数据目录；修改后新下载与导入文件写入此目录。</small></label>;
+}
 /** 单项能力卡统一显示真实开放或锁定状态。 */
 function CapabilityCard({ label, ready, text }: { label: string; ready: boolean; text: string }) { return <article className={ready ? "is-ready" : "is-locked"}>{ready ? <CheckCircle2 /> : <AlertTriangle />}<div><strong>{label}</strong><span>{text}</span></div></article>; }
 /** 总览指标保持紧凑并适配长硬件名称。 */

@@ -69,7 +69,8 @@
 | `desktop-local-job-updated` | desktop core/local scheduler | desktop webview | 本地任务状态、进度或产物变化事件；载荷为 `DesktopLocalJobView`，刷新页面后仍以 SQLite 为准 |
 | `desktop_enqueue_gallery_publication` | desktop runtime/UI | desktop core | 校验本地结果文件、计算 SHA-256，并以本地任务和文件哈希幂等写入图库同步队列 |
 | `desktop_list_gallery_sync_queue` | desktop webview | desktop core | 读取当前设备本地图库同步队列；对应 `DesktopGallerySyncItem[]` |
-| `desktop_load_website_loras` | desktop webview | desktop core/api | 使用 Credential Manager 设备会话读取当前账号可访问的公开 LoRA 与本人私有 LoRA；返回 SHA-256、大小、触发词和本机安装状态，不向 WebView 暴露会话密钥 |
+| `desktop_load_website_models` | desktop webview | desktop core/api | 使用 Credential Manager 设备会话读取主站底模仓库，并把首张受保护示例图缓存到应用数据目录作为封面；页面只得到本机路径和公开元数据 |
+| `desktop_load_website_loras` | desktop webview | desktop core/api | 使用 Credential Manager 设备会话读取当前账号可访问的公开 LoRA 与本人私有 LoRA；返回封面本机路径、SHA-256、大小、触发词和本机安装状态，不向 WebView 暴露会话密钥 |
 | `desktop_install_website_lora` | desktop webview | desktop core/api | 按 LoRA 条目 ID 重新鉴权，使用 HTTP Range 断点下载最新有效 safetensors，完成整体 SHA-256 后原子导入本机仓库 |
 | `desktop-website-lora-progress` | desktop core | desktop webview | 网站 LoRA 下载与校验进度事件；对应 `DesktopWebsiteLoraInstallProgress` |
 | `desktop_software_update_status` | desktop webview | desktop core | 验签稳定通道资源清单并对比当前安装包语义版本；重启后依据实际运行版本收敛 `applying` 记录，不以进程启动成功伪造安装成功 |

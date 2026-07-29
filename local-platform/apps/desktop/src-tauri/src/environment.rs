@@ -9,6 +9,8 @@ const MIB: u64 = 1024 * 1024;
 // NVIDIA 会为固件保留少量显存，6/8 GiB 标称显卡通常分别上报约 6140/8188 MiB。
 const MINIMUM_GPU_MEMORY_BYTES: u64 = 5_800 * MIB;
 const MINIMUM_TRAINING_GPU_MEMORY_BYTES: u64 = 7_800 * MIB;
+// 桌面 Runtime 固定使用 CUDA 12.6 GA，NVIDIA 官方发布说明要求 Windows 驱动至少为 560.76。
+const MINIMUM_NVIDIA_DRIVER: (u64, u64) = (560, 76);
 
 /** 检测当前真实环境；任何缺失都转为明确问题，不使用虚构硬件数据。 */
 pub fn inspect_environment(settings: &DesktopSettings) -> DesktopEnvironmentReport {
@@ -24,7 +26,8 @@ pub fn inspect_environment(settings: &DesktopSettings) -> DesktopEnvironmentRepo
     if !os_supported {
         issues.push(issue("windows_version_unsupported", "critical", "当前 Windows 版本不在支持范围", "首版要求 Windows 10 1809 及以后版本或 Windows 11 x64。", "查看系统升级要求"));
     }
-    let (gpu_supported, training_gpu_supported, low_free_memory) = evaluate_gpu_state(&gpus, &mut issues);
+    let nvidia_hardware_detected = !system.nvidia_adapter_names.is_empty();
+    let (gpu_supported, training_gpu_supported, low_free_memory) = evaluate_gpu_state(&gpus, nvidia_hardware_detected, &mut issues);
     if runtime.status == "not_installed" { issues.push(issue("runtime_missing", "warning", "本地 Runtime 尚未安装", "桌面核心和硬件检测可用；安装经过签名的推理、训练环境后才开放 GPU 任务。", "安装运行环境")); }
     if runtime.status == "installed_unverified" { issues.push(issue("runtime_unverified", "warning", "本地 Runtime 等待自检", "已发现 Runtime 清单，但尚未记录完整推理和训练自检结果。", "执行环境自检")); }
     if runtime.status == "broken" { issues.push(issue("runtime_broken", "critical", "本地 Runtime 清单损坏", "Runtime 清单不能读取或状态无效，生成和训练保持暂停。", "修复运行环境")); }
@@ -70,12 +73,21 @@ fn capability_block_message(report: &DesktopEnvironmentReport, capability: &str)
 }
 
 /** 统一评估 GPU 门禁并生成可操作提示，确保无卡、低显存和繁忙状态使用同一真实逻辑。 */
-fn evaluate_gpu_state(gpus: &[GpuView], issues: &mut Vec<EnvironmentIssue>) -> (bool, bool, bool) {
-    let generation_supported = gpus.iter().any(|gpu| gpu.memory_total_bytes >= MINIMUM_GPU_MEMORY_BYTES);
-    let training_supported = gpus.iter().any(|gpu| gpu.memory_total_bytes >= MINIMUM_TRAINING_GPU_MEMORY_BYTES);
+fn evaluate_gpu_state(gpus: &[GpuView], nvidia_hardware_detected: bool, issues: &mut Vec<EnvironmentIssue>) -> (bool, bool, bool) {
+    let driver_supported = gpus.iter().any(|gpu| nvidia_driver_supported(&gpu.driver_version));
+    let generation_supported = driver_supported && gpus.iter().any(|gpu| gpu.memory_total_bytes >= MINIMUM_GPU_MEMORY_BYTES);
+    let training_supported = driver_supported && gpus.iter().any(|gpu| gpu.memory_total_bytes >= MINIMUM_TRAINING_GPU_MEMORY_BYTES);
     let low_free_memory = gpus.first().map(|gpu| gpu.memory_free_bytes < 1024 * MIB).unwrap_or(true);
     if gpus.is_empty() {
-        issues.push(issue("gpu_missing", "critical", "未检测到可用 NVIDIA GPU", "本地生成和 LoRA 训练保持暂停；模型管理、训练集与手动标签仍可使用。", "检查 GPU 与驱动"));
+        if nvidia_hardware_detected {
+            issues.push(issue("nvidia_driver_unavailable", "critical", "NVIDIA 显卡驱动不可用", "Windows 已发现 NVIDIA 显卡硬件，但 nvidia-smi 未返回可用设备；生成和训练保持暂停。", "安装或修复 NVIDIA 驱动"));
+        } else {
+            issues.push(issue("gpu_missing", "critical", "未检测到可用 NVIDIA GPU", "本地生成和 LoRA 训练保持暂停；模型管理、训练集与手动标签仍可使用。", "检查 GPU 与驱动"));
+        }
+    } else if !driver_supported {
+        let detected = gpus.iter().map(|gpu| gpu.driver_version.as_str()).collect::<Vec<_>>().join(" / ");
+        let message = format!("当前 NVIDIA 驱动为 {detected}，CUDA 12.6 Runtime 要求 Windows 驱动至少为 560.76；生成和训练保持暂停。");
+        issues.push(issue("nvidia_driver_too_old", "critical", "NVIDIA 显卡驱动版本过旧", &message, "更新 NVIDIA 驱动"));
     } else if !generation_supported {
         issues.push(issue("gpu_memory_insufficient", "critical", "GPU 显存低于首版运行要求", "当前检测到的 NVIDIA GPU 均少于 6GB 独立显存，生成和训练保持暂停。", "查看显存要求"));
     } else if !training_supported {
@@ -88,10 +100,10 @@ fn evaluate_gpu_state(gpus: &[GpuView], issues: &mut Vec<EnvironmentIssue>) -> (
 }
 
 fn windows_system_probe() -> WindowsSystemProbe {
-    if cfg!(not(target_os = "windows")) { return WindowsSystemProbe { os_name: None, os_version: None, os_build: None, cpu_name: None, total_memory_bytes: None, available_memory_bytes: None, virtual_total_bytes: None, disks: Vec::new() }; }
-    let script = r#"[Console]::OutputEncoding=[Text.UTF8Encoding]::new();$os=Get-CimInstance Win32_OperatingSystem;$cpu=Get-CimInstance Win32_Processor|Select-Object -First 1;$disks=@(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3'|ForEach-Object{[ordered]@{name=$_.DeviceID;fileSystem=[string]$_.FileSystem;totalBytes=[uint64]$_.Size;availableBytes=[uint64]$_.FreeSpace}});[ordered]@{osName=[string]$os.Caption;osVersion=[string]$os.Version;osBuild=[uint64]$os.BuildNumber;cpuName=[string]$cpu.Name;totalMemoryBytes=[uint64]$os.TotalVisibleMemorySize*1024;availableMemoryBytes=[uint64]$os.FreePhysicalMemory*1024;virtualTotalBytes=[uint64]$os.TotalVirtualMemorySize*1024;disks=$disks}|ConvertTo-Json -Compress -Depth 4"#;
+    if cfg!(not(target_os = "windows")) { return WindowsSystemProbe { os_name: None, os_version: None, os_build: None, cpu_name: None, total_memory_bytes: None, available_memory_bytes: None, virtual_total_bytes: None, nvidia_adapter_names: Vec::new(), disks: Vec::new() }; }
+    let script = r#"[Console]::OutputEncoding=[Text.UTF8Encoding]::new();$os=Get-CimInstance Win32_OperatingSystem;$cpu=Get-CimInstance Win32_Processor|Select-Object -First 1;$nvidiaAdapters=@(Get-CimInstance Win32_VideoController|Where-Object{$_.Name -match 'NVIDIA'}|ForEach-Object{[string]$_.Name});$disks=@(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3'|ForEach-Object{[ordered]@{name=$_.DeviceID;fileSystem=[string]$_.FileSystem;totalBytes=[uint64]$_.Size;availableBytes=[uint64]$_.FreeSpace}});[ordered]@{osName=[string]$os.Caption;osVersion=[string]$os.Version;osBuild=[uint64]$os.BuildNumber;cpuName=[string]$cpu.Name;totalMemoryBytes=[uint64]$os.TotalVisibleMemorySize*1024;availableMemoryBytes=[uint64]$os.FreePhysicalMemory*1024;virtualTotalBytes=[uint64]$os.TotalVirtualMemorySize*1024;nvidiaAdapterNames=$nvidiaAdapters;disks=$disks}|ConvertTo-Json -Compress -Depth 4"#;
     let output = Command::new("powershell.exe").args(["-NoProfile", "-NonInteractive", "-Command", script]).output();
-    output.ok().filter(|result| result.status.success()).and_then(|result| serde_json::from_slice(&result.stdout).ok()).unwrap_or(WindowsSystemProbe { os_name: None, os_version: None, os_build: None, cpu_name: None, total_memory_bytes: None, available_memory_bytes: None, virtual_total_bytes: None, disks: Vec::new() })
+    output.ok().filter(|result| result.status.success()).and_then(|result| serde_json::from_slice(&result.stdout).ok()).unwrap_or(WindowsSystemProbe { os_name: None, os_version: None, os_build: None, cpu_name: None, total_memory_bytes: None, available_memory_bytes: None, virtual_total_bytes: None, nvidia_adapter_names: Vec::new(), disks: Vec::new() })
 }
 
 fn nvidia_gpus() -> Vec<GpuView> {
@@ -149,6 +161,13 @@ fn has_trainer_component(runtime_root: &str) -> bool {
 fn issue(code: &str, severity: &str, title: &str, message: &str, action: &str) -> EnvironmentIssue { EnvironmentIssue { code: code.into(), severity: severity.into(), title: title.into(), message: message.into(), action: action.into() } }
 fn parse_number(value: &str) -> Option<f64> { value.parse().ok() }
 fn non_empty(value: &str) -> Option<String> { let value = value.trim(); (!value.is_empty() && value != "N/A").then(|| value.to_owned()) }
+/** 比较 nvidia-smi 返回的主次版本，拒绝缺失、畸形或低于 CUDA 12.6 要求的驱动。 */
+fn nvidia_driver_supported(value: &str) -> bool {
+    let mut parts = value.trim().split('.');
+    let Some(major) = parts.next().and_then(|part| part.parse::<u64>().ok()) else { return false; };
+    let Some(minor) = parts.next().and_then(|part| part.parse::<u64>().ok()) else { return false; };
+    (major, minor) >= MINIMUM_NVIDIA_DRIVER
+}
 /** Windows 10 与 11 的内核主版本均为 10，使用构建号判断最低 1809。 */
 fn windows_build_supported(version: Option<&str>, build: Option<u64>) -> bool { version.is_some_and(|value| value.starts_with("10.")) && build.is_some_and(|value| value >= 17763) }
 
@@ -176,20 +195,36 @@ mod tests {
     #[test]
     fn gpu_gate_explains_missing_low_memory_and_generation_only_devices() {
         let mut issues = Vec::new();
-        assert_eq!(evaluate_gpu_state(&[], &mut issues), (false, false, true));
+        assert_eq!(evaluate_gpu_state(&[], false, &mut issues), (false, false, true));
         assert!(issues.iter().any(|issue| issue.code == "gpu_missing"));
 
-        let gpu = |total_mib: u64, free_mib: u64| GpuView { index: 0, uuid: "test".into(), name: "测试 GPU".into(), vendor: "NVIDIA".into(), memory_total_bytes: total_mib * MIB, memory_free_bytes: free_mib * MIB, driver_version: "test".into(), compute_capability: Some("test".into()), temperature_celsius: Some(0.0), utilization_percent: Some(0.0) };
         issues.clear();
-        assert_eq!(evaluate_gpu_state(&[gpu(4_092, 4_000)], &mut issues), (false, false, false));
+        assert_eq!(evaluate_gpu_state(&[], true, &mut issues), (false, false, true));
+        assert!(issues.iter().any(|issue| issue.code == "nvidia_driver_unavailable"));
+
+        let gpu = |total_mib: u64, free_mib: u64, driver_version: &str| GpuView { index: 0, uuid: "test".into(), name: "测试 GPU".into(), vendor: "NVIDIA".into(), memory_total_bytes: total_mib * MIB, memory_free_bytes: free_mib * MIB, driver_version: driver_version.into(), compute_capability: Some("test".into()), temperature_celsius: Some(0.0), utilization_percent: Some(0.0) };
+        issues.clear();
+        assert_eq!(evaluate_gpu_state(&[gpu(8_188, 8_000, "560.75")], true, &mut issues), (false, false, false));
+        assert!(issues.iter().any(|issue| issue.code == "nvidia_driver_too_old"));
+
+        issues.clear();
+        assert_eq!(evaluate_gpu_state(&[gpu(4_092, 4_000, "560.76")], true, &mut issues), (false, false, false));
         assert!(issues.iter().any(|issue| issue.code == "gpu_memory_insufficient"));
 
         issues.clear();
-        assert_eq!(evaluate_gpu_state(&[gpu(6_140, 6_000)], &mut issues), (true, false, false));
+        assert_eq!(evaluate_gpu_state(&[gpu(6_140, 6_000, "560.76")], true, &mut issues), (true, false, false));
         assert!(issues.iter().any(|issue| issue.code == "training_gpu_memory_insufficient"));
 
         issues.clear();
-        assert_eq!(evaluate_gpu_state(&[gpu(8_188, 8_000)], &mut issues), (true, true, false));
+        assert_eq!(evaluate_gpu_state(&[gpu(8_188, 8_000, "596.21")], true, &mut issues), (true, true, false));
         assert!(issues.is_empty());
+    }
+
+    #[test]
+    fn nvidia_driver_gate_matches_cuda_12_6_windows_requirement() {
+        assert!(!nvidia_driver_supported("560.75"));
+        assert!(nvidia_driver_supported("560.76"));
+        assert!(nvidia_driver_supported("596.21"));
+        assert!(!nvidia_driver_supported("unknown"));
     }
 }

@@ -71,6 +71,7 @@ pub fn load_catalog(settings: &DesktopSettings, app_data_dir: &Path) -> Result<D
             installed,
             install_path: installed.then(|| install_destination(item, settings).to_string_lossy().into_owned()),
             source_kinds: ordered_sources(item, &settings.dependency_source).iter().map(|source| source.kind.clone()).collect(),
+            model_registration: item.model_registration.clone(),
         }
     }).collect();
     Ok(DesktopResourceCatalogView { configured: true, key_id: Some(key_id.into()), generated_at: Some(payload.generated_at), expires_at: Some(payload.expires_at), message: "资源清单签名和有效期校验通过".into(), resources })
