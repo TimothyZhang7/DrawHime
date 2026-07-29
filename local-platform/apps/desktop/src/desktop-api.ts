@@ -1,5 +1,5 @@
 /** 本文件封装 WebView 到 Tauri 本地核心的受类型约束命令。 */
-import type { DesktopAccountView, DesktopAuthorizationRequestView, DesktopAuthorizationStartRequest, DesktopBootstrapView, DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopEnvironmentReport, DesktopGalleryPrivacy, DesktopGallerySyncItem, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView, DesktopSettings, DesktopSettingsUpdate, DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetIdInput, DesktopTrainingDatasetView, DesktopTrainingImagesAddInput, DesktopTrainingJobCreateInput, DesktopTrainingJobView, DesktopWebsiteLoraInstallProgress, DesktopWebsiteLoraView } from "@drawhime/contracts";
+import type { DesktopAccountView, DesktopAuthorizationRequestView, DesktopAuthorizationStartRequest, DesktopBootstrapView, DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopEnvironmentReport, DesktopGalleryPrivacy, DesktopGallerySyncItem, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopOfflineUpdateImportInput, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView, DesktopSettings, DesktopSettingsUpdate, DesktopSoftwareUpdateView, DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetIdInput, DesktopTrainingDatasetView, DesktopTrainingImagesAddInput, DesktopTrainingJobCreateInput, DesktopTrainingJobView, DesktopWebsiteLoraInstallProgress, DesktopWebsiteLoraView } from "@drawhime/contracts";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
@@ -59,6 +59,16 @@ export function loadDesktopWebsiteLoras(): Promise<DesktopWebsiteLoraView[]> { r
 export function installDesktopWebsiteLora(loraId: string): Promise<DesktopLocalLoraView> { return invoke("desktop_install_website_lora", { loraId }); }
 /** 监听网站 LoRA 下载、校验和安装进度。 */
 export function listenDesktopWebsiteLoraProgress(handler: (progress: DesktopWebsiteLoraInstallProgress) => void): Promise<UnlistenFn> { return listen<DesktopWebsiteLoraInstallProgress>("desktop-website-lora-progress", (event) => handler(event.payload)); }
+/** 检查签名稳定通道和可信回滚缓存。 */
+export function loadDesktopSoftwareUpdateStatus(): Promise<DesktopSoftwareUpdateView> { return invoke("desktop_software_update_status"); }
+/** 断点下载最新签名 NSIS 更新包。 */
+export function downloadDesktopSoftwareUpdate(): Promise<DesktopSoftwareUpdateView> { return invoke("desktop_download_software_update"); }
+/** 导入离线安装包和 Ed25519 信封。 */
+export function importDesktopOfflineUpdate(input: DesktopOfflineUpdateImportInput): Promise<DesktopSoftwareUpdateView> { return invoke("desktop_import_offline_update", { input }); }
+/** 应用已验证更新并退出当前程序。 */
+export function applyDesktopSoftwareUpdate(): Promise<DesktopSoftwareUpdateView> { return invoke("desktop_apply_software_update"); }
+/** 使用可信缓存回滚到上一版本。 */
+export function rollbackDesktopSoftwareUpdate(): Promise<DesktopSoftwareUpdateView> { return invoke("desktop_rollback_software_update"); }
 /** 创建本地持久训练集。 */
 export function createDesktopTrainingDataset(input: DesktopTrainingDatasetCreateInput): Promise<DesktopTrainingDatasetView> { return invoke("desktop_create_training_dataset", { input }); }
 /** 读取全部本地训练集与图片 Caption。 */

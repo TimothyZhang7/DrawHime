@@ -245,9 +245,11 @@ Local Scheduler 使用桌面 SQLite 作为唯一事实源。提交命令先固�
 ## 14. 更新与回滚
 
 - 桌面程序、Runtime、工作流和资源使用独立版本通道。
-- 软件更新包必须有发布签名和 SHA-256。
-- 更新先下载到新目录，验证后切换；失败恢复上一个版本。
-- 提供离线更新包和离线 Runtime 包。
+- 软件更新复用固定 Ed25519 资源清单；`application` 条目必须声明严格三段目标版本、最低直接升级版本、NSIS EXE、大小、SHA-256、版本说明和强制标记。
+- 在线更新使用官方/镜像选择、8 MiB Range 断点和整体哈希；下载后额外保留原始签名信封，应用和回滚前都重新验签，不信任 SQLite 状态或单独的验证标记。
+- 离线更新必须同时导入安装包和原始签名信封；平台、架构、文件名、版本、大小与 SHA-256 全部匹配后才进入受控缓存。
+- NSIS 由独立隐藏辅助进程在主程序退出后静默执行，启动前再次计算安装包 SHA-256；重启后只根据实际运行版本收敛 `applying → applied`，安装器退出码或超时收敛为失败。
+- 可信上一版本安装包和信封仍在缓存时开放回滚；没有可重新验签的缓存时不展示可执行回滚。
 - 更新不修改模型、LoRA、任务、账号或图库队列数据。
 
 ## 15. 安全要求
@@ -297,6 +299,6 @@ Local Scheduler 使用桌面 SQLite 作为唯一事实源。提交命令先固�
 
 ## 18. 当前实现状态
 
-当前已完成：Tauri 工程、Windows/NVIDIA 基础检测、Windows 10 1809 构建号门禁、持续环境提示、SQLite 设置及升级、主题跟随/手动切换、依赖来源偏好、环境快照、默认图库隐私、图库 outbox、响应式桌面 UI、签名资源清单契约和 API、离线签名工具、8 MiB Range 断点下载、低速切源、SHA-256 隔离、资源进度事件、安全 ZIP/7z 解压、磁盘预检、同卷原子安装、旧版本保留与回滚、Runtime 安装状态回归测试和 NSIS 构建。首个 NVIDIA Runtime、WAI Anima 模型组合、固定公钥、签名清单和主站 Range 镜像已经发布；清单签名、模型资源分片、完整 7z 安装及 NSIS 安装包均已通过真实验证。桌面核心现已支持 ComfyUI 动态回环启动、状态轮询、GPU/节点自检、受控日志、停止回收、safetensors 原子导入、Checkpoint/Anima 工作流、SQLite 本地任务/attempt/产物、串行调度、取消恢复和自动图库 outbox。LoRA 已支持安全导入、类型与触发词管理、单任务最多四个独立强度、任务级不可变快照，以及 Checkpoint/Anima 工作流真实串联；真实 Runtime 生命周期、自带 LoRA 的 512×512 Anima 生成和 NSIS 启动冒烟均已通过。本地训练集现已支持 5–200 张 PNG/JPEG/WebP 原子导入、内容去重、逐图人工 Caption、文件完整性复核与确认门禁。WD ViT Tagger v3 签名组件、ONNX Runtime 私有依赖、持久化批量/单图打标队列、人工 Caption 保护、取消和重启恢复已经接入 UI；真实动漫图片离线推理、签名 ZIP 安装及公开 Range 首尾分片均已验证。Anima Trainer 现已具备签名 ZIP、固定上游源码与 Windows CUDA 12.6 依赖、SQLite 任务/尝试/快照、共享 GPU 协调、取消进程树、OOM 建议、结果 LoRA 自动登记以及参数与任务 UI；Trainer v2 已在 RTX 4060 Laptop 8GB 上以 5 张真实图片完成 512 分辨率、Rank 8 的完整训练并生成 23MB safetensors。浏览器设备码授权、服务端哈希存储、幂等换取可撤销会话、Windows Credential Manager、离线账号状态和自适应账号 UI 已落地。图库同步 Worker 现已完成账号原子绑定、4 MiB 分片、断点、整体哈希、隐私、失败恢复和主站免计费正式图库发布；网站 LoRA 目录支持公开/本人私有权限、单段 Range 续传、哈希校验和 UI 一键原子安装。
+当前已完成：Tauri 工程、Windows/NVIDIA 基础检测、Windows 10 1809 构建号门禁、持续环境提示、SQLite 设置及升级、主题跟随/手动切换、依赖来源偏好、环境快照、默认图库隐私、图库 outbox、响应式桌面 UI、签名资源清单契约和 API、离线签名工具、8 MiB Range 断点下载、低速切源、SHA-256 隔离、资源进度事件、安全 ZIP/7z 解压、磁盘预检、同卷原子安装、旧版本保留与回滚、Runtime 安装状态回归测试和 NSIS 构建。首个 NVIDIA Runtime、WAI Anima 模型组合、固定公钥、签名清单和主站 Range 镜像已经发布；清单签名、模型资源分片、完整 7z 安装及 NSIS 安装包均已通过真实验证。桌面核心现已支持 ComfyUI 动态回环启动、状态轮询、GPU/节点自检、受控日志、停止回收、safetensors 原子导入、Checkpoint/Anima 工作流、SQLite 本地任务/attempt/产物、串行调度、取消恢复和自动图库 outbox。LoRA 已支持安全导入、类型与触发词管理、单任务最多四个独立强度、任务级不可变快照，以及 Checkpoint/Anima 工作流真实串联；真实 Runtime 生命周期、自带 LoRA 的 512×512 Anima 生成和 NSIS 启动冒烟均已通过。本地训练集现已支持 5–200 张 PNG/JPEG/WebP 原子导入、内容去重、逐图人工 Caption、文件完整性复核与确认门禁。WD ViT Tagger v3 签名组件、ONNX Runtime 私有依赖、持久化批量/单图打标队列、人工 Caption 保护、取消和重启恢复已经接入 UI；真实动漫图片离线推理、签名 ZIP 安装及公开 Range 首尾分片均已验证。Anima Trainer 现已具备签名 ZIP、固定上游源码与 Windows CUDA 12.6 依赖、SQLite 任务/尝试/快照、共享 GPU 协调、取消进程树、OOM 建议、结果 LoRA 自动登记以及参数与任务 UI；Trainer v2 已在 RTX 4060 Laptop 8GB 上以 5 张真实图片完成 512 分辨率、Rank 8 的完整训练并生成 23MB safetensors。浏览器设备码授权、服务端哈希存储、幂等换取可撤销会话、Windows Credential Manager、离线账号状态和自适应账号 UI 已落地。图库同步 Worker 现已完成账号原子绑定、4 MiB 分片、断点、整体哈希、隐私、失败恢复和主站免计费正式图库发布；网站 LoRA 目录支持公开/本人私有权限、单段 Range 续传、哈希校验和 UI 一键原子安装。软件更新现已完成 `application` 签名契约、SQLite 状态、在线断点下载、离线双文件导入、应用前二次验签、NSIS 辅助进程、实际版本终态收敛、可信缓存回滚和响应式更新页面；篡改信封、安装包哈希不符、元数据缺失、版本比较及更新状态测试均已通过，新的 NSIS 安装包已完成构建和十秒启动冒烟。
 
-后续按顺序推进：补齐网站底模文件发布与授权安装 → 签名软件更新与离线更新包 → Windows 完整系统矩阵和安装包验收。
+后续按顺序推进：补齐网站其余底模文件发布与授权安装 → 发布两个连续版本的签名应用包并执行真实升级/回滚 → Windows、DPI、WebView2、GPU、弱网和磁盘完整矩阵 → 正式 GitHub Release。

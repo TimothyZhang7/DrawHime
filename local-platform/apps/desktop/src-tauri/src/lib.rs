@@ -16,8 +16,9 @@ mod training_dataset;
 mod trainer;
 mod workload;
 mod website_lora;
+mod software_update;
 
-use models::{DesktopBootstrapView, DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopEnvironmentReport, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView, DesktopSettings, DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetIdInput, DesktopTrainingDatasetView, DesktopTrainingImagesAddInput, DesktopTrainingJobCreateInput, DesktopTrainingJobView, DesktopWebsiteLoraView, GalleryPublicationInput, GallerySyncItem};
+use models::{DesktopBootstrapView, DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopEnvironmentReport, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopOfflineUpdateImportInput, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView, DesktopSettings, DesktopSoftwareUpdateView, DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetIdInput, DesktopTrainingDatasetView, DesktopTrainingImagesAddInput, DesktopTrainingJobCreateInput, DesktopTrainingJobView, DesktopWebsiteLoraView, GalleryPublicationInput, GallerySyncItem};
 use std::path::PathBuf;
 use storage::DesktopState;
 use tauri::{Manager, State};
@@ -182,6 +183,59 @@ async fn desktop_install_website_lora(app: tauri::AppHandle, state: State<'_, De
     Ok(view)
 }
 
+/** 验签在线通道并返回当前软件更新与可信回滚状态。 */
+#[tauri::command]
+async fn desktop_software_update_status(state: State<'_, DesktopState>) -> Result<DesktopSoftwareUpdateView, String> {
+    let database_path = state.database_path.clone();
+    let app_data_dir = state.app_data_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || software_update::status(&database_path, &app_data_dir)).await.map_err(|error| format!("软件更新检查任务异常：{error}"))?
+}
+
+/** 使用依赖来源策略断点下载最新签名 NSIS 包。 */
+#[tauri::command]
+async fn desktop_download_software_update(app: tauri::AppHandle, state: State<'_, DesktopState>) -> Result<DesktopSoftwareUpdateView, String> {
+    let database_path = state.database_path.clone();
+    let app_data_dir = state.app_data_dir.clone();
+    let settings = state.load_settings()?;
+    tauri::async_runtime::spawn_blocking(move || software_update::download(&database_path, &app_data_dir, &settings, &app)).await.map_err(|error| format!("软件下载任务异常：{error}"))?
+}
+
+/** 导入离线安装包和 Ed25519 信封。 */
+#[tauri::command]
+async fn desktop_import_offline_update(state: State<'_, DesktopState>, input: DesktopOfflineUpdateImportInput) -> Result<DesktopSoftwareUpdateView, String> {
+    let database_path = state.database_path.clone();
+    let app_data_dir = state.app_data_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || software_update::import_offline(&database_path, &app_data_dir, input)).await.map_err(|error| format!("离线更新导入任务异常：{error}"))?
+}
+
+/** 启动静默更新辅助进程后退出当前应用。 */
+#[tauri::command]
+async fn desktop_apply_software_update(app: tauri::AppHandle, state: State<'_, DesktopState>) -> Result<DesktopSoftwareUpdateView, String> {
+    let database_path = state.database_path.clone();
+    let app_data_dir = state.app_data_dir.clone();
+    let view = tauri::async_runtime::spawn_blocking(move || software_update::apply(&database_path, &app_data_dir)).await.map_err(|error| format!("软件更新应用任务异常：{error}"))??;
+    let exit_app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(600));
+        exit_app.exit(0);
+    });
+    Ok(view)
+}
+
+/** 启动上一可信版本安装包后退出当前应用。 */
+#[tauri::command]
+async fn desktop_rollback_software_update(app: tauri::AppHandle, state: State<'_, DesktopState>) -> Result<DesktopSoftwareUpdateView, String> {
+    let database_path = state.database_path.clone();
+    let app_data_dir = state.app_data_dir.clone();
+    let view = tauri::async_runtime::spawn_blocking(move || software_update::rollback(&database_path, &app_data_dir)).await.map_err(|error| format!("软件回滚任务异常：{error}"))??;
+    let exit_app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(600));
+        exit_app.exit(0);
+    });
+    Ok(view)
+}
+
 #[tauri::command]
 fn desktop_create_training_dataset(state: State<'_, DesktopState>, input: DesktopTrainingDatasetCreateInput) -> Result<DesktopTrainingDatasetView, String> {
     state.create_training_dataset(input)
@@ -293,7 +347,7 @@ pub fn run() {
             app.manage(state);
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![desktop_account_status, desktop_start_authorization, desktop_poll_authorization, desktop_sign_out, desktop_bootstrap, desktop_inspect_environment, desktop_save_settings, desktop_enqueue_gallery_publication, desktop_list_gallery_sync_queue, desktop_load_resource_catalog, desktop_download_resource, desktop_install_resource, desktop_runtime_status, desktop_start_runtime, desktop_stop_runtime, desktop_self_test_runtime, desktop_import_local_model, desktop_list_local_models, desktop_import_local_lora, desktop_list_local_loras, desktop_load_website_loras, desktop_install_website_lora, desktop_create_training_dataset, desktop_list_training_datasets, desktop_add_training_images, desktop_update_training_caption, desktop_create_caption_job, desktop_list_caption_jobs, desktop_cancel_caption_job, desktop_confirm_training_dataset, desktop_create_training_job, desktop_list_training_jobs, desktop_cancel_training_job, desktop_create_local_job, desktop_list_local_jobs, desktop_cancel_local_job])
+        .invoke_handler(tauri::generate_handler![desktop_account_status, desktop_start_authorization, desktop_poll_authorization, desktop_sign_out, desktop_bootstrap, desktop_inspect_environment, desktop_save_settings, desktop_enqueue_gallery_publication, desktop_list_gallery_sync_queue, desktop_load_resource_catalog, desktop_download_resource, desktop_install_resource, desktop_runtime_status, desktop_start_runtime, desktop_stop_runtime, desktop_self_test_runtime, desktop_import_local_model, desktop_list_local_models, desktop_import_local_lora, desktop_list_local_loras, desktop_load_website_loras, desktop_install_website_lora, desktop_software_update_status, desktop_download_software_update, desktop_import_offline_update, desktop_apply_software_update, desktop_rollback_software_update, desktop_create_training_dataset, desktop_list_training_datasets, desktop_add_training_images, desktop_update_training_caption, desktop_create_caption_job, desktop_list_caption_jobs, desktop_cancel_caption_job, desktop_confirm_training_dataset, desktop_create_training_job, desktop_list_training_jobs, desktop_cancel_training_job, desktop_create_local_job, desktop_list_local_jobs, desktop_cancel_local_job])
         .run(tauri::generate_context!())
         .expect("DrawHime Desktop 启动失败");
 }

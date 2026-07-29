@@ -718,10 +718,19 @@ export const desktopResourceSourceSchema = z.object({
   url: z.string().url(),
 });
 
+/** 桌面签名资源类型，应用更新与普通依赖共用该稳定枚举。 */
+export const desktopResourceKindSchema = z.enum(["runtime", "model", "lora", "captioner", "trainer", "application"]);
+
+/** 把严格三段版本转换为可比较元组，资源签名前拒绝含糊版本。 */
+function desktopSemanticVersion(value: string): [number, number, number] | null {
+  const parts = value.split(".").map(Number);
+  return parts.length === 3 && parts.every((part) => Number.isSafeInteger(part) && part >= 0) ? [parts[0]!, parts[1]!, parts[2]!] : null;
+}
+
 /** 签名清单内单个可安装资源的不可变描述。 */
 export const desktopResourceManifestItemSchema = z.object({
   id: z.string().regex(/^[a-z0-9][a-z0-9._-]{1,127}$/),
-  kind: z.enum(["runtime", "model", "lora", "captioner", "trainer"]),
+  kind: desktopResourceKindSchema,
   version: z.string().min(1).max(100),
   os: z.literal("windows"),
   arch: z.enum(["x86_64", "aarch64"]),
@@ -741,8 +750,29 @@ export const desktopResourceManifestItemSchema = z.object({
     workflowKind: z.enum(["checkpoint", "anima"]),
     role: z.enum(["primary", "text_encoder", "vae"]),
   }).nullable().optional(),
+  /** application 资源专用的更新说明和最低可直接升级版本。 */
+  applicationUpdate: z.object({
+    minimumVersion: z.string().regex(/^\d+\.\d+\.\d+$/),
+    releaseNotes: z.string().max(20000),
+    mandatory: z.boolean(),
+  }).nullable().optional(),
   required: z.boolean(),
   sources: z.array(desktopResourceSourceSchema).min(1).max(8),
+}).superRefine((item, context) => {
+  const isApplication = item.kind === "application";
+  if (isApplication && (item.archive !== "raw" || !item.fileName.toLowerCase().endsWith(".exe") || !item.applicationUpdate)) {
+    context.addIssue({ code: "custom", path: ["applicationUpdate"], message: "application 资源必须是带更新元数据的原始 NSIS EXE" });
+  }
+  if (!isApplication && item.applicationUpdate) {
+    context.addIssue({ code: "custom", path: ["applicationUpdate"], message: "非 application 资源不得声明软件更新元数据" });
+  }
+  if (isApplication && item.applicationUpdate) {
+    const target = desktopSemanticVersion(item.version);
+    const minimum = desktopSemanticVersion(item.applicationUpdate.minimumVersion);
+    if (!target || !minimum || minimum[0] > target[0] || (minimum[0] === target[0] && minimum[1] > target[1]) || (minimum[0] === target[0] && minimum[1] === target[1] && minimum[2] > target[2])) {
+      context.addIssue({ code: "custom", path: ["version"], message: "应用目标版本必须是三段版本且不低于最低升级版本" });
+    }
+  }
 });
 
 /** 服务端签名前的资源清单载荷。 */
@@ -770,7 +800,7 @@ export const desktopResourceCatalogViewSchema = z.object({
   message: z.string(),
   resources: z.array(z.object({
     id: z.string(),
-    kind: desktopResourceManifestItemSchema.shape.kind,
+    kind: desktopResourceKindSchema,
     version: z.string(),
     fileName: z.string(),
     byteSize: z.number().int().positive(),
@@ -893,6 +923,22 @@ export const desktopWebsiteLoraInstallProgressSchema = z.object({
   bytesPerSecond: z.number().int().nonnegative(),
   error: z.string().nullable(),
 });
+
+/** 桌面软件更新检查、暂存、应用和回滚状态。 */
+export const desktopSoftwareUpdateViewSchema = z.object({
+  currentVersion: z.string(),
+  latestVersion: z.string().nullable(),
+  status: z.enum(["unavailable", "up_to_date", "available", "downloading", "downloaded", "staged", "applying", "failed"]),
+  mandatory: z.boolean(),
+  releaseNotes: z.string().nullable(),
+  byteSize: z.number().int().nonnegative(),
+  downloadedBytes: z.number().int().nonnegative(),
+  rollbackVersion: z.string().nullable(),
+  error: z.string().nullable(),
+});
+
+/** 离线更新要求同时提供安装包和签名信封。 */
+export const desktopOfflineUpdateImportInputSchema = z.object({ installerPath: z.string().min(1), envelopePath: z.string().min(1) });
 
 /** 桌面端本地训练集及逐图 Caption 视图。 */
 export const desktopTrainingDatasetViewSchema = z.object({
@@ -1271,6 +1317,8 @@ export type DesktopGalleryUploadCreateRequest = z.infer<typeof desktopGalleryUpl
 export type DesktopGalleryUploadView = z.infer<typeof desktopGalleryUploadViewSchema>;
 export type DesktopWebsiteLoraView = z.infer<typeof desktopWebsiteLoraViewSchema>;
 export type DesktopWebsiteLoraInstallProgress = z.infer<typeof desktopWebsiteLoraInstallProgressSchema>;
+export type DesktopSoftwareUpdateView = z.infer<typeof desktopSoftwareUpdateViewSchema>;
+export type DesktopOfflineUpdateImportInput = z.infer<typeof desktopOfflineUpdateImportInputSchema>;
 export type MainSessionExchangeRequest = z.infer<typeof mainSessionExchangeRequestSchema>;
 export type MainSessionExchangeResponse = z.infer<typeof mainSessionExchangeResponseSchema>;
 export type BillingReservationCreateRequest = z.infer<typeof billingReservationCreateRequestSchema>;

@@ -72,6 +72,11 @@
 | `desktop_load_website_loras` | desktop webview | desktop core/api | 使用 Credential Manager 设备会话读取当前账号可访问的公开 LoRA 与本人私有 LoRA；返回 SHA-256、大小、触发词和本机安装状态，不向 WebView 暴露会话密钥 |
 | `desktop_install_website_lora` | desktop webview | desktop core/api | 按 LoRA 条目 ID 重新鉴权，使用 HTTP Range 断点下载最新有效 safetensors，完成整体 SHA-256 后原子导入本机仓库 |
 | `desktop-website-lora-progress` | desktop core | desktop webview | 网站 LoRA 下载与校验进度事件；对应 `DesktopWebsiteLoraInstallProgress` |
+| `desktop_software_update_status` | desktop webview | desktop core | 验签稳定通道资源清单并对比当前安装包语义版本；重启后依据实际运行版本收敛 `applying` 记录，不以进程启动成功伪造安装成功 |
+| `desktop_download_software_update` | desktop webview | desktop core | 复用依赖来源策略、低速切源、Range 断点与 SHA-256 校验下载签名清单中的 Windows NSIS 更新包 |
+| `desktop_import_offline_update` | desktop webview | desktop core | 同时选择 NSIS 安装包和离线 Ed25519 签名信封；验证 key ID、签名、有效期、平台、版本、大小与 SHA-256 后写入同一受控缓存 |
+| `desktop_apply_software_update` | desktop webview | desktop core | 持久化 `staged/applying` 后启动当前用户静默 NSIS 更新辅助进程并退出应用；模型、LoRA、任务、账号和图库 SQLite 保持原目录不变 |
+| `desktop_rollback_software_update` | desktop webview | desktop core | 仅对仍保留且通过原签名清单校验的上一版本安装包执行相同静默安装；没有可信缓存时保持入口关闭 |
 | `desktop-gallery-sync-updated` | desktop core/gallery sync worker | desktop webview | 图库分片上传、等待登录、网络重试或发布终态变化事件；载荷为最新 `DesktopGallerySyncItem` |
 | `POST /v1/desktop/gallery/uploads` | desktop core | api | 使用设备会话按账号、桌面任务 ID 与产物 SHA-256 幂等创建上传会话；固化隐私、尺寸、提示词、模型和参数快照，返回服务端真实偏移与 4 MiB 分片大小 |
 | `GET/PUT /v1/desktop/gallery/uploads/:id` | desktop core | api | 查询真实断点或按 `x-upload-offset` 追加单个分片；上传会话严格绑定创建账号，偏移冲突返回服务端真实偏移 |

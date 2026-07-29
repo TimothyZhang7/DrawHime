@@ -1399,6 +1399,36 @@ select:focus-visible {
 .website-lora-grid span,
 .website-lora-grid > article > small { color: var(--muted); font-size: 7px; }
 
+/* 软件更新把版本、签名状态、在线操作和离线恢复拆成清晰的两张响应式卡片。 */
+.updates-page { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(300px, .65fr); gap: 12px; }
+.update-overview > header > b { padding: 5px 8px; border-radius: 4px; background: var(--accent-soft); color: var(--accent); font-size: 8px; }
+.update-overview > header > b.is-up_to_date { background: var(--success-soft); color: var(--success); }
+.update-overview > header > b.is-failed,
+.update-overview > header > b.is-unavailable { background: var(--danger-soft); color: var(--danger); }
+.update-version { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 16px; padding: 18px; border: 1px solid var(--border); border-radius: 5px; background: var(--panel-raised); }
+.update-version > div { display: grid; gap: 4px; }
+.update-version > div:last-child { text-align: right; }
+.update-version span { color: var(--muted); font-size: 8px; }
+.update-version strong { font-size: clamp(19px, 2.4vw, 30px); letter-spacing: -.03em; }
+.update-version > svg { width: 19px; color: var(--accent); }
+.update-overview > section { margin-top: 12px; padding: 12px; border-left: 3px solid var(--accent); background: var(--accent-soft); }
+.update-overview > section strong { font-size: 9px; }
+.update-overview > section p,
+.update-recovery > p { margin: 6px 0 0; color: var(--muted); font-size: 8px; line-height: 1.7; white-space: pre-wrap; }
+.update-warning { display: flex; align-items: center; gap: 8px; margin-top: 10px; color: var(--danger); font-size: 8px; }
+.update-warning svg { width: 16px; flex: none; }
+.update-actions,
+.update-recovery > div { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.update-actions button,
+.update-recovery button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 34px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: 4px; background: var(--panel-raised); color: var(--text); font-size: 8px; font-weight: 800; }
+.update-actions button.primary { background: var(--accent); color: var(--button-text); }
+.update-recovery button.danger { color: var(--danger); }
+.update-actions button:disabled,
+.update-recovery button:disabled { cursor: not-allowed; opacity: .5; }
+.update-actions svg,
+.update-recovery button svg { width: 14px; }
+.update-recovery > header > svg { color: var(--success); }
+
 /* 本地训练集使用固定步骤事实源；图片、Caption 和确认状态在紧凑窗口仍保持可操作。 */
 .training-page {
   display: grid;
@@ -2656,6 +2686,8 @@ select:focus-visible {
   .local-job-grid {
     grid-template-columns: 1fr;
   }
+
+  .updates-page { grid-template-columns: 1fr; }
 
   .training-create > div,
   .training-dataset-list {

@@ -43,7 +43,7 @@ pub fn load_catalog(settings: &DesktopSettings, app_data_dir: &Path) -> Result<D
     };
     let payload = fetch_verified_manifest(manifest_url, key_id, public_key)?;
     let cache_dir = resource_cache_dir(app_data_dir);
-    let resources = payload.resources.iter().filter(|item| resource_matches_current_platform(item)).map(|item| {
+    let resources = payload.resources.iter().filter(|item| item.kind != "application" && resource_matches_current_platform(item)).map(|item| {
         let target = cache_dir.join(&item.file_name);
         let installed = installed_resource_matches(item, settings);
         DesktopResourceCatalogItemView {
@@ -75,6 +75,8 @@ fn install_resource_inner(settings: &DesktopSettings, app_data_dir: &Path, resou
     let Some((manifest_url, key_id, public_key)) = manifest_configuration() else { return Err("当前安装包尚未配置经过签名的资源发布通道".into()); };
     let payload = fetch_verified_manifest(manifest_url, key_id, public_key)?;
     let item = payload.resources.iter().find(|candidate| candidate.id == resource_id && resource_matches_current_platform(candidate)).cloned().ok_or_else(|| "资源不存在或不适用于当前系统".to_string())?;
+    // 应用程序包只能经过软件更新控制器重新验签并启动，禁止作为普通依赖写入模型目录。
+    if item.kind == "application" { return Err("应用程序包请在软件更新页面应用".into()); }
     let cache = resource_cache_dir(app_data_dir).join(&item.file_name);
     let notify = |view| emit_install_progress(app, view);
     let view = install_cached_resource(settings, &item, &cache, &notify)?;
@@ -181,7 +183,64 @@ fn manifest_configuration() -> Option<(&'static str, &'static str, &'static str)
     (!MANIFEST_URL.is_empty() && !MANIFEST_KEY_ID.is_empty() && !MANIFEST_PUBLIC_KEY.is_empty()).then_some((MANIFEST_URL, MANIFEST_KEY_ID, MANIFEST_PUBLIC_KEY))
 }
 
+/** 为软件更新控制器读取同一固定公钥验签后的在线清单。 */
+pub(crate) fn verified_manifest() -> Result<DesktopResourceManifestPayload, String> {
+    let Some((manifest_url, key_id, public_key)) = manifest_configuration() else { return Err("当前安装包尚未配置经过签名的更新通道".into()); };
+    fetch_verified_manifest(manifest_url, key_id, public_key)
+}
+
+/** 返回资源受控缓存路径，调用方仍需使用签名条目校验。 */
+pub(crate) fn cached_resource_path(app_data_dir: &Path, item: &DesktopResourceManifestItem) -> PathBuf { resource_cache_dir(app_data_dir).join(&item.file_name) }
+
+/** 导入离线 NSIS 包及其 Ed25519 信封，验证完成后写入与在线下载相同的受控缓存。 */
+pub(crate) fn import_offline_application(app_data_dir: &Path, installer_path: &Path, envelope_path: &Path) -> Result<DesktopResourceManifestItem, String> {
+    if !installer_path.is_file() || !envelope_path.is_file() { return Err("离线更新安装包或签名信封不存在".into()); }
+    let item = verify_offline_application(installer_path, envelope_path)?;
+    let cache_dir = resource_cache_dir(app_data_dir);
+    fs::create_dir_all(&cache_dir).map_err(|error| format!("创建更新缓存目录失败：{error}"))?;
+    let target = cache_dir.join(&item.file_name);
+    let target_envelope = offline_envelope_path(&target);
+    let nonce = Uuid::new_v4();
+    let temporary = cache_dir.join(format!("{}.offline-{nonce}", item.file_name));
+    let temporary_envelope = cache_dir.join(format!("{}.envelope-{nonce}", item.file_name));
+    fs::copy(installer_path, &temporary).map_err(|error| format!("复制离线更新包失败：{error}"))?;
+    if let Err(error) = fs::copy(envelope_path, &temporary_envelope) {
+        let _ = fs::remove_file(&temporary);
+        return Err(format!("复制离线更新签名失败：{error}"));
+    }
+    if target.exists() { quarantine_file(&target, "replaced")?; }
+    if target_envelope.exists() { quarantine_file(&target_envelope, "replaced")?; }
+    fs::rename(&temporary, &target).map_err(|error| format!("提交离线更新缓存失败：{error}"))?;
+    fs::rename(&temporary_envelope, &target_envelope).map_err(|error| format!("提交离线更新签名失败：{error}"))?;
+    write_verified_marker(&target, &item)?;
+    Ok(item)
+}
+
+/** 重新验证离线包签名与完整性，应用更新前不得只信任 SQLite 或验证标记。 */
+pub(crate) fn verify_offline_application(installer_path: &Path, envelope_path: &Path) -> Result<DesktopResourceManifestItem, String> {
+    verify_application_package(installer_path, envelope_path, MANIFEST_KEY_ID, MANIFEST_PUBLIC_KEY)
+}
+
+fn verify_application_package(installer_path: &Path, envelope_path: &Path, expected_key_id: &str, public_key: &str) -> Result<DesktopResourceManifestItem, String> {
+    let envelope_bytes = fs::read(envelope_path).map_err(|error| format!("读取离线更新签名失败：{error}"))?;
+    if envelope_bytes.len() as u64 > MAX_MANIFEST_BYTES { return Err("离线更新签名信封超过大小限制".into()); }
+    let envelope: DesktopResourceManifestEnvelope = serde_json::from_slice(&envelope_bytes).map_err(|error| format!("解析离线更新签名失败：{error}"))?;
+    let payload = verify_manifest(envelope, expected_key_id, public_key)?;
+    let file_name = installer_path.file_name().and_then(|value| value.to_str()).ok_or_else(|| "离线更新文件名不正确".to_string())?;
+    let item = payload.resources.into_iter().find(|item| item.kind == "application" && item.file_name == file_name && resource_matches_current_platform(item)).ok_or_else(|| "签名信封没有登记该 Windows 安装包".to_string())?;
+    if !file_matches(installer_path, &item)? { return Err("离线更新安装包大小或 SHA-256 与签名不一致".into()); }
+    Ok(item)
+}
+
+/** 离线签名信封与安装包同目录保存，回滚和应用时都重新验签。 */
+pub(crate) fn offline_envelope_path(installer_path: &Path) -> PathBuf { installer_path.with_file_name(format!("{}.envelope.json", installer_path.file_name().unwrap_or_default().to_string_lossy())) }
+
 fn fetch_verified_manifest(manifest_url: &str, expected_key_id: &str, public_key: &str) -> Result<DesktopResourceManifestPayload, String> {
+    verify_manifest(fetch_manifest_envelope(manifest_url)?, expected_key_id, public_key)
+}
+
+/** 有界读取 HTTPS 清单信封；签名验证由调用方在返回后立即执行。 */
+fn fetch_manifest_envelope(manifest_url: &str) -> Result<DesktopResourceManifestEnvelope, String> {
     let url = Url::parse(manifest_url).map_err(|_| "资源清单地址格式不正确".to_string())?;
     if url.scheme() != "https" { return Err("资源清单必须使用 HTTPS".into()); }
     let client = Client::builder().connect_timeout(Duration::from_secs(5)).timeout(Duration::from_secs(12)).user_agent("DrawHime-Desktop/0.1").build().map_err(|error| format!("创建清单客户端失败：{error}"))?;
@@ -193,8 +252,22 @@ fn fetch_verified_manifest(manifest_url: &str, expected_key_id: &str, public_key
     if bytes.len() as u64 > MAX_MANIFEST_BYTES { return Err("资源清单超过大小限制".into()); }
     let wrapper: ManifestApiResponse = serde_json::from_slice(&bytes).map_err(|error| format!("解析资源清单响应失败：{error}"))?;
     if !wrapper.ok { return Err(wrapper.message.unwrap_or_else(|| "资源服务返回失败状态".into())); }
-    let envelope = wrapper.data.ok_or_else(|| "资源服务未返回签名清单".to_string())?;
-    verify_manifest(envelope, expected_key_id, public_key)
+    wrapper.data.ok_or_else(|| "资源服务未返回签名清单".to_string())
+}
+
+/** 保存当前在线清单的原始签名信封，使已下载版本在后续回滚时仍可重新验签。 */
+pub(crate) fn persist_online_application_envelope(app_data_dir: &Path, item: &DesktopResourceManifestItem) -> Result<PathBuf, String> {
+    let Some((manifest_url, key_id, public_key)) = manifest_configuration() else { return Err("当前安装包尚未配置经过签名的更新通道".into()); };
+    let envelope = fetch_manifest_envelope(manifest_url)?;
+    let payload = verify_manifest(envelope.clone(), key_id, public_key)?;
+    if !payload.resources.iter().any(|candidate| candidate.id == item.id && candidate.file_name == item.file_name && candidate.sha256 == item.sha256 && candidate.byte_size == item.byte_size && candidate.version == item.version) { return Err("在线签名清单已切换到其他更新版本".into()); }
+    let installer = cached_resource_path(app_data_dir, item);
+    let target = offline_envelope_path(&installer);
+    let temporary = target.with_file_name(format!("{}.tmp-{}", target.file_name().unwrap_or_default().to_string_lossy(), Uuid::new_v4()));
+    fs::write(&temporary, serde_json::to_vec(&envelope).map_err(|error| format!("序列化更新签名失败：{error}"))?).map_err(|error| format!("保存在线更新签名失败：{error}"))?;
+    if target.exists() { quarantine_file(&target, "replaced")?; }
+    fs::rename(&temporary, &target).map_err(|error| format!("提交在线更新签名失败：{error}"))?;
+    Ok(target)
 }
 
 fn verify_manifest(envelope: DesktopResourceManifestEnvelope, expected_key_id: &str, public_key: &str) -> Result<DesktopResourceManifestPayload, String> {
@@ -244,7 +317,7 @@ fn validate_model_groups(items: &[DesktopResourceManifestItem]) -> Result<(), St
 
 fn validate_item(item: &DesktopResourceManifestItem) -> Result<(), String> {
     if item.id.len() < 2 || item.id.len() > 128 || !item.id.chars().all(|character| character.is_ascii_lowercase() || character.is_ascii_digit() || matches!(character, '.' | '_' | '-')) { return Err("资源 ID 不符合约束".into()); }
-    if !matches!(item.kind.as_str(), "runtime" | "model" | "lora" | "captioner" | "trainer") { return Err(format!("资源类型不受支持：{}", item.id)); }
+    if !matches!(item.kind.as_str(), "runtime" | "model" | "lora" | "captioner" | "trainer" | "application") { return Err(format!("资源类型不受支持：{}", item.id)); }
     if item.os != "windows" || !matches!(item.arch.as_str(), "x86_64" | "aarch64") { return Err(format!("资源平台字段不正确：{}", item.id)); }
     if item.file_name.len() < 2 || item.file_name.len() > 255 || !item.file_name.chars().all(|character| character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-')) { return Err(format!("资源文件名不安全：{}", item.id)); }
     validate_windows_relative_path(Path::new(&item.file_name)).map_err(|_| format!("资源文件名不适用于 Windows：{}", item.id))?;
@@ -252,6 +325,13 @@ fn validate_item(item: &DesktopResourceManifestItem) -> Result<(), String> {
     if !matches!(item.archive.as_str(), "raw" | "zip" | "7z") || item.sources.is_empty() || item.sources.len() > 8 { return Err(format!("资源归档或来源不正确：{}", item.id)); }
     if matches!(item.kind.as_str(), "model" | "lora") && (item.archive != "raw" || item.installed_size != item.byte_size) { return Err(format!("模型和 LoRA 必须使用声明大小一致的原始文件：{}", item.id)); }
     if matches!(item.kind.as_str(), "runtime" | "captioner" | "trainer") && item.archive == "raw" { return Err(format!("运行组件必须使用归档文件：{}", item.id)); }
+    if item.kind == "application" && (item.archive != "raw" || item.application_update.is_none() || !item.file_name.to_ascii_lowercase().ends_with(".exe")) { return Err(format!("应用更新必须是带版本元数据的原始 NSIS EXE：{}", item.id)); }
+    if let Some(metadata) = &item.application_update {
+        let version = semantic_version(&item.version).ok_or_else(|| format!("应用更新版本格式不正确：{}", item.id))?;
+        let minimum = semantic_version(&metadata.minimum_version).ok_or_else(|| format!("应用更新最低版本格式不正确：{}", item.id))?;
+        if minimum > version || metadata.release_notes.len() > 20_000 { return Err(format!("应用更新版本门禁或说明不正确：{}", item.id)); }
+    }
+    if item.kind != "application" && item.application_update.is_some() { return Err(format!("非应用资源不得声明软件更新元数据：{}", item.id)); }
     if item.archive == "raw" && item.root_directory.is_some() { return Err(format!("原始文件资源不得声明归档根目录：{}", item.id)); }
     if item.kind == "model" && (!matches!(item.install_directory.as_deref(), Some("checkpoints" | "diffusion_models" | "text_encoders" | "vae")) || item.model_registration.is_none()) { return Err(format!("模型资源缺少受控安装目录或组合登记：{}", item.id)); }
     if item.kind == "lora" && item.install_directory.as_deref().is_some_and(|directory| directory != "loras") { return Err(format!("LoRA 安装目录不正确：{}", item.id)); }
@@ -264,6 +344,11 @@ fn validate_item(item: &DesktopResourceManifestItem) -> Result<(), String> {
         if url.scheme() != "https" { return Err(format!("资源下载地址必须使用 HTTPS：{}", item.id)); }
     }
     Ok(())
+}
+
+fn semantic_version(value: &str) -> Option<(u64, u64, u64)> {
+    let values = value.split('.').map(str::parse::<u64>).collect::<Result<Vec<_>, _>>().ok()?;
+    (values.len() == 3).then_some((values[0], values[1], values[2]))
 }
 
 fn ordered_sources<'a>(item: &'a DesktopResourceManifestItem, preference: &str) -> Vec<&'a DesktopResourceSource> {
@@ -558,7 +643,54 @@ mod tests {
     use std::{net::TcpListener, thread};
 
     fn item() -> DesktopResourceManifestItem {
-        DesktopResourceManifestItem { id: "runtime.core".into(), kind: "runtime".into(), version: "1.0.0".into(), os: "windows".into(), arch: std::env::consts::ARCH.into(), file_name: "runtime.zip".into(), byte_size: 10, installed_size: 1024, sha256: "a".repeat(64), archive: "zip".into(), root_directory: None, install_directory: None, model_registration: None, required: true, sources: vec![DesktopResourceSource { kind: "mirror".into(), url: "https://mirror.example/runtime.zip".into() }, DesktopResourceSource { kind: "official".into(), url: "https://official.example/runtime.zip".into() }] }
+        DesktopResourceManifestItem { id: "runtime.core".into(), kind: "runtime".into(), version: "1.0.0".into(), os: "windows".into(), arch: std::env::consts::ARCH.into(), file_name: "runtime.zip".into(), byte_size: 10, installed_size: 1024, sha256: "a".repeat(64), archive: "zip".into(), root_directory: None, install_directory: None, model_registration: None, application_update: None, required: true, sources: vec![DesktopResourceSource { kind: "mirror".into(), url: "https://mirror.example/runtime.zip".into() }, DesktopResourceSource { kind: "official".into(), url: "https://official.example/runtime.zip".into() }] }
+    }
+
+    fn application_item(bytes: &[u8]) -> DesktopResourceManifestItem {
+        DesktopResourceManifestItem {
+            id: "application.desktop.stable".into(),
+            kind: "application".into(),
+            version: "0.2.0".into(),
+            os: "windows".into(),
+            arch: std::env::consts::ARCH.into(),
+            file_name: "drawhime-update.exe".into(),
+            byte_size: bytes.len() as u64,
+            installed_size: bytes.len() as u64,
+            sha256: hex::encode(Sha256::digest(bytes)),
+            archive: "raw".into(),
+            root_directory: None,
+            install_directory: None,
+            model_registration: None,
+            application_update: Some(crate::models::DesktopApplicationUpdateMetadata {
+                minimum_version: "0.1.0".into(),
+                release_notes: "测试签名更新".into(),
+                mandatory: false,
+            }),
+            required: false,
+            sources: vec![DesktopResourceSource {
+                kind: "mirror".into(),
+                url: "https://mirror.example/drawhime-update.exe".into(),
+            }],
+        }
+    }
+
+    fn signed_application_envelope(
+        item: DesktopResourceManifestItem,
+        signing_key: &SigningKey,
+    ) -> DesktopResourceManifestEnvelope {
+        let payload = serde_json::to_string(&DesktopResourceManifestPayload {
+            schema_version: 1,
+            channel: "stable".into(),
+            generated_at: Utc::now().to_rfc3339(),
+            expires_at: (Utc::now() + ChronoDuration::hours(1)).to_rfc3339(),
+            resources: vec![item],
+        })
+        .expect("序列化应用更新测试清单");
+        DesktopResourceManifestEnvelope {
+            key_id: "test".into(),
+            signature: BASE64.encode(signing_key.sign(payload.as_bytes()).to_bytes()),
+            payload,
+        }
     }
 
     #[test]
@@ -577,6 +709,46 @@ mod tests {
         let public_key = BASE64.encode(signing_key.verifying_key().to_bytes());
         assert!(verify_manifest(DesktopResourceManifestEnvelope { key_id: "test".into(), payload: payload.clone(), signature: signature.clone() }, "test", &public_key).is_ok());
         assert!(verify_manifest(DesktopResourceManifestEnvelope { key_id: "test".into(), payload: format!("{payload} "), signature }, "test", &public_key).is_err());
+    }
+
+    #[test]
+    fn application_resource_requires_complete_update_metadata() {
+        let mut application = application_item(b"signed-installer");
+        application.application_update = None;
+        assert!(validate_item(&application).is_err());
+        application.application_update = Some(crate::models::DesktopApplicationUpdateMetadata {
+            minimum_version: "0.3.0".into(),
+            release_notes: "最低版本高于目标版本".into(),
+            mandatory: false,
+        });
+        assert!(validate_item(&application).is_err());
+    }
+
+    #[test]
+    fn offline_application_rejects_tampered_envelope() {
+        let temporary = tempfile::tempdir().expect("创建离线更新篡改测试目录");
+        let installer = temporary.path().join("drawhime-update.exe");
+        fs::write(&installer, b"signed-installer").expect("写入测试安装包");
+        let signing_key = SigningKey::from_bytes(&[9_u8; 32]);
+        let mut envelope = signed_application_envelope(application_item(b"signed-installer"), &signing_key);
+        envelope.payload.push(' ');
+        let envelope_path = temporary.path().join("update.envelope.json");
+        fs::write(&envelope_path, serde_json::to_vec(&envelope).expect("序列化篡改信封")).expect("写入篡改信封");
+        let public_key = BASE64.encode(signing_key.verifying_key().to_bytes());
+        assert!(verify_application_package(&installer, &envelope_path, "test", &public_key).is_err());
+    }
+
+    #[test]
+    fn offline_application_rejects_installer_sha256_mismatch() {
+        let temporary = tempfile::tempdir().expect("创建离线更新哈希测试目录");
+        let installer = temporary.path().join("drawhime-update.exe");
+        fs::write(&installer, b"broken-installer").expect("写入被替换安装包");
+        let signing_key = SigningKey::from_bytes(&[11_u8; 32]);
+        let envelope = signed_application_envelope(application_item(b"signed-installer"), &signing_key);
+        let envelope_path = temporary.path().join("update.envelope.json");
+        fs::write(&envelope_path, serde_json::to_vec(&envelope).expect("序列化签名信封")).expect("写入签名信封");
+        let public_key = BASE64.encode(signing_key.verifying_key().to_bytes());
+        assert!(verify_application_package(&installer, &envelope_path, "test", &public_key).is_err());
     }
 
     #[test]
@@ -705,6 +877,7 @@ mod tests {
             root_directory: Some("drawhime-wd-vit-tagger-v3".into()),
             install_directory: None,
             model_registration: None,
+            application_update: None,
             required: true,
             sources: vec![DesktopResourceSource { kind: "mirror".into(), url: "https://www.xanime.ink/local-model-api/v1/desktop/resources/captioner.wd-vit-tagger-v3/content".into() }],
         };
@@ -728,7 +901,7 @@ mod tests {
         let Ok(archive_path) = std::env::var("DRAWHIME_TRAINER_TEST_ARCHIVE") else { return; };
         let temporary = tempfile::tempdir().expect("创建 Trainer 安装目录");
         let item = DesktopResourceManifestItem {
-            id: "trainer.anima-sd-scripts".into(), kind: "trainer".into(), version: "anima-sd-scripts-37a1cbbc5725-py312-v2".into(), os: "windows".into(), arch: std::env::consts::ARCH.into(), file_name: "drawhime-anima-trainer-win-x64-v2.zip".into(), byte_size: 162_338_622, installed_size: 506_199_484, sha256: "c8344e24c9c54feffa02ea79253cae543220a0072165bd2e03b48721678dc993".into(), archive: "zip".into(), root_directory: Some("drawhime-anima-trainer".into()), install_directory: None, model_registration: None, required: true, sources: vec![DesktopResourceSource { kind: "mirror".into(), url: "https://www.xanime.ink/local-model-api/v1/desktop/resources/trainer.anima-sd-scripts/content".into() }],
+            id: "trainer.anima-sd-scripts".into(), kind: "trainer".into(), version: "anima-sd-scripts-37a1cbbc5725-py312-v2".into(), os: "windows".into(), arch: std::env::consts::ARCH.into(), file_name: "drawhime-anima-trainer-win-x64-v2.zip".into(), byte_size: 162_338_622, installed_size: 506_199_484, sha256: "c8344e24c9c54feffa02ea79253cae543220a0072165bd2e03b48721678dc993".into(), archive: "zip".into(), root_directory: Some("drawhime-anima-trainer".into()), install_directory: None, model_registration: None, application_update: None, required: true, sources: vec![DesktopResourceSource { kind: "mirror".into(), url: "https://www.xanime.ink/local-model-api/v1/desktop/resources/trainer.anima-sd-scripts/content".into() }],
         };
         let runtime_root = temporary.path().join("runtime");
         fs::create_dir_all(runtime_root.join("current").join("python_embeded")).expect("创建测试 Runtime");
@@ -758,7 +931,7 @@ mod tests {
         for (role, directory, file_name, bytes) in definitions {
             let cache = temporary.path().join(format!("cache-{role}.safetensors"));
             fs::write(&cache, bytes).expect("写入模型缓存");
-            let item = DesktopResourceManifestItem { id: format!("model.test.{role}"), kind: "model".into(), version: "1".into(), os: "windows".into(), arch: std::env::consts::ARCH.into(), file_name: file_name.into(), byte_size: bytes.len() as u64, installed_size: bytes.len() as u64, sha256: hex::encode(Sha256::digest(bytes)), archive: "raw".into(), root_directory: None, install_directory: Some(directory.into()), model_registration: Some(crate::models::DesktopResourceModelRegistration { group_id: "model.test".into(), display_name: "测试 Anima".into(), family: "anima".into(), workflow_kind: "anima".into(), role: role.into() }), required: true, sources: vec![DesktopResourceSource { kind: "mirror".into(), url: format!("https://mirror.example/{file_name}") }] };
+            let item = DesktopResourceManifestItem { id: format!("model.test.{role}"), kind: "model".into(), version: "1".into(), os: "windows".into(), arch: std::env::consts::ARCH.into(), file_name: file_name.into(), byte_size: bytes.len() as u64, installed_size: bytes.len() as u64, sha256: hex::encode(Sha256::digest(bytes)), archive: "raw".into(), root_directory: None, install_directory: Some(directory.into()), model_registration: Some(crate::models::DesktopResourceModelRegistration { group_id: "model.test".into(), display_name: "测试 Anima".into(), family: "anima".into(), workflow_kind: "anima".into(), role: role.into() }), application_update: None, required: true, sources: vec![DesktopResourceSource { kind: "mirror".into(), url: format!("https://mirror.example/{file_name}") }] };
             install_cached_resource(&settings, &item, &cache, &|_| {}).expect("安装模型组合文件");
             items.push(item);
         }

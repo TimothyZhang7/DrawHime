@@ -468,9 +468,25 @@ pub struct DesktopResourceManifestItem {
     pub root_directory: Option<String>,
     pub install_directory: Option<String>,
     pub model_registration: Option<DesktopResourceModelRegistration>,
+    pub application_update: Option<DesktopApplicationUpdateMetadata>,
     pub required: bool,
     pub sources: Vec<DesktopResourceSource>,
 }
+
+/** 签名清单中 application 更新包的版本门禁和用户说明。 */
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopApplicationUpdateMetadata { pub minimum_version: String, pub release_notes: String, pub mandatory: bool }
+
+/** 桌面软件更新检查、下载、暂存、应用和回滚视图。 */
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopSoftwareUpdateView { pub current_version: String, pub latest_version: Option<String>, pub status: String, pub mandatory: bool, pub release_notes: Option<String>, pub byte_size: u64, pub downloaded_bytes: u64, pub rollback_version: Option<String>, pub error: Option<String> }
+
+/** 离线更新安装包与签名信封输入。 */
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopOfflineUpdateImportInput { pub installer_path: String, pub envelope_path: String }
 
 /** 签名清单中把多个原始文件组合为一个可用底模的登记元数据。 */
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -494,7 +510,7 @@ pub struct DesktopResourceManifestPayload {
 }
 
 /** 服务端返回的资源清单签名信封。 */
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DesktopResourceManifestEnvelope { pub key_id: String, pub payload: String, pub signature: String }
 
