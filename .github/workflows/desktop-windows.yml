@@ -67,7 +67,7 @@ jobs:
         run: pnpm --filter @drawhime/desktop run tauri:build
 
       - name: 校验安装包边界
-        shell: powershell
+        shell: pwsh
         run: |
           $bundleDirectory = Join-Path $PWD "apps/desktop/src-tauri/target/release/bundle/nsis"
           if (-not (Test-Path -LiteralPath $bundleDirectory -PathType Container)) { throw "NSIS 输出目录不存在：$bundleDirectory" }
