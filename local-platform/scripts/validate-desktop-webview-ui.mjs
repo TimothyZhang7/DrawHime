@@ -2,7 +2,7 @@
  * 本文件通过本机 WebView2 调试协议验证桌面环境横幅、能力锁定和核心提交门禁，不读取用户业务数据。
  */
 import { spawn, spawnSync } from "node:child_process";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import net from "node:net";
 import path from "node:path";
 
@@ -11,9 +11,10 @@ const executable = requiredArgument(argumentsMap, "executable");
 const evidencePath = argumentsMap.get("evidence") || null;
 const expectNoGpu = argumentsMap.has("expect-no-gpu");
 const port = await reservePort();
+const userDataDirectory = path.join(process.env.TEMP || process.cwd(), `drawhime-webview-probe-${process.pid}-${port}`);
 const additionalArguments = [`--remote-debugging-port=${port}`, "--remote-allow-origins=*"].join(" ");
 const child = spawn(executable, [], {
-  env: { ...process.env, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: additionalArguments },
+  env: { ...process.env, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: additionalArguments, WEBVIEW2_USER_DATA_FOLDER: userDataDirectory },
   stdio: "ignore",
   windowsHide: false,
 });
@@ -22,7 +23,7 @@ try {
   const target = await waitForWebViewTarget(port, child);
   const client = await connectCdp(target.webSocketDebuggerUrl);
   try {
-    const result = await client.evaluate(buildProbeExpression());
+    const result = await evaluateAfterInitialReload(client, buildProbeExpression());
     validateProbe(result, expectNoGpu);
     const evidence = {
       checkedAt: new Date().toISOString(),
@@ -44,6 +45,7 @@ try {
   }
 } finally {
   terminateProcessTree(child.pid);
+  await rm(userDataDirectory, { recursive: true, force: true });
 }
 
 /** 解析严格的 --key value 与布尔参数，未知位置参数直接拒绝。 */
@@ -172,6 +174,20 @@ function buildProbeExpression() {
       coreSubmissionError,
     };
   })()`;
+}
+
+/** WebView2 首次建立独立用户目录时可能发生一次页面重载，只对该瞬态错误进行有限重试。 */
+async function evaluateAfterInitialReload(client, expression) {
+  let lastError = null;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try { return await client.evaluate(expression); }
+    catch (error) {
+      lastError = error;
+      if (!String(error).includes("Execution context was destroyed")) throw error;
+      await delay(500);
+    }
+  }
+  throw lastError || new Error("WebView 初始页面未稳定");
 }
 
 /** 对无 GPU Runner 执行强门禁；其他硬件仍至少要求导航横幅状态一致。 */
