@@ -7,6 +7,7 @@ on:
     paths:
       - ".github/workflows/desktop-windows.yml"
       - "local-platform/apps/desktop/**"
+      - "local-platform/scripts/validate-desktop-windows-host.ps1"
       - "local-platform/packages/contracts/**"
       - "local-platform/package.json"
       - "local-platform/pnpm-lock.yaml"

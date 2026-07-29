@@ -1,4 +1,4 @@
-<#
+﻿<#
 本文件在真实 Windows 主机执行桌面安装、WebView2、DPI、数据保留和启动门禁，并输出脱敏 JSON 证据。
 #>
 [CmdletBinding()]
