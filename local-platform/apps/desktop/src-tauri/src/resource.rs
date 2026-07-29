@@ -105,7 +105,7 @@ fn install_cached_resource<F: Fn(DesktopResourceInstallView)>(settings: &Desktop
     fs::create_dir_all(parent).map_err(|error| format!("创建资源安装目录失败：{error}"))?;
     let required_space = item.installed_size.saturating_add(256 * 1024 * 1024);
     let available = available_space(parent).map_err(|error| format!("读取安装磁盘空间失败：{error}"))?;
-    if available < required_space { return Err(format!("安装磁盘空间不足：至少需要 {} MiB 可用空间", required_space / 1024 / 1024)); }
+    ensure_sufficient_space(available, required_space)?;
     let staging = parent.join(format!(".drawhime-install-{}-{}", item.id, Uuid::new_v4()));
     notify(install_view(&item.id, "installing", 10, Some(&destination), None, None));
     let install_candidate = if item.archive != "raw" {
@@ -141,6 +141,12 @@ fn install_cached_resource<F: Fn(DesktopResourceInstallView)>(settings: &Desktop
     let view = install_view(&item.id, "installed", 100, Some(&destination), backup.as_deref(), None);
     notify(view.clone());
     Ok(view)
+}
+
+/** 在写入临时目录前统一执行磁盘容量门禁，避免覆盖现有 Runtime 或模型。 */
+fn ensure_sufficient_space(available: u64, required: u64) -> Result<(), String> {
+    if available < required { return Err(format!("安装磁盘空间不足：至少需要 {} MiB 可用空间", required / 1024 / 1024)); }
+    Ok(())
 }
 
 /** 下载单个资源并保存断点；只有整体哈希匹配后才写入已验证标记。 */
@@ -780,6 +786,13 @@ mod tests {
         let mut item = item();
         item.sources[1].url = item.sources[0].url.clone();
         assert!(validate_item(&item).is_err());
+    }
+
+    #[test]
+    fn disk_space_gate_rejects_installation_before_writing() {
+        let required = 512 * 1024 * 1024;
+        assert!(ensure_sufficient_space(required - 1, required).is_err());
+        assert!(ensure_sufficient_space(required, required).is_ok());
     }
 
     #[test]

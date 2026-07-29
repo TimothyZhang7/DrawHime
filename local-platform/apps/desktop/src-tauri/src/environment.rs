@@ -23,25 +23,15 @@ pub fn inspect_environment(settings: &DesktopSettings) -> DesktopEnvironmentRepo
     if !os_supported {
         issues.push(issue("windows_version_unsupported", "critical", "当前 Windows 版本不在支持范围", "首版要求 Windows 10 1809 及以后版本或 Windows 11 x64。", "查看系统升级要求"));
     }
-    if gpus.is_empty() {
-        issues.push(issue("gpu_missing", "critical", "未检测到可用 NVIDIA GPU", "本地生成和 LoRA 训练保持暂停；模型管理、训练集与手动标签仍可使用。", "检查 GPU 与驱动"));
-    } else if gpus.iter().all(|gpu| gpu.memory_total_bytes < MINIMUM_GPU_MEMORY_BYTES) {
-        issues.push(issue("gpu_memory_insufficient", "critical", "GPU 显存低于首版运行要求", "当前检测到的 NVIDIA GPU 均少于 6GB 独立显存，生成和训练保持暂停。", "查看显存要求"));
-    }
-    if let Some(gpu) = gpus.first() {
-        if gpu.memory_free_bytes < 1024 * MIB { issues.push(issue("gpu_busy", "warning", "GPU 当前可用显存很低", "其他程序正在大量占用显存，提交任务前需要释放显存。", "关闭占用 GPU 的程序")); }
-    }
+    let (gpu_supported, training_gpu_supported, low_free_memory) = evaluate_gpu_state(&gpus, &mut issues);
     if runtime.status == "not_installed" { issues.push(issue("runtime_missing", "warning", "本地 Runtime 尚未安装", "桌面核心和硬件检测可用；安装经过签名的推理、训练环境后才开放 GPU 任务。", "安装运行环境")); }
     if runtime.status == "installed_unverified" { issues.push(issue("runtime_unverified", "warning", "本地 Runtime 等待自检", "已发现 Runtime 清单，但尚未记录完整推理和训练自检结果。", "执行环境自检")); }
     if runtime.status == "broken" { issues.push(issue("runtime_broken", "critical", "本地 Runtime 清单损坏", "Runtime 清单不能读取或状态无效，生成和训练保持暂停。", "修复运行环境")); }
     if runtime.status == "ready" && !generation_assets_ready { issues.push(issue("generation_model_missing", "warning", "尚未安装可生成的底模", "Runtime 已通过基础自检，但模型目录缺少完整底模资产，生成和训练保持暂停。", "前往资源安装")); }
     if runtime.installed && !captioner_ready { issues.push(issue("captioner_missing", "warning", "离线自动打标组件尚未安装", "手动 Caption 仍可使用；安装签名 WD14 组件后可批量自动打标。", "前往资源安装")); }
     if runtime.installed && !trainer_ready { issues.push(issue("trainer_missing", "warning", "本地 LoRA Trainer 尚未安装", "训练集和 Caption 仍可整理；安装签名 Trainer 组件后才开放真实 LoRA 训练。", "前往资源安装")); }
-    let gpu_supported = gpus.iter().any(|gpu| gpu.memory_total_bytes >= MINIMUM_GPU_MEMORY_BYTES);
-    let training_gpu_supported = gpus.iter().any(|gpu| gpu.memory_total_bytes >= MINIMUM_TRAINING_GPU_MEMORY_BYTES);
     let runtime_ready = runtime.status == "ready";
     let runtime_installed = runtime.installed;
-    let low_free_memory = gpus.first().map(|gpu| gpu.memory_free_bytes < 1024 * MIB).unwrap_or(true);
     let status = if !os_supported || !gpu_supported || runtime.status == "broken" { "blocked" } else if !runtime.installed { "installable" } else if !runtime_ready || !generation_assets_ready || !captioner_ready || !trainer_ready || low_free_memory { "degraded" } else { "ready" };
     DesktopEnvironmentReport {
         status: status.into(),
@@ -55,6 +45,24 @@ pub fn inspect_environment(settings: &DesktopSettings) -> DesktopEnvironmentRepo
         capabilities: CapabilityView { inference: os_supported && gpu_supported && runtime_ready && generation_assets_ready && !low_free_memory, training: os_supported && training_gpu_supported && runtime_ready && anima_training_assets_ready && trainer_ready && !low_free_memory, captioning: os_supported && runtime_installed && captioner_ready, model_management: true },
         issues,
     }
+}
+
+/** 统一评估 GPU 门禁并生成可操作提示，确保无卡、低显存和繁忙状态使用同一真实逻辑。 */
+fn evaluate_gpu_state(gpus: &[GpuView], issues: &mut Vec<EnvironmentIssue>) -> (bool, bool, bool) {
+    let generation_supported = gpus.iter().any(|gpu| gpu.memory_total_bytes >= MINIMUM_GPU_MEMORY_BYTES);
+    let training_supported = gpus.iter().any(|gpu| gpu.memory_total_bytes >= MINIMUM_TRAINING_GPU_MEMORY_BYTES);
+    let low_free_memory = gpus.first().map(|gpu| gpu.memory_free_bytes < 1024 * MIB).unwrap_or(true);
+    if gpus.is_empty() {
+        issues.push(issue("gpu_missing", "critical", "未检测到可用 NVIDIA GPU", "本地生成和 LoRA 训练保持暂停；模型管理、训练集与手动标签仍可使用。", "检查 GPU 与驱动"));
+    } else if !generation_supported {
+        issues.push(issue("gpu_memory_insufficient", "critical", "GPU 显存低于首版运行要求", "当前检测到的 NVIDIA GPU 均少于 6GB 独立显存，生成和训练保持暂停。", "查看显存要求"));
+    } else if !training_supported {
+        issues.push(issue("training_gpu_memory_insufficient", "warning", "GPU 显存仅支持本地生成", "当前 GPU 可用于本地生成，但少于 8GB 独立显存，LoRA 训练保持暂停。", "查看训练显存要求"));
+    }
+    if !gpus.is_empty() && low_free_memory {
+        issues.push(issue("gpu_busy", "warning", "GPU 当前可用显存很低", "其他程序正在大量占用显存，提交任务前需要释放显存。", "关闭占用 GPU 的程序"));
+    }
+    (generation_supported, training_supported, low_free_memory)
 }
 
 fn windows_system_probe() -> WindowsSystemProbe {
@@ -141,5 +149,21 @@ mod tests {
         assert!(!windows_build_supported(Some("10.0.17763"), Some(17762)));
         assert!(windows_build_supported(Some("10.0.17763"), Some(17763)));
         assert!(!windows_build_supported(Some("6.3"), Some(9600)));
+    }
+
+    #[test]
+    fn gpu_gate_explains_missing_low_memory_and_generation_only_devices() {
+        let mut issues = Vec::new();
+        assert_eq!(evaluate_gpu_state(&[], &mut issues), (false, false, true));
+        assert!(issues.iter().any(|issue| issue.code == "gpu_missing"));
+
+        let gpu = |total_gib: u64, free_gib: u64| GpuView { index: 0, uuid: "test".into(), name: "测试 GPU".into(), vendor: "NVIDIA".into(), memory_total_bytes: total_gib * 1024 * MIB, memory_free_bytes: free_gib * 1024 * MIB, driver_version: "test".into(), compute_capability: Some("test".into()), temperature_celsius: Some(0.0), utilization_percent: Some(0.0) };
+        issues.clear();
+        assert_eq!(evaluate_gpu_state(&[gpu(4, 4)], &mut issues), (false, false, false));
+        assert!(issues.iter().any(|issue| issue.code == "gpu_memory_insufficient"));
+
+        issues.clear();
+        assert_eq!(evaluate_gpu_state(&[gpu(6, 6)], &mut issues), (true, false, false));
+        assert!(issues.iter().any(|issue| issue.code == "training_gpu_memory_insufficient"));
     }
 }
