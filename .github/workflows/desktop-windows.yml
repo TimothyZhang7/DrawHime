@@ -69,9 +69,13 @@ jobs:
       - name: 校验安装包边界
         shell: powershell
         run: |
-          $installers = @(Get-ChildItem "apps/desktop/src-tauri/target/release/bundle/nsis" -Filter "*_x64-setup.exe")
-          if ($installers.Count -ne 1) { throw "应当只生成一个 x64 NSIS 安装包" }
+          $bundleDirectory = Join-Path $PWD "apps/desktop/src-tauri/target/release/bundle/nsis"
+          if (-not (Test-Path -LiteralPath $bundleDirectory -PathType Container)) { throw "NSIS 输出目录不存在：$bundleDirectory" }
+          $installers = @(Get-ChildItem -LiteralPath $bundleDirectory -File -Filter "*.exe")
+          $installers | ForEach-Object { Write-Host "NSIS 文件：$($_.Name)，字节数：$($_.Length)" }
+          if ($installers.Count -ne 1) { throw "NSIS 输出目录应当只包含一个安装包，实际为 $($installers.Count) 个" }
           $installer = $installers[0]
-          if ($installer.Length -lt 150MB) { throw "安装包缺少 WebView2 离线载荷" }
+          if ($installer.Name -notmatch "_x64-setup\.exe$") { throw "安装包命名不符合 x64 NSIS 约定：$($installer.Name)" }
+          if ($installer.Length -lt 150MB) { throw "安装包缺少 WebView2 离线载荷，实际字节数：$($installer.Length)" }
           $summary = "### ${{ matrix.os }}`n- 安装包：$($installer.Name)`n- 字节数：$($installer.Length)`n- SHA-256：$((Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant())"
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value $summary -Encoding UTF8
