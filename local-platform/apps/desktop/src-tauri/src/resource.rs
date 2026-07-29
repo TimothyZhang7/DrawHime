@@ -491,6 +491,11 @@ fn validate_extracted_resource(item: &DesktopResourceManifestItem, staging: &Pat
             if !required.is_file() { return Err(format!("Captioner 归档缺少必需文件：{}", required.file_name().unwrap_or_default().to_string_lossy())); }
         }
     }
+    if item.kind == "trainer" {
+        for required in [staging.join("runner.py"), staging.join("sd-scripts").join("anima_train_network.py"), staging.join("sd-scripts").join("networks").join("lora_anima.py"), staging.join("site-packages").join("accelerate").join("__init__.py")] {
+            if !required.is_file() { return Err(format!("Trainer 归档缺少必需文件：{}", required.file_name().unwrap_or_default().to_string_lossy())); }
+        }
+    }
     Ok(())
 }
 
@@ -716,6 +721,32 @@ mod tests {
         assert!(root.join("site-packages/onnxruntime/__init__.py").is_file());
         assert!(installed_resource_matches(&item, &settings));
         assert!(crate::environment::inspect_environment(&settings).capabilities.captioning);
+    }
+
+    #[test]
+    fn published_trainer_zip_installs_anima_training_entry() {
+        let Ok(archive_path) = std::env::var("DRAWHIME_TRAINER_TEST_ARCHIVE") else { return; };
+        let temporary = tempfile::tempdir().expect("创建 Trainer 安装目录");
+        let item = DesktopResourceManifestItem {
+            id: "trainer.anima-sd-scripts".into(), kind: "trainer".into(), version: "anima-sd-scripts-37a1cbbc5725-py312-v1".into(), os: "windows".into(), arch: std::env::consts::ARCH.into(), file_name: "drawhime-anima-trainer-win-x64.zip".into(), byte_size: 162_338_184, installed_size: 506_197_873, sha256: "530b79b8b18caeddfa8c8097267aebe7e324908cd2553ed994456a80f17f1b23".into(), archive: "zip".into(), root_directory: Some("drawhime-anima-trainer".into()), install_directory: None, model_registration: None, required: true, sources: vec![DesktopResourceSource { kind: "mirror".into(), url: "https://www.xanime.ink/local-model-api/v1/desktop/resources/trainer.anima-sd-scripts/content".into() }],
+        };
+        let runtime_root = temporary.path().join("runtime");
+        fs::create_dir_all(runtime_root.join("current").join("python_embeded")).expect("创建测试 Runtime");
+        fs::write(runtime_root.join("current/runtime-manifest.json"), b"{\"status\":\"ready\"}").expect("写入测试 Runtime 清单");
+        fs::write(runtime_root.join("current/python_embeded/python.exe"), b"test").expect("写入测试 Python 标记");
+        let model_root = temporary.path().join("models");
+        for directory in ["diffusion_models", "text_encoders", "vae"] { fs::create_dir_all(model_root.join(directory)).expect("创建测试模型目录"); }
+        fs::write(model_root.join("diffusion_models/anima.safetensors"), b"test").expect("写入测试 DiT");
+        fs::write(model_root.join("text_encoders/qwen_3_06b_base.safetensors"), b"test").expect("写入测试文本编码器");
+        fs::write(model_root.join("vae/qwen_image_vae.safetensors"), b"test").expect("写入测试 VAE");
+        let settings = DesktopSettings { theme_mode: "system".into(), dependency_source: "auto".into(), default_privacy: "private".into(), model_root: model_root.to_string_lossy().into_owned(), output_root: temporary.path().join("outputs").to_string_lossy().into_owned(), runtime_root: runtime_root.to_string_lossy().into_owned(), upload_concurrency: 2, wifi_only: false, bandwidth_limit_kib: None };
+        let result = install_cached_resource(&settings, &item, Path::new(&archive_path), &|_| {}).expect("安装已发布 Trainer");
+        assert_eq!(result.status, "installed");
+        let root = PathBuf::from(result.install_path.expect("读取 Trainer 安装路径"));
+        assert!(root.join("runner.py").is_file());
+        assert!(root.join("sd-scripts/anima_train_network.py").is_file());
+        assert!(root.join("site-packages/accelerate/__init__.py").is_file());
+        assert!(installed_resource_matches(&item, &settings));
     }
 
     #[test]

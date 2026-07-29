@@ -908,6 +908,75 @@ export const desktopCaptionJobViewSchema = z.object({
   updatedAt: z.string().datetime(),
 });
 
+/** 桌面端真实 LoRA 训练任务固化的用户参数。 */
+export const desktopTrainingParametersSchema = z.object({
+  rank: z.number().int().min(8).max(64),
+  alpha: z.number().int().min(1).max(64),
+  epochs: z.number().int().min(1).max(20),
+  repeats: z.number().int().min(1).max(50),
+  resolution: z.number().int().min(512).max(1536).refine((value) => value % 64 === 0, "训练分辨率必须是 64 的倍数"),
+  learningRate: z.number().min(0.000001).max(0.01),
+  lrScheduler: z.enum(["constant", "cosine", "cosine_with_restarts"]),
+  warmupRatio: z.number().min(0).max(0.2),
+  gradientAccumulationSteps: z.number().int().min(1).max(4),
+  captionDropoutRate: z.number().min(0).max(0.3),
+  shuffleCaption: z.boolean(),
+  keepTokens: z.number().int().min(0).max(10),
+  seed: z.number().int().min(0).max(2147483647),
+});
+
+/** 桌面端创建真实 LoRA 训练任务的输入。 */
+export const desktopTrainingJobCreateInputSchema = z.object({
+  datasetId: z.string().uuid(),
+  modelId: z.string().uuid(),
+  title: z.string().trim().min(1).max(191),
+  parameters: desktopTrainingParametersSchema,
+});
+
+/** 桌面端训练尝试的持久化视图。 */
+export const desktopTrainingAttemptViewSchema = z.object({
+  id: z.string().uuid(),
+  attemptNumber: z.number().int().positive(),
+  status: z.enum(["running", "succeeded", "failed", "cancelled", "interrupted"]),
+  error: z.string().nullable(),
+  startedAt: z.string().datetime(),
+  completedAt: z.string().datetime().nullable(),
+});
+
+/** 显存不足时返回的确定性降档建议。 */
+export const desktopTrainingSuggestionViewSchema = z.object({
+  message: z.string().min(1),
+  resolution: z.number().int().min(512).max(1536).nullable(),
+  rank: z.number().int().min(8).max(64).nullable(),
+});
+
+/** SQLite 作为事实源的桌面端 LoRA 训练任务。 */
+export const desktopTrainingJobViewSchema = z.object({
+  id: z.string().uuid(),
+  datasetId: z.string().uuid(),
+  datasetTitle: z.string().min(1),
+  title: z.string().min(1),
+  type: z.enum(["character", "style", "concept"]),
+  status: z.enum(["queued", "running", "succeeded", "failed", "cancelled"]),
+  progress: z.number().int().min(0).max(100),
+  queuePosition: z.number().int().nonnegative(),
+  currentEpoch: z.number().int().nonnegative(),
+  totalEpochs: z.number().int().positive(),
+  modelId: z.string().uuid(),
+  modelDisplayName: z.string().min(1),
+  triggerWords: z.array(z.string().min(1)).max(50),
+  assetCount: z.number().int().min(5).max(200),
+  parameters: desktopTrainingParametersSchema,
+  attempts: z.array(desktopTrainingAttemptViewSchema).max(10),
+  outputLoraId: z.string().uuid().nullable(),
+  error: z.string().nullable(),
+  suggestion: desktopTrainingSuggestionViewSchema.nullable(),
+  createdAt: z.string().datetime(),
+  startedAt: z.string().datetime().nullable(),
+  completedAt: z.string().datetime().nullable(),
+  updatedAt: z.string().datetime(),
+});
+
 /** 单个本地任务的 LoRA 选择和强度。 */
 export const desktopLocalLoraSelectionSchema = z.object({ id: z.string().uuid(), strength: z.number().min(0).max(1.5) });
 
@@ -1155,6 +1224,11 @@ export type DesktopTrainingDatasetIdInput = z.infer<typeof desktopTrainingDatase
 export type DesktopCaptionJobCreateInput = z.infer<typeof desktopCaptionJobCreateInputSchema>;
 export type DesktopCaptionJobItemView = z.infer<typeof desktopCaptionJobItemViewSchema>;
 export type DesktopCaptionJobView = z.infer<typeof desktopCaptionJobViewSchema>;
+export type DesktopTrainingParameters = z.infer<typeof desktopTrainingParametersSchema>;
+export type DesktopTrainingJobCreateInput = z.infer<typeof desktopTrainingJobCreateInputSchema>;
+export type DesktopTrainingAttemptView = z.infer<typeof desktopTrainingAttemptViewSchema>;
+export type DesktopTrainingSuggestionView = z.infer<typeof desktopTrainingSuggestionViewSchema>;
+export type DesktopTrainingJobView = z.infer<typeof desktopTrainingJobViewSchema>;
 export type DesktopLocalJobCreateInput = z.infer<typeof desktopLocalJobCreateInputSchema>;
 export type DesktopLocalJobView = z.infer<typeof desktopLocalJobViewSchema>;
 export type DesktopGallerySyncItem = z.infer<typeof desktopGallerySyncItemSchema>;

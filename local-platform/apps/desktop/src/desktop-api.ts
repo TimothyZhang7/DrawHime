@@ -1,5 +1,5 @@
 /** 本文件封装 WebView 到 Tauri 本地核心的受类型约束命令。 */
-import type { DesktopBootstrapView, DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopEnvironmentReport, DesktopGalleryPrivacy, DesktopGallerySyncItem, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView, DesktopSettings, DesktopSettingsUpdate, DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetIdInput, DesktopTrainingDatasetView, DesktopTrainingImagesAddInput } from "@drawhime/contracts";
+import type { DesktopBootstrapView, DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopEnvironmentReport, DesktopGalleryPrivacy, DesktopGallerySyncItem, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView, DesktopSettings, DesktopSettingsUpdate, DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetIdInput, DesktopTrainingDatasetView, DesktopTrainingImagesAddInput, DesktopTrainingJobCreateInput, DesktopTrainingJobView } from "@drawhime/contracts";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
@@ -55,6 +55,14 @@ export function listDesktopCaptionJobs(): Promise<DesktopCaptionJobView[]> { ret
 export function cancelDesktopCaptionJob(id: string): Promise<DesktopCaptionJobView> { return invoke("desktop_cancel_caption_job", { id }); }
 /** 监听 SQLite 已持久化的离线自动打标状态。 */
 export function listenDesktopCaptionJobUpdates(handler: (job: DesktopCaptionJobView) => void): Promise<UnlistenFn> { return listen<DesktopCaptionJobView>("desktop-caption-job-updated", (event) => handler(event.payload)); }
+/** 创建本地 LoRA 训练任务并立即返回排队记录。 */
+export function createDesktopTrainingJob(input: DesktopTrainingJobCreateInput): Promise<DesktopTrainingJobView> { return invoke("desktop_create_training_job", { input }); }
+/** 读取最近的持久化本地 LoRA 训练任务。 */
+export function listDesktopTrainingJobs(): Promise<DesktopTrainingJobView[]> { return invoke("desktop_list_training_jobs"); }
+/** 取消排队或运行中的本地 LoRA 训练任务。 */
+export function cancelDesktopTrainingJob(id: string): Promise<DesktopTrainingJobView> { return invoke("desktop_cancel_training_job", { id }); }
+/** 监听 SQLite 已持久化的本地 LoRA 训练状态。 */
+export function listenDesktopTrainingJobUpdates(handler: (job: DesktopTrainingJobView) => void): Promise<UnlistenFn> { return listen<DesktopTrainingJobView>("desktop-training-job-updated", (event) => handler(event.payload)); }
 /** 全量校验后确认训练集。 */
 export function confirmDesktopTrainingDataset(input: DesktopTrainingDatasetIdInput): Promise<DesktopTrainingDatasetView> { return invoke("desktop_confirm_training_dataset", { input }); }
 /** 持久化创建本地生成任务并立即返回。 */

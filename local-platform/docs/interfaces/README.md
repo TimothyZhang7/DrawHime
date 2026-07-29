@@ -52,6 +52,10 @@
 | `desktop_cancel_caption_job` | desktop webview | desktop core/caption scheduler | 幂等取消排队或运行中的打标任务，已经成功落库的逐图 Caption 保留 |
 | `desktop-caption-job-updated` | desktop core/caption scheduler | desktop webview | 离线打标任务及逐图状态变化事件；载荷为 `DesktopCaptionJobView` |
 | `desktop_confirm_training_dataset` | desktop webview | desktop core | 仅在训练集含 5–200 张图片且每张 Caption 非空时事务化确认，确认成功后才允许进入训练参数阶段 |
+| `desktop_create_training_job` | desktop webview | desktop core/training scheduler | 固化已确认训练集、Anima 底模文件快照与训练参数并立即返回排队记录；对应 `DesktopTrainingJobCreateInput` 和 `DesktopTrainingJobView` |
+| `desktop_list_training_jobs` | desktop webview | desktop core | 返回最近 100 个训练任务、尝试、排队位置、进度、产物 LoRA ID 与 OOM 降档建议 |
+| `desktop_cancel_training_job` | desktop webview | desktop core/training scheduler | 幂等取消排队或运行中的本地训练；运行中进程树由核心终止，已成功登记的 LoRA 不回滚 |
+| `desktop-training-job-updated` | desktop core/training scheduler | desktop webview | 本地训练任务状态变化事件；载荷为 `DesktopTrainingJobView` |
 | `desktop_create_local_job` | desktop webview | desktop core/local scheduler | 校验模型与最多 4 个 LoRA 快照、提示词和参数后持久化创建 `DesktopLocalJobView`；提交立即返回排队状态，后台串行调度不会阻塞页面 |
 | `desktop_list_local_jobs` | desktop webview | desktop core | 分页前的首版接口返回当前设备最近 100 个本地任务及产物摘要，任务、尝试和错误在应用重启后保留 |
 | `desktop_cancel_local_job` | desktop webview | desktop core/local scheduler | 幂等取消排队任务；运行中任务向当前 ComfyUI prompt 发出删除和中断请求，终态任务保持不变 |

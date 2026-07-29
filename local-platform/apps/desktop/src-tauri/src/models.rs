@@ -200,6 +200,85 @@ pub struct DesktopCaptionJobView {
     pub updated_at: String,
 }
 
+/** 桌面端真实 LoRA 训练任务固化的用户参数。 */
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopTrainingParameters {
+    pub rank: u32,
+    pub alpha: u32,
+    pub epochs: u32,
+    pub repeats: u32,
+    pub resolution: u32,
+    pub learning_rate: f64,
+    pub lr_scheduler: String,
+    pub warmup_ratio: f64,
+    pub gradient_accumulation_steps: u32,
+    pub caption_dropout_rate: f64,
+    pub shuffle_caption: bool,
+    pub keep_tokens: u32,
+    pub seed: u32,
+}
+
+/** 创建桌面端真实 LoRA 训练任务的参数。 */
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopTrainingJobCreateInput {
+    pub dataset_id: String,
+    pub model_id: String,
+    pub title: String,
+    pub parameters: DesktopTrainingParameters,
+}
+
+/** 单次桌面训练执行尝试。 */
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopTrainingAttemptView {
+    pub id: String,
+    pub attempt_number: u32,
+    pub status: String,
+    pub error: Option<String>,
+    pub started_at: String,
+    pub completed_at: Option<String>,
+}
+
+/** 显存不足后的确定性降档建议。 */
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopTrainingSuggestionView {
+    pub message: String,
+    pub resolution: Option<u32>,
+    pub rank: Option<u32>,
+}
+
+/** SQLite 为事实源的桌面端 LoRA 训练任务视图。 */
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopTrainingJobView {
+    pub id: String,
+    pub dataset_id: String,
+    pub dataset_title: String,
+    pub title: String,
+    pub r#type: String,
+    pub status: String,
+    pub progress: u32,
+    pub queue_position: u32,
+    pub current_epoch: u32,
+    pub total_epochs: u32,
+    pub model_id: String,
+    pub model_display_name: String,
+    pub trigger_words: Vec<String>,
+    pub asset_count: u32,
+    pub parameters: DesktopTrainingParameters,
+    pub attempts: Vec<DesktopTrainingAttemptView>,
+    pub output_lora_id: Option<String>,
+    pub error: Option<String>,
+    pub suggestion: Option<DesktopTrainingSuggestionView>,
+    pub created_at: String,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub updated_at: String,
+}
+
 /** 提交到本机串行调度器的生成参数。 */
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]

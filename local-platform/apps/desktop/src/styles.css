@@ -1861,6 +1861,243 @@ select:focus-visible {
   font-size: 7px;
 }
 
+/* 训练参数与持久任务独立于逐图 Caption，避免长列表滚动时丢失提交状态。 */
+.desktop-training-execution {
+  display: grid;
+  gap: 12px;
+}
+
+.desktop-training-execution > header,
+.desktop-training-submit,
+.desktop-training-jobs article header,
+.desktop-training-jobs article footer,
+.desktop-training-jobs article header span,
+.desktop-training-jobs article p,
+.desktop-training-parameters label > div {
+  display: flex;
+  align-items: center;
+}
+
+.desktop-training-execution > header {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.desktop-training-execution > header span {
+  color: var(--accent);
+  font-size: 7px;
+  font-weight: 900;
+  letter-spacing: .12em;
+}
+
+.desktop-training-execution > header h2 {
+  margin: 3px 0 0;
+  font-size: 15px;
+}
+
+.desktop-training-execution > header small {
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.desktop-training-parameters {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.desktop-training-parameters label {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.desktop-training-parameters label > span {
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 700;
+}
+
+.desktop-training-parameters input,
+.desktop-training-parameters select {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--control);
+  color: var(--text);
+  font-size: 9px;
+}
+
+.desktop-training-parameters label > div {
+  gap: 6px;
+}
+
+.desktop-training-parameters .training-checkbox {
+  min-height: 34px;
+  align-self: end;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--control);
+}
+
+.desktop-training-parameters .training-checkbox input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+}
+
+.desktop-training-submit {
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px;
+  border: 1px solid var(--accent-border);
+  border-radius: 5px;
+  background: var(--accent-soft);
+}
+
+.desktop-training-submit span {
+  min-width: 0;
+}
+
+.desktop-training-submit strong,
+.desktop-training-submit small {
+  display: block;
+}
+
+.desktop-training-submit strong {
+  font-size: 9px;
+}
+
+.desktop-training-submit small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 7px;
+}
+
+.desktop-training-submit button,
+.desktop-training-jobs article footer button {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 11px;
+  border: 1px solid var(--accent-border);
+  border-radius: 4px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 8px;
+  font-weight: 800;
+}
+
+.desktop-training-submit button svg,
+.desktop-training-jobs article footer button svg {
+  width: 13px;
+}
+
+.desktop-training-submit button:disabled,
+.desktop-training-jobs article footer button:disabled {
+  cursor: not-allowed;
+  opacity: .48;
+}
+
+.desktop-training-jobs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.desktop-training-jobs article {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--panel-muted);
+}
+
+.desktop-training-jobs article header,
+.desktop-training-jobs article footer {
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.desktop-training-jobs article header span {
+  min-width: 0;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.desktop-training-jobs article header b {
+  color: var(--accent);
+  font-size: 7px;
+}
+
+.desktop-training-jobs article header strong {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.desktop-training-jobs article header small,
+.desktop-training-jobs article footer span {
+  color: var(--muted);
+  font-size: 7px;
+}
+
+.desktop-training-jobs article header em {
+  color: var(--accent);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.desktop-training-jobs article > i {
+  height: 4px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--border);
+}
+
+.desktop-training-jobs article > i u {
+  height: 100%;
+  display: block;
+  border-radius: inherit;
+  background: var(--accent);
+  text-decoration: none;
+  transition: width .2s ease;
+}
+
+.desktop-training-jobs article footer button {
+  min-height: 26px;
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.desktop-training-jobs article p {
+  gap: 5px;
+  margin: 0;
+  color: var(--warning);
+  font-size: 7px;
+  line-height: 1.55;
+}
+
+.desktop-training-jobs article p svg {
+  width: 14px;
+  flex: 0 0 auto;
+}
+
 .local-job-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -2161,6 +2398,10 @@ select:focus-visible {
 }
 
 @media (max-width: 1100px) {
+  .desktop-training-parameters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .capability-grid,
   .metric-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2267,6 +2508,17 @@ select:focus-visible {
 }
 
 @media (max-width: 760px) {
+  .desktop-training-parameters,
+  .desktop-training-jobs {
+    grid-template-columns: 1fr;
+  }
+
+  .desktop-training-execution > header,
+  .desktop-training-submit {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
   .desktop-sidebar > header {
     width: 132px;
   }

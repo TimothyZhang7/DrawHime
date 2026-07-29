@@ -8,6 +8,7 @@ use crate::{
         DesktopLocalLoraSelectionInput, DesktopSettings,
     },
     runtime::RuntimeController,
+    workload::GpuWorkloadCoordinator,
 };
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
@@ -77,6 +78,7 @@ impl LocalScheduler {
         database_path: PathBuf,
         app_data_dir: PathBuf,
         runtime: Arc<RuntimeController>,
+        gpu_workload: Arc<GpuWorkloadCoordinator>,
         app: AppHandle,
     ) -> Result<Self, String> {
         let stopping = Arc::new(AtomicBool::new(false));
@@ -90,6 +92,7 @@ impl LocalScheduler {
                     &database_path,
                     &app_data_dir,
                     &runtime,
+                    &gpu_workload,
                     &app,
                     &worker_stopping,
                     &worker_signal,
@@ -194,6 +197,7 @@ fn scheduler_loop(
     database_path: &Path,
     app_data_dir: &Path,
     runtime: &RuntimeController,
+    gpu_workload: &Arc<GpuWorkloadCoordinator>,
     app: &AppHandle,
     stopping: &AtomicBool,
     wake_signal: &(Mutex<bool>, Condvar),
@@ -205,10 +209,11 @@ fn scheduler_loop(
         "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;",
     );
     while !stopping.load(Ordering::SeqCst) {
+        let Some(gpu_guard) = gpu_workload.acquire(stopping) else { break; };
         match claim_next_job(&mut database) {
-            Ok(Some(job)) => execute_job(&database, app_data_dir, runtime, app, stopping, job),
-            Ok(None) => wait_for_work(wake_signal, stopping),
-            Err(_) => thread::sleep(Duration::from_secs(2)),
+            Ok(Some(job)) => { execute_job(&database, app_data_dir, runtime, app, stopping, job); drop(gpu_guard); }
+            Ok(None) => { drop(gpu_guard); wait_for_work(wake_signal, stopping); }
+            Err(_) => { drop(gpu_guard); thread::sleep(Duration::from_secs(2)); }
         }
     }
 }

@@ -9,9 +9,12 @@ mod resource;
 mod runtime;
 mod scheduler;
 mod storage;
+mod training;
 mod training_dataset;
+mod trainer;
+mod workload;
 
-use models::{DesktopBootstrapView, DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopEnvironmentReport, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView, DesktopSettings, DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetIdInput, DesktopTrainingDatasetView, DesktopTrainingImagesAddInput, GalleryPublicationInput, GallerySyncItem};
+use models::{DesktopBootstrapView, DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopEnvironmentReport, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView, DesktopSettings, DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetIdInput, DesktopTrainingDatasetView, DesktopTrainingImagesAddInput, DesktopTrainingJobCreateInput, DesktopTrainingJobView, GalleryPublicationInput, GallerySyncItem};
 use std::path::PathBuf;
 use storage::DesktopState;
 use tauri::{Manager, State};
@@ -82,14 +85,16 @@ async fn desktop_start_runtime(state: State<'_, DesktopState>) -> Result<Desktop
     let settings = state.load_settings()?;
     let app_data_dir = state.app_data_dir.clone();
     let runtime = state.runtime.clone();
-    tauri::async_runtime::spawn_blocking(move || runtime.start(&settings, &app_data_dir)).await.map_err(|error| format!("Runtime 启动任务异常：{error}"))?
+    let gpu_workload = state.gpu_workload.clone();
+    tauri::async_runtime::spawn_blocking(move || { let _guard = gpu_workload.try_acquire().ok_or_else(|| "GPU 正在执行生成或训练任务".to_string())?; runtime.start(&settings, &app_data_dir) }).await.map_err(|error| format!("Runtime 启动任务异常：{error}"))?
 }
 
 #[tauri::command]
 async fn desktop_stop_runtime(state: State<'_, DesktopState>) -> Result<DesktopRuntimeStatusView, String> {
     if state.running_local_job_count()? > 0 { return Err("存在运行中的本地任务，请先取消或等待任务完成".into()); }
     let runtime = state.runtime.clone();
-    tauri::async_runtime::spawn_blocking(move || runtime.stop()).await.map_err(|error| format!("Runtime 停止任务异常：{error}"))?
+    let gpu_workload = state.gpu_workload.clone();
+    tauri::async_runtime::spawn_blocking(move || { let _guard = gpu_workload.try_acquire().ok_or_else(|| "GPU 正在执行生成或训练任务".to_string())?; runtime.stop() }).await.map_err(|error| format!("Runtime 停止任务异常：{error}"))?
 }
 
 #[tauri::command]
@@ -97,7 +102,8 @@ async fn desktop_self_test_runtime(state: State<'_, DesktopState>) -> Result<Des
     let settings = state.load_settings()?;
     let app_data_dir = state.app_data_dir.clone();
     let runtime = state.runtime.clone();
-    tauri::async_runtime::spawn_blocking(move || runtime.self_test(&settings, &app_data_dir)).await.map_err(|error| format!("Runtime 自检任务异常：{error}"))?
+    let gpu_workload = state.gpu_workload.clone();
+    tauri::async_runtime::spawn_blocking(move || { let _guard = gpu_workload.try_acquire().ok_or_else(|| "GPU 正在执行生成或训练任务".to_string())?; runtime.self_test(&settings, &app_data_dir) }).await.map_err(|error| format!("Runtime 自检任务异常：{error}"))?
 }
 
 #[tauri::command]
@@ -168,6 +174,24 @@ fn desktop_cancel_caption_job(state: State<'_, DesktopState>, id: String) -> Res
     state.cancel_caption_job(&id)
 }
 
+/** 创建本地 LoRA 训练任务并立即返回持久化排队记录。 */
+#[tauri::command]
+fn desktop_create_training_job(state: State<'_, DesktopState>, input: DesktopTrainingJobCreateInput) -> Result<DesktopTrainingJobView, String> {
+    state.create_training_job(input)
+}
+
+/** 返回最近的本地 LoRA 训练任务。 */
+#[tauri::command]
+fn desktop_list_training_jobs(state: State<'_, DesktopState>) -> Result<Vec<DesktopTrainingJobView>, String> {
+    state.list_training_jobs()
+}
+
+/** 幂等取消排队或运行中的本地 LoRA 训练任务。 */
+#[tauri::command]
+fn desktop_cancel_training_job(state: State<'_, DesktopState>, id: String) -> Result<DesktopTrainingJobView, String> {
+    state.cancel_training_job(&id)
+}
+
 #[tauri::command]
 async fn desktop_confirm_training_dataset(state: State<'_, DesktopState>, input: DesktopTrainingDatasetIdInput) -> Result<DesktopTrainingDatasetView, String> {
     let database_path = state.database_path.clone();
@@ -216,7 +240,7 @@ pub fn run() {
             app.manage(state);
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![desktop_bootstrap, desktop_inspect_environment, desktop_save_settings, desktop_enqueue_gallery_publication, desktop_list_gallery_sync_queue, desktop_load_resource_catalog, desktop_download_resource, desktop_install_resource, desktop_runtime_status, desktop_start_runtime, desktop_stop_runtime, desktop_self_test_runtime, desktop_import_local_model, desktop_list_local_models, desktop_import_local_lora, desktop_list_local_loras, desktop_create_training_dataset, desktop_list_training_datasets, desktop_add_training_images, desktop_update_training_caption, desktop_create_caption_job, desktop_list_caption_jobs, desktop_cancel_caption_job, desktop_confirm_training_dataset, desktop_create_local_job, desktop_list_local_jobs, desktop_cancel_local_job])
+        .invoke_handler(tauri::generate_handler![desktop_bootstrap, desktop_inspect_environment, desktop_save_settings, desktop_enqueue_gallery_publication, desktop_list_gallery_sync_queue, desktop_load_resource_catalog, desktop_download_resource, desktop_install_resource, desktop_runtime_status, desktop_start_runtime, desktop_stop_runtime, desktop_self_test_runtime, desktop_import_local_model, desktop_list_local_models, desktop_import_local_lora, desktop_list_local_loras, desktop_create_training_dataset, desktop_list_training_datasets, desktop_add_training_images, desktop_update_training_caption, desktop_create_caption_job, desktop_list_caption_jobs, desktop_cancel_caption_job, desktop_confirm_training_dataset, desktop_create_training_job, desktop_list_training_jobs, desktop_cancel_training_job, desktop_create_local_job, desktop_list_local_jobs, desktop_cancel_local_job])
         .run(tauri::generate_context!())
         .expect("DrawHime Desktop 启动失败");
 }
