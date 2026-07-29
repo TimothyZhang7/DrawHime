@@ -554,6 +554,8 @@ pub struct DesktopResourceDownloadView {
     pub downloaded_bytes: u64,
     pub total_bytes: u64,
     pub bytes_per_second: u64,
+    pub eta_seconds: Option<u64>,
+    pub switch_reason: Option<String>,
     pub target_path: Option<String>,
     pub error: Option<String>,
 }

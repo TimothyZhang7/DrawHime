@@ -12,7 +12,8 @@ const argumentsMap = parseArguments(rawArguments);
 
 if (command === "generate") await generateSigningKey(argumentsMap);
 else if (command === "sign") await signManifest(argumentsMap);
-else throw new Error("用法：generate --private-key PATH --public-key PATH；或 sign --payload PATH --private-key PATH --output PATH --key-id ID");
+else if (command === "normalize") await normalizeManifest(argumentsMap);
+else throw new Error("用法：generate --private-key PATH --public-key PATH；sign --payload PATH --private-key PATH --output PATH --key-id ID；或 normalize --payload PATH --output PATH");
 
 /** 解析明确的 --key value 参数，拒绝遗漏值和重复键。 */
 function parseArguments(values) {
@@ -65,6 +66,31 @@ async function signManifest(options) {
   await mkdir(dirname(outputPath), { recursive: true });
   await writeFile(outputPath, `${JSON.stringify(envelope, null, 2)}\n`, "utf8");
   process.stdout.write(`已签署资源清单：${outputPath}\n`);
+}
+
+/** 去除同一资源的重复来源 URL，优先保留镜像语义并刷新清单有效期。 */
+async function normalizeManifest(options) {
+  const payloadPath = requiredPath(options, "payload");
+  const outputPath = requiredPath(options, "output");
+  const raw = JSON.parse(await readFile(payloadPath, "utf8"));
+  if (!Array.isArray(raw.resources)) throw new Error("资源清单缺少 resources 数组");
+  const resources = raw.resources.map((resource) => {
+    if (!Array.isArray(resource.sources)) return resource;
+    const byUrl = new Map();
+    for (const source of resource.sources) {
+      const previous = byUrl.get(source.url);
+      if (!previous || source.kind === "mirror") byUrl.set(source.url, source);
+    }
+    return { ...resource, sources: [...byUrl.values()] };
+  });
+  const minimumExpiry = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
+  const currentExpiry = new Date(raw.expiresAt);
+  const candidate = { ...raw, generatedAt: new Date().toISOString(), expiresAt: currentExpiry > minimumExpiry ? currentExpiry.toISOString() : minimumExpiry.toISOString(), resources };
+  const parsed = desktopResourceManifestPayloadSchema.safeParse(candidate);
+  if (!parsed.success) throw new Error(`规范化后的资源清单未通过契约校验：${parsed.error.issues[0]?.message || "未知字段错误"}`);
+  await mkdir(dirname(outputPath), { recursive: true });
+  await writeFile(outputPath, `${JSON.stringify(parsed.data, null, 2)}\n`, "utf8");
+  process.stdout.write(`已规范化资源清单：${outputPath}\n`);
 }
 
 /** 读取必填路径参数并转换为绝对路径。 */

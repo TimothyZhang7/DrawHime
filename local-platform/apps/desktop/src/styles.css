@@ -2394,6 +2394,14 @@ select:focus-visible {
   font-size: 7px;
 }
 
+.resource-switch-reason {
+  display: block;
+  margin-top: 5px;
+  color: var(--warning);
+  font-size: 7px;
+  line-height: 1.5;
+}
+
 .settings-card > header > svg {
   color: var(--success);
 }

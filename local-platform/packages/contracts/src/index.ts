@@ -759,6 +759,9 @@ export const desktopResourceManifestItemSchema = z.object({
   required: z.boolean(),
   sources: z.array(desktopResourceSourceSchema).min(1).max(8),
 }).superRefine((item, context) => {
+  if (new Set(item.sources.map((source) => source.url)).size !== item.sources.length) {
+    context.addIssue({ code: "custom", path: ["sources"], message: "同一资源的官方与镜像来源地址不得重复" });
+  }
   const isApplication = item.kind === "application";
   if (isApplication && (item.archive !== "raw" || !item.fileName.toLowerCase().endsWith(".exe") || !item.applicationUpdate)) {
     context.addIssue({ code: "custom", path: ["applicationUpdate"], message: "application 资源必须是带更新元数据的原始 NSIS EXE" });
@@ -822,6 +825,8 @@ export const desktopResourceDownloadViewSchema = z.object({
   downloadedBytes: z.number().int().nonnegative(),
   totalBytes: z.number().int().positive(),
   bytesPerSecond: z.number().int().nonnegative(),
+  etaSeconds: z.number().int().nonnegative().nullable(),
+  switchReason: z.string().nullable(),
   targetPath: z.string().nullable(),
   error: z.string().nullable(),
 });

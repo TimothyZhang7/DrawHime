@@ -6,10 +6,10 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use fs2::available_space;
-use reqwest::{blocking::{Client, Response}, header::RANGE, StatusCode, Url};
+use reqwest::{blocking::{Client, Response}, header::{CONTENT_LENGTH, CONTENT_RANGE, RANGE}, StatusCode, Url};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
-use std::{collections::{HashMap, HashSet}, fs::{self, File, OpenOptions}, io::{BufReader, Read, Seek, SeekFrom, Write}, path::{Component, Path, PathBuf}, process::{Command, Stdio}, thread, time::{Duration, Instant, UNIX_EPOCH}};
+use std::{collections::{HashMap, HashSet}, fs::{self, File, OpenOptions}, io::{BufReader, Read, Seek, SeekFrom, Write}, path::{Component, Path, PathBuf}, process::{Command, Stdio}, sync::{Mutex, OnceLock}, thread, time::{Duration, Instant, UNIX_EPOCH}};
 use tauri::Emitter;
 use uuid::Uuid;
 use zip::ZipArchive;
@@ -20,8 +20,20 @@ const MANIFEST_PUBLIC_KEY: &str = "asfEBEwmIW6BPSgrLk9iNSgKqLprKisVFkq9QpJI8Pg="
 const MAX_MANIFEST_BYTES: u64 = 5 * 1024 * 1024;
 const DOWNLOAD_BUFFER_BYTES: usize = 256 * 1024;
 const DOWNLOAD_RANGE_BYTES: u64 = 8 * 1024 * 1024;
-const LOW_SPEED_WINDOW: Duration = Duration::from_secs(20);
-const LOW_SPEED_BYTES_PER_SECOND: u64 = 1024 * 1024;
+const SOURCE_CIRCUIT_DURATION: Duration = Duration::from_secs(10 * 60);
+
+#[derive(Clone, Copy)]
+struct DownloadPolicy {
+    low_speed_window: Duration,
+    minimum_bytes_per_second: u64,
+}
+
+const PRODUCTION_DOWNLOAD_POLICY: DownloadPolicy = DownloadPolicy {
+    low_speed_window: Duration::from_secs(20),
+    minimum_bytes_per_second: 1024 * 1024,
+};
+
+static SOURCE_FAILURES: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
 
 #[derive(Deserialize)]
 struct ManifestApiResponse {
@@ -143,38 +155,54 @@ pub fn download_resource(settings: &DesktopSettings, app_data_dir: &Path, resour
     let target = cache_dir.join(&item.file_name);
     if target.is_file() && file_matches(&target, &item)? {
         write_verified_marker(&target, &item)?;
-        return Ok(progress_view(&item, "downloaded", None, item.byte_size, 0, Some(&target), None));
+        return Ok(progress_view(&item, "downloaded", None, item.byte_size, 0, None, Some(&target), None));
     }
     quarantine_invalid_target(&target)?;
     let partial = partial_path(&target);
     if partial.metadata().map(|metadata| metadata.len() > item.byte_size).unwrap_or(false) { fs::remove_file(&partial).map_err(|error| format!("清理超长下载断点失败：{error}"))?; }
-    emit_progress(app, progress_view(&item, "queued", None, partial.metadata().map(|metadata| metadata.len()).unwrap_or(0), 0, None, None));
+    emit_progress(app, progress_view(&item, "queued", None, partial.metadata().map(|metadata| metadata.len()).unwrap_or(0), 0, None, None, None));
     let client = Client::builder().connect_timeout(Duration::from_secs(6)).timeout(Duration::from_secs(30)).user_agent("DrawHime-Desktop/0.1").build().map_err(|error| format!("创建资源下载客户端失败：{error}"))?;
     let started_at = Instant::now();
     let mut errors = Vec::new();
+    let mut switch_reason = None;
+    let mut active_source_kind = None;
     let notify = |view| emit_progress(app, view);
-    for source in sources {
+    for (index, source) in sources.iter().enumerate() {
         if partial.metadata().map(|metadata| metadata.len()).unwrap_or(0) >= item.byte_size { break; }
-        if let Err(error) = download_from_source(&client, &item, &source, &partial, started_at, &notify) { errors.push(format!("{}：{}", source.kind, error)); }
+        active_source_kind = Some(source.kind.clone());
+        match download_from_source(&client, &item, source, &partial, started_at, &notify) {
+            Ok(()) => record_source_success(source),
+            Err(error) => {
+                record_source_failure(source);
+                let reason = format!("{}来源{}，已保留断点", source_kind_name(&source.kind), error);
+                errors.push(reason.clone());
+                switch_reason = Some(reason);
+                if let Some(next_source) = sources.get(index + 1) {
+                    let downloaded = partial.metadata().map(|metadata| metadata.len()).unwrap_or(0);
+                    active_source_kind = Some(next_source.kind.clone());
+                    emit_progress(app, progress_view(&item, "downloading", active_source_kind.clone(), downloaded, average_speed(downloaded, started_at), switch_reason.clone(), None, None));
+                }
+            }
+        }
     }
     let downloaded_bytes = partial.metadata().map(|metadata| metadata.len()).unwrap_or(0);
     if downloaded_bytes != item.byte_size {
         let message = if errors.is_empty() { "下载未达到资源声明大小".into() } else { errors.join("；") };
-        let view = progress_view(&item, "failed", None, downloaded_bytes, average_speed(downloaded_bytes, started_at), None, Some(message.clone()));
+        let view = progress_view(&item, "failed", active_source_kind.clone(), downloaded_bytes, average_speed(downloaded_bytes, started_at), switch_reason.clone(), None, Some(message.clone()));
         emit_progress(app, view);
         return Err(message);
     }
-    emit_progress(app, progress_view(&item, "verifying", None, downloaded_bytes, average_speed(downloaded_bytes, started_at), None, None));
+    emit_progress(app, progress_view(&item, "verifying", active_source_kind.clone(), downloaded_bytes, average_speed(downloaded_bytes, started_at), switch_reason.clone(), None, None));
     let actual_sha256 = sha256_file(&partial)?;
     if actual_sha256 != item.sha256 {
         quarantine_file(&partial, "checksum-invalid")?;
         let message = "资源整体 SHA-256 校验失败，文件已隔离".to_string();
-        emit_progress(app, progress_view(&item, "failed", None, downloaded_bytes, 0, None, Some(message.clone())));
+        emit_progress(app, progress_view(&item, "failed", active_source_kind.clone(), downloaded_bytes, 0, switch_reason.clone(), None, Some(message.clone())));
         return Err(message);
     }
     fs::rename(&partial, &target).map_err(|error| format!("原子写入资源缓存失败：{error}"))?;
     write_verified_marker(&target, &item)?;
-    let view = progress_view(&item, "downloaded", None, item.byte_size, average_speed(item.byte_size, started_at), Some(&target), None);
+    let view = progress_view(&item, "downloaded", active_source_kind, item.byte_size, average_speed(item.byte_size, started_at), switch_reason, Some(&target), None);
     emit_progress(app, view.clone());
     Ok(view)
 }
@@ -338,8 +366,9 @@ fn validate_item(item: &DesktopResourceManifestItem) -> Result<(), String> {
     if !matches!(item.kind.as_str(), "model" | "lora") && (item.install_directory.is_some() || item.model_registration.is_some()) { return Err(format!("非模型资源不得声明模型安装元数据：{}", item.id)); }
     if let Some(root_directory) = &item.root_directory { validate_windows_relative_path(Path::new(root_directory)).map_err(|_| format!("资源归档根目录不安全：{}", item.id))?; if Path::new(root_directory).components().count() != 1 { return Err(format!("资源归档根目录只能包含一级：{}", item.id)); } }
     let mut kinds = HashSet::new();
+    let mut urls = HashSet::new();
     for source in &item.sources {
-        if !matches!(source.kind.as_str(), "official" | "mirror") || !kinds.insert(&source.kind) { return Err(format!("资源来源类型不正确或重复：{}", item.id)); }
+        if !matches!(source.kind.as_str(), "official" | "mirror") || !kinds.insert(&source.kind) || !urls.insert(&source.url) { return Err(format!("资源来源类型或地址不正确、重复：{}", item.id)); }
         let url = Url::parse(&source.url).map_err(|_| format!("资源下载地址格式不正确：{}", item.id))?;
         if url.scheme() != "https" { return Err(format!("资源下载地址必须使用 HTTPS：{}", item.id)); }
     }
@@ -353,11 +382,19 @@ fn semantic_version(value: &str) -> Option<(u64, u64, u64)> {
 
 fn ordered_sources<'a>(item: &'a DesktopResourceManifestItem, preference: &str) -> Vec<&'a DesktopResourceSource> {
     let mut sources: Vec<_> = item.sources.iter().filter(|source| match preference { "official" => source.kind == "official", "mirror" => source.kind == "mirror", _ => true }).collect();
-    if preference == "auto" { sources.sort_by_key(|source| if source.kind == "official" { 0 } else { 1 }); }
+    if preference == "auto" {
+        sources.sort_by_key(|source| if source.kind == "official" { 0 } else { 1 });
+        let healthy: Vec<_> = sources.iter().copied().filter(|source| !source_circuit_open(source)).collect();
+        if !healthy.is_empty() { return healthy; }
+    }
     sources
 }
 
 fn download_from_source<F: Fn(DesktopResourceDownloadView)>(client: &Client, item: &DesktopResourceManifestItem, source: &DesktopResourceSource, partial: &Path, started_at: Instant, notify: &F) -> Result<(), String> {
+    download_from_source_with_policy(client, item, source, partial, started_at, notify, PRODUCTION_DOWNLOAD_POLICY)
+}
+
+fn download_from_source_with_policy<F: Fn(DesktopResourceDownloadView)>(client: &Client, item: &DesktopResourceManifestItem, source: &DesktopResourceSource, partial: &Path, started_at: Instant, notify: &F, policy: DownloadPolicy) -> Result<(), String> {
     let mut offset = partial.metadata().map(|metadata| metadata.len()).unwrap_or(0);
     let mut file = OpenOptions::new().create(true).read(true).write(true).open(partial).map_err(|error| format!("打开下载断点失败：{error}"))?;
     file.seek(SeekFrom::Start(offset)).map_err(|error| format!("定位下载断点失败：{error}"))?;
@@ -371,16 +408,25 @@ fn download_from_source<F: Fn(DesktopResourceDownloadView)>(client: &Client, ite
         if response.status() != StatusCode::PARTIAL_CONTENT && !full_single_response {
             return Err(if response.status().is_success() { "下载来源不支持断点 Range".into() } else { format!("HTTP {}", response.status().as_u16()) });
         }
-        offset = stream_response(response, &mut file, item, source, offset, end_inclusive + 1, started_at, notify)?;
-        if source_started.elapsed() >= LOW_SPEED_WINDOW {
-            let source_speed = (offset - source_start_bytes) / source_started.elapsed().as_secs().max(1);
-            if source_speed < LOW_SPEED_BYTES_PER_SECOND && offset < item.byte_size { file.flush().map_err(|error| format!("保存低速断点失败：{error}"))?; return Err(format!("持续下载速度过低（{} KiB/s）", source_speed / 1024)); }
-        }
+        validate_range_response(&response, item, offset, end_inclusive, full_single_response)?;
+        offset = stream_response(response, &mut file, item, source, offset, end_inclusive + 1, started_at, source_started, source_start_bytes, notify, policy)?;
     }
     Ok(())
 }
 
-fn stream_response<F: Fn(DesktopResourceDownloadView)>(mut response: Response, file: &mut File, item: &DesktopResourceManifestItem, source: &DesktopResourceSource, mut downloaded: u64, expected_end: u64, started_at: Instant, notify: &F) -> Result<u64, String> {
+fn validate_range_response(response: &Response, item: &DesktopResourceManifestItem, start: u64, end_inclusive: u64, full_single_response: bool) -> Result<(), String> {
+    let expected_length = end_inclusive.saturating_sub(start).saturating_add(1);
+    let content_length = response.headers().get(CONTENT_LENGTH).and_then(|value| value.to_str().ok()).and_then(|value| value.parse::<u64>().ok());
+    if content_length != Some(expected_length) { return Err("下载来源返回的分片长度不正确".into()); }
+    if !full_single_response {
+        let expected_range = format!("bytes {start}-{end_inclusive}/{}", item.byte_size);
+        let content_range = response.headers().get(CONTENT_RANGE).and_then(|value| value.to_str().ok());
+        if content_range != Some(expected_range.as_str()) { return Err("下载来源返回的 Content-Range 不正确".into()); }
+    }
+    Ok(())
+}
+
+fn stream_response<F: Fn(DesktopResourceDownloadView)>(mut response: Response, file: &mut File, item: &DesktopResourceManifestItem, source: &DesktopResourceSource, mut downloaded: u64, expected_end: u64, started_at: Instant, source_started: Instant, source_start_bytes: u64, notify: &F, policy: DownloadPolicy) -> Result<u64, String> {
     let mut buffer = vec![0_u8; DOWNLOAD_BUFFER_BYTES];
     let mut last_emit = Instant::now();
     loop {
@@ -391,8 +437,16 @@ fn stream_response<F: Fn(DesktopResourceDownloadView)>(mut response: Response, f
         file.write_all(&buffer[..read]).map_err(|error| format!("写入下载断点失败：{error}"))?;
         downloaded = next;
         if last_emit.elapsed() >= Duration::from_millis(250) {
-            notify(progress_view(item, "downloading", Some(source.kind.clone()), downloaded, average_speed(downloaded, started_at), None, None));
+            notify(progress_view(item, "downloading", Some(source.kind.clone()), downloaded, average_speed(downloaded, started_at), None, None, None));
             last_emit = Instant::now();
+        }
+        let source_elapsed = source_started.elapsed();
+        if source_elapsed >= policy.low_speed_window && downloaded < item.byte_size {
+            let source_speed = downloaded.saturating_sub(source_start_bytes) / source_elapsed.as_secs().max(1);
+            if source_speed < policy.minimum_bytes_per_second {
+                file.flush().map_err(|error| format!("保存低速断点失败：{error}"))?;
+                return Err(format!("持续下载速度过低（{} KiB/s）", source_speed / 1024));
+            }
         }
         if downloaded == expected_end { break; }
     }
@@ -400,6 +454,24 @@ fn stream_response<F: Fn(DesktopResourceDownloadView)>(mut response: Response, f
     if downloaded < expected_end { return Err("连接提前结束，已保留断点".into()); }
     Ok(downloaded)
 }
+
+fn source_failures() -> &'static Mutex<HashMap<String, Instant>> { SOURCE_FAILURES.get_or_init(|| Mutex::new(HashMap::new())) }
+
+fn source_circuit_open(source: &DesktopResourceSource) -> bool {
+    let mut failures = source_failures().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    failures.retain(|_, failed_at| failed_at.elapsed() < SOURCE_CIRCUIT_DURATION);
+    failures.contains_key(&source.url)
+}
+
+fn record_source_failure(source: &DesktopResourceSource) {
+    source_failures().lock().unwrap_or_else(|poisoned| poisoned.into_inner()).insert(source.url.clone(), Instant::now());
+}
+
+fn record_source_success(source: &DesktopResourceSource) {
+    source_failures().lock().unwrap_or_else(|poisoned| poisoned.into_inner()).remove(&source.url);
+}
+
+fn source_kind_name(kind: &str) -> &'static str { if kind == "official" { "官方" } else { "主站镜像" } }
 
 fn resource_matches_current_platform(item: &DesktopResourceManifestItem) -> bool { item.os == "windows" && item.arch == std::env::consts::ARCH }
 fn resource_cache_dir(app_data_dir: &Path) -> PathBuf { app_data_dir.join("resource-cache") }
@@ -628,8 +700,10 @@ fn quarantine_file(path: &Path, reason: &str) -> Result<(), String> {
     fs::rename(path, quarantined).map_err(|error| format!("隔离异常资源失败：{error}"))
 }
 
-fn progress_view(item: &DesktopResourceManifestItem, status: &str, source_kind: Option<String>, downloaded_bytes: u64, bytes_per_second: u64, target_path: Option<&Path>, error: Option<String>) -> DesktopResourceDownloadView {
-    DesktopResourceDownloadView { resource_id: item.id.clone(), status: status.into(), source_kind, downloaded_bytes, total_bytes: item.byte_size, bytes_per_second, target_path: target_path.map(|path| path.to_string_lossy().into_owned()), error }
+fn progress_view(item: &DesktopResourceManifestItem, status: &str, source_kind: Option<String>, downloaded_bytes: u64, bytes_per_second: u64, switch_reason: Option<String>, target_path: Option<&Path>, error: Option<String>) -> DesktopResourceDownloadView {
+    let remaining_bytes = item.byte_size.saturating_sub(downloaded_bytes);
+    let eta_seconds = (bytes_per_second > 0 && remaining_bytes > 0).then(|| remaining_bytes.saturating_add(bytes_per_second - 1) / bytes_per_second);
+    DesktopResourceDownloadView { resource_id: item.id.clone(), status: status.into(), source_kind, downloaded_bytes, total_bytes: item.byte_size, bytes_per_second, eta_seconds, switch_reason, target_path: target_path.map(|path| path.to_string_lossy().into_owned()), error }
 }
 
 fn emit_progress(app: &tauri::AppHandle, view: DesktopResourceDownloadView) { let _ = app.emit("desktop-resource-progress", view); }
@@ -699,6 +773,26 @@ mod tests {
         assert_eq!(ordered_sources(&item, "auto").iter().map(|source| source.kind.as_str()).collect::<Vec<_>>(), vec!["official", "mirror"]);
         assert_eq!(ordered_sources(&item, "official").len(), 1);
         assert_eq!(ordered_sources(&item, "mirror")[0].kind, "mirror");
+    }
+
+    #[test]
+    fn resource_rejects_duplicate_official_and_mirror_urls() {
+        let mut item = item();
+        item.sources[1].url = item.sources[0].url.clone();
+        assert!(validate_item(&item).is_err());
+    }
+
+    #[test]
+    fn auto_source_skips_open_circuit_while_fixed_source_stays_selected() {
+        let mut item = item();
+        item.sources[0].url = "https://mirror.example/circuit-runtime.zip".into();
+        item.sources[1].url = "https://official.example/circuit-runtime.zip".into();
+        let official = item.sources.iter().find(|source| source.kind == "official").expect("找到官方测试来源");
+        record_source_failure(official);
+        assert_eq!(ordered_sources(&item, "auto").iter().map(|source| source.kind.as_str()).collect::<Vec<_>>(), vec!["mirror"]);
+        assert_eq!(ordered_sources(&item, "official")[0].kind, "official");
+        record_source_success(official);
+        assert_eq!(ordered_sources(&item, "auto")[0].kind, "official");
     }
 
     #[test]
@@ -773,6 +867,88 @@ mod tests {
         download_from_source(&client, &item, &source, &partial, Instant::now(), &|_| {}).expect("续传测试资源");
         server.join().expect("等待测试端点退出");
         assert_eq!(fs::read(partial).expect("读取续传结果"), b"abcdefghij");
+    }
+
+    #[test]
+    fn range_download_rejects_misaligned_content_range() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("启动错位分片端点");
+        let address = listener.local_addr().expect("读取错位分片地址");
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("接受错位分片连接");
+            let mut request = [0_u8; 2048];
+            let _ = stream.read(&mut request).expect("读取错位分片请求");
+            stream.write_all(b"HTTP/1.1 206 Partial Content\r\nContent-Length: 10\r\nContent-Range: bytes 1-10/10\r\nConnection: close\r\n\r\nabcdefghij").expect("写入错位分片响应");
+        });
+        let temporary = tempfile::tempdir().expect("创建错位分片测试目录");
+        let partial = temporary.path().join("runtime.zip.part");
+        let mut item = item();
+        item.sha256 = hex::encode(Sha256::digest(b"abcdefghij"));
+        let source = DesktopResourceSource { kind: "official".into(), url: format!("http://{address}/runtime.zip") };
+        let client = Client::builder().timeout(Duration::from_secs(5)).build().expect("创建错位分片客户端");
+        let error = download_from_source(&client, &item, &source, &partial, Instant::now(), &|_| {}).expect_err("错位 Content-Range 必须被拒绝");
+        server.join().expect("等待错位分片端点退出");
+        assert!(error.contains("Content-Range"));
+        assert_eq!(partial.metadata().expect("读取错位分片断点").len(), 0);
+    }
+
+    #[test]
+    fn progress_view_reports_ceiled_eta() {
+        let mut item = item();
+        item.byte_size = 10_000;
+        let view = progress_view(&item, "downloading", Some("official".into()), 1_001, 1_000, None, None, None);
+        assert_eq!(view.eta_seconds, Some(9));
+        assert!(view.switch_reason.is_none());
+    }
+
+    #[test]
+    fn slow_official_source_switches_to_mirror_without_losing_partial_bytes() {
+        let content = vec![b'x'; 64 * 1024];
+        let official_listener = TcpListener::bind("127.0.0.1:0").expect("启动慢速官方端点");
+        let official_address = official_listener.local_addr().expect("读取慢速官方地址");
+        let official_server = thread::spawn(move || {
+            let (mut stream, _) = official_listener.accept().expect("接受慢速官方连接");
+            let mut request = [0_u8; 2048];
+            let _ = stream.read(&mut request).expect("读取慢速官方请求");
+            stream.write_all(b"HTTP/1.1 206 Partial Content\r\nContent-Length: 65536\r\nContent-Range: bytes 0-65535/65536\r\nConnection: close\r\n\r\n").expect("写入慢速官方响应头");
+            stream.write_all(&vec![b'x'; 1024]).expect("写入首个慢速分片");
+            stream.flush().expect("刷新首个慢速分片");
+            thread::sleep(Duration::from_millis(150));
+            let _ = stream.write_all(&vec![b'x'; 1024]);
+            let _ = stream.flush();
+        });
+        let mirror_listener = TcpListener::bind("127.0.0.1:0").expect("启动镜像端点");
+        let mirror_address = mirror_listener.local_addr().expect("读取镜像地址");
+        let mirror_content = content.clone();
+        let mirror_server = thread::spawn(move || {
+            let (mut stream, _) = mirror_listener.accept().expect("接受镜像连接");
+            let mut request = [0_u8; 2048];
+            let read = stream.read(&mut request).expect("读取镜像续传请求");
+            let request = String::from_utf8_lossy(&request[..read]);
+            let range_line = request.lines().find(|line| line.to_ascii_lowercase().starts_with("range: bytes=")).expect("镜像请求包含 Range");
+            let start = range_line.split('=').nth(1).and_then(|value| value.split('-').next()).and_then(|value| value.parse::<usize>().ok()).expect("解析镜像续传偏移");
+            assert!(start > 0 && start < mirror_content.len());
+            let body = &mirror_content[start..];
+            let header = format!("HTTP/1.1 206 Partial Content\r\nContent-Length: {}\r\nContent-Range: bytes {}-{}/{}\r\nConnection: close\r\n\r\n", body.len(), start, mirror_content.len() - 1, mirror_content.len());
+            stream.write_all(header.as_bytes()).expect("写入镜像响应头");
+            stream.write_all(body).expect("写入镜像剩余内容");
+        });
+        let temporary = tempfile::tempdir().expect("创建切源测试目录");
+        let partial = temporary.path().join("runtime.zip.part");
+        let mut item = item();
+        item.byte_size = content.len() as u64;
+        item.sha256 = hex::encode(Sha256::digest(&content));
+        let official = DesktopResourceSource { kind: "official".into(), url: format!("http://{official_address}/runtime.zip") };
+        let mirror = DesktopResourceSource { kind: "mirror".into(), url: format!("http://{mirror_address}/runtime.zip") };
+        let client = Client::builder().timeout(Duration::from_secs(5)).build().expect("创建切源测试客户端");
+        let policy = DownloadPolicy { low_speed_window: Duration::from_millis(100), minimum_bytes_per_second: 128 * 1024 };
+        let error = download_from_source_with_policy(&client, &item, &official, &partial, Instant::now(), &|_| {}, policy).expect_err("慢速官方来源应当熔断");
+        assert!(error.contains("速度过低"));
+        let retained = partial.metadata().expect("读取已保留断点").len();
+        assert!(retained > 0 && retained < item.byte_size);
+        download_from_source_with_policy(&client, &item, &mirror, &partial, Instant::now(), &|_| {}, DownloadPolicy { low_speed_window: Duration::from_secs(2), minimum_bytes_per_second: 1 }).expect("镜像从原偏移续传");
+        official_server.join().expect("等待慢速官方端点退出");
+        mirror_server.join().expect("等待镜像端点退出");
+        assert_eq!(fs::read(partial).expect("读取切源下载结果"), content);
     }
 
     #[test]

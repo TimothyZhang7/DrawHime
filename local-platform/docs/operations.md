@@ -59,6 +59,15 @@ node scripts/publish-desktop-application-update.mjs publish --installer INSTALLE
 
 发布脚本固定执行安装包大小/SHA-256、共享契约、Ed25519 私钥与桌面内置公钥一致性检查；生产端先上传临时文件并备份旧信封，只在资源落盘后原子切换清单，回环 API 未读到新资源时自动恢复旧信封。应用更新资源发布不重启 API，也不接触数据库、模型、LoRA、训练集、任务、媒体或钱包。
 
+签名清单历史数据存在官方/镜像重复 URL 时，先规范化到新文件并完成签名自检，再原子替换生产信封；相同 URL 保留镜像语义，避免客户端在同一故障地址之间进行无效切换：
+
+```powershell
+pnpm desktop:resource-manifest normalize --payload OLD_PAYLOAD.json --output NEXT_PAYLOAD.json
+pnpm desktop:resource-manifest sign --payload NEXT_PAYLOAD.json --private-key PRIVATE.pem --output NEXT_ENVELOPE.json --key-id KEY_ID
+pnpm desktop:deploy-manifest --envelope NEXT_ENVELOPE.json --state-payload CURRENT_PAYLOAD.json --state-envelope CURRENT_ENVELOPE.json --dry-run
+pnpm desktop:deploy-manifest --envelope NEXT_ENVELOPE.json --state-payload CURRENT_PAYLOAD.json --state-envelope CURRENT_ENVELOPE.json
+```
+
 可选目标：`web`、`admin`、`api`、`scheduler`、`gpu-agent`、`inference-worker`、`training-worker`、`artifact-service`、`source`、`all`。单服务目标只上传共享包与对应 app，只构建和重启该 PM2 进程；`api` 额外执行 Prisma 生成、生产迁移和标签种子，其他服务不触碰数据库。前端目标直接上传本机构建产物，不在生产机安装依赖。
 
 ## 生产队列规则

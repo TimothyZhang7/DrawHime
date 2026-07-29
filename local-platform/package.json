@@ -23,6 +23,7 @@
     "bootstrap:tag-translations": "node apps/api/dist/bootstrap-tag-translations.js",
     "sync:anima-models": "node scripts/sync-anima-base-models.mjs",
     "desktop:resource-manifest": "node scripts/manage-desktop-resource-manifest.mjs",
+    "desktop:deploy-manifest": "node scripts/deploy-desktop-resource-manifest.mjs",
     "desktop:publish-application": "node scripts/publish-desktop-application-update.mjs",
     "desktop:set-version": "node scripts/set-desktop-version.mjs",
     "desktop:build-runtime": "node scripts/build-desktop-runtime.mjs",
