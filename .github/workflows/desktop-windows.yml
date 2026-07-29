@@ -81,6 +81,12 @@ jobs:
           $before = "${{ github.event.before }}"
           $nativeChanged = $true
           if ($before -and $before -notmatch '^0+$') {
+            git cat-file -e "$before^{commit}" 2>$null
+            if ($LASTEXITCODE -ne 0) {
+              # 同一次推送包含多个提交时，浅克隆不一定包含事件基线，只补取该提交而不拉取完整历史。
+              git fetch --no-tags --depth=1 origin $before
+              if ($LASTEXITCODE -ne 0) { throw "读取推送基线提交失败：$before" }
+            }
             $changedFiles = @(git diff --name-only $before $env:GITHUB_SHA -- "apps/desktop/src-tauri")
             $nativeChanged = $changedFiles.Count -gt 0
           }
