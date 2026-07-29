@@ -104,6 +104,7 @@ model ExternalIdentity {
   trainingJobs   TrainingJob[]
   sessions       PlatformSession[]
   desktopAuthorizations DesktopAuthorization[]
+  desktopGalleryUploads DesktopGalleryUpload[]
   inferenceSubmissionGate InferenceSubmissionGate?
 
   @@unique([issuer, subject])
@@ -123,6 +124,43 @@ model PlatformSession {
 
   @@index([externalIdentityId, expiresAt])
   @@index([expiresAt, revokedAt])
+}
+
+// 桌面本机产物的断点上传与正式图库发布镜像；文件先完整校验，再允许主站读取。
+model DesktopGalleryUpload {
+  id                 String   @id @default(uuid()) @db.VarChar(36)
+  externalIdentityId String   @db.VarChar(36)
+  localTaskId        String   @db.VarChar(36)
+  artifactSha256     String   @db.Char(64)
+  fileName           String   @db.VarChar(255)
+  temporaryFileName  String   @unique @db.VarChar(64)
+  mimeType           String   @db.VarChar(64)
+  totalBytes         BigInt
+  receivedBytes      BigInt   @default(0)
+  width              Int
+  height             Int
+  isPrivate          Boolean
+  effectivePrompt    String   @db.LongText
+  negativePrompt     String?  @db.LongText
+  modelDisplayName   String   @db.VarChar(191)
+  parameters         Json
+  status             String   @default("UPLOADING") @db.VarChar(24)
+  artifactId         String?  @unique @db.VarChar(36)
+  mainPublicationId  String?  @unique @db.VarChar(191)
+  mainGalleryItemId  String?  @unique @db.VarChar(191)
+  mediaUrl           String?  @db.VarChar(1000)
+  errorMessage       String?  @db.Text
+  expiresAt          DateTime
+  publishedAt        DateTime?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  externalIdentity ExternalIdentity @relation(fields: [externalIdentityId], references: [id], onDelete: Cascade)
+  artifact         JobArtifact?     @relation(fields: [artifactId], references: [id], onDelete: Restrict)
+
+  @@unique([externalIdentityId, localTaskId, artifactSha256], map: "desktop_gallery_owner_task_sha_uq")
+  @@index([externalIdentityId, status, createdAt], map: "desktop_gallery_owner_status_created_idx")
+  @@index([status, expiresAt], map: "desktop_gallery_status_expires_idx")
 }
 
 model DesktopAuthorization {
@@ -424,6 +462,7 @@ model JobArtifact {
   loraExamples    LoraExample[]
   modelExamples   ModelExample[]
   datasetAssets   DatasetAsset[]
+  desktopGalleryUpload DesktopGalleryUpload?
 
   @@index([jobId, kind])
   @@index([sha256])

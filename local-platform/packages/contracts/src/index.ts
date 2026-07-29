@@ -1081,6 +1081,37 @@ export const desktopGallerySyncItemSchema = z.object({
   updatedAt: z.string().datetime(),
 });
 
+/** 桌面端创建图库分片上传会话时固化的真实产物与任务快照。 */
+export const desktopGalleryUploadCreateRequestSchema = z.object({
+  localTaskId: z.string().uuid(),
+  artifactSha256: z.string().regex(/^[a-f0-9]{64}$/),
+  fileName: z.string().min(1).max(255),
+  mimeType: z.enum(["image/png", "image/jpeg", "image/webp"]),
+  byteSize: z.number().int().positive().max(100 * 1024 * 1024),
+  width: z.number().int().min(64).max(8192),
+  height: z.number().int().min(64).max(8192),
+  privacy: desktopGalleryPrivacySchema,
+  effectivePrompt: z.string().min(1).max(100000),
+  negativePrompt: z.string().max(100000).nullable().optional(),
+  modelDisplayName: z.string().min(1).max(191),
+  parameters: z.record(z.unknown()),
+});
+
+/** 桌面图库上传会话视图，不暴露对象存储键或临时文件路径。 */
+export const desktopGalleryUploadViewSchema = z.object({
+  id: z.string().uuid(),
+  localTaskId: z.string().uuid(),
+  status: z.enum(["uploading", "ready", "publishing", "published", "failed_retryable", "remote_deleted"]),
+  totalBytes: z.number().int().positive(),
+  receivedBytes: z.number().int().nonnegative(),
+  chunkSizeBytes: z.number().int().positive(),
+  privacy: desktopGalleryPrivacySchema,
+  mainGalleryItemId: z.string().nullable(),
+  mediaUrl: z.string().nullable(),
+  errorMessage: z.string().nullable(),
+  expiresAt: z.string().datetime(),
+});
+
 /** 桌面端首次加载时一次返回环境、设置和待同步数量。 */
 export const desktopBootstrapViewSchema = z.object({
   environment: desktopEnvironmentReportSchema,
@@ -1207,6 +1238,8 @@ export type DesktopAuthorizationApproveRequest = z.infer<typeof desktopAuthoriza
 export type DesktopAuthorizationPollView = z.infer<typeof desktopAuthorizationPollViewSchema>;
 export type DesktopAuthorizationApprovalView = z.infer<typeof desktopAuthorizationApprovalViewSchema>;
 export type DesktopAccountView = z.infer<typeof desktopAccountViewSchema>;
+export type DesktopGalleryUploadCreateRequest = z.infer<typeof desktopGalleryUploadCreateRequestSchema>;
+export type DesktopGalleryUploadView = z.infer<typeof desktopGalleryUploadViewSchema>;
 export type MainSessionExchangeRequest = z.infer<typeof mainSessionExchangeRequestSchema>;
 export type MainSessionExchangeResponse = z.infer<typeof mainSessionExchangeResponseSchema>;
 export type BillingReservationCreateRequest = z.infer<typeof billingReservationCreateRequestSchema>;

@@ -76,6 +76,15 @@ export async function publishMainGallery(jobId: string, input: GalleryPublicatio
   return galleryPublicationViewSchema.parse(payload);
 }
 
+/** 把桌面本机计算并完整校验的产物发布到主站正式图库，不经过共享 GPU 计费链路。 */
+export async function publishDesktopMainGallery(jobId: string, input: GalleryPublicationCreateRequest): Promise<GalleryPublicationView> {
+  const payload = await requestMain(`/internal/integrations/local-model/desktop-generations/${encodeURIComponent(jobId)}/publish`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  return galleryPublicationViewSchema.parse(payload);
+}
+
 /** 删除主站正式图库中的本地模型作品，不触碰主站钱包和计费审计。 */
 export async function removeMainGallery(jobId: string): Promise<GalleryPublicationRemovalView> {
   const payload = await requestMain(`/internal/integrations/local-model/generations/${encodeURIComponent(jobId)}`, {

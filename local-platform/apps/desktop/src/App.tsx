@@ -7,7 +7,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { addDesktopTrainingImages, cancelDesktopCaptionJob, cancelDesktopLocalJob, cancelDesktopTrainingJob, confirmDesktopTrainingDataset, createDesktopCaptionJob, createDesktopLocalJob, createDesktopTrainingDataset, createDesktopTrainingJob, downloadDesktopResource, importDesktopLocalLora, importDesktopLocalModel, inspectDesktopEnvironment, installDesktopResource, listDesktopCaptionJobs, listDesktopGallerySyncQueue, listDesktopLocalJobs, listDesktopLocalLoras, listDesktopLocalModels, listDesktopTrainingDatasets, listDesktopTrainingJobs, listenDesktopCaptionJobUpdates, listenDesktopLocalJobUpdates, listenDesktopResourceInstallProgress, listenDesktopResourceProgress, listenDesktopTrainingJobUpdates, loadDesktopAccountStatus, loadDesktopBootstrap, loadDesktopResourceCatalog, loadDesktopRuntimeStatus, saveDesktopSettings, selfTestDesktopRuntime, startDesktopRuntime, stopDesktopRuntime, updateDesktopTrainingCaption } from "./desktop-api";
+import { addDesktopTrainingImages, cancelDesktopCaptionJob, cancelDesktopLocalJob, cancelDesktopTrainingJob, confirmDesktopTrainingDataset, createDesktopCaptionJob, createDesktopLocalJob, createDesktopTrainingDataset, createDesktopTrainingJob, downloadDesktopResource, importDesktopLocalLora, importDesktopLocalModel, inspectDesktopEnvironment, installDesktopResource, listDesktopCaptionJobs, listDesktopGallerySyncQueue, listDesktopLocalJobs, listDesktopLocalLoras, listDesktopLocalModels, listDesktopTrainingDatasets, listDesktopTrainingJobs, listenDesktopCaptionJobUpdates, listenDesktopGallerySyncUpdates, listenDesktopLocalJobUpdates, listenDesktopResourceInstallProgress, listenDesktopResourceProgress, listenDesktopTrainingJobUpdates, loadDesktopAccountStatus, loadDesktopBootstrap, loadDesktopResourceCatalog, loadDesktopRuntimeStatus, saveDesktopSettings, selfTestDesktopRuntime, startDesktopRuntime, stopDesktopRuntime, updateDesktopTrainingCaption } from "./desktop-api";
 import { AccountPage } from "./AccountPage";
 
 type DesktopPage = "generate" | "jobs" | "models" | "loras" | "training" | "overview" | "environment" | "resources" | "sync" | "account" | "settings";
@@ -57,6 +57,11 @@ export function App() {
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     void listenDesktopResourceProgress((progress) => setResourceProgress((current) => ({ ...current, [progress.resourceId]: progress }))).then((dispose) => { unlisten = dispose; }).catch((error) => setMessage(errorMessage(error)));
+    return () => unlisten?.();
+  }, []);
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    void listenDesktopGallerySyncUpdates((item) => setQueue((current) => [item, ...current.filter((value) => value.id !== item.id)].sort((left, right) => right.createdAt.localeCompare(left.createdAt)))).then((dispose) => { unlisten = dispose; }).catch((error) => setMessage(errorMessage(error)));
     return () => unlisten?.();
   }, []);
   useEffect(() => {
@@ -480,7 +485,7 @@ function ResourcesPage({ catalog, progress, installProgress, loading, bulkBusy, 
 
 /** 图库同步页读取真实 SQLite 队列，离线队列不会因关闭窗口而丢失。 */
 function SyncPage({ items }: { items: DesktopGallerySyncItem[] }) {
-  return <div className="desktop-page"><section className="section-card"><header><div><span>GALLERY OUTBOX</span><h2>网页图库同步</h2></div><small>{items.length} 项</small></header>{items.length ? <div className="sync-list">{items.map((item) => <article key={item.id}><Image /><div><strong>{item.localTaskId}</strong><span>{item.privacy === "private" ? "私有" : "公开"} · {syncStatusLabel(item.status)}</span></div><small>{item.galleryItemId || item.artifactSha256.slice(0, 12)}</small></article>)}</div> : <div className="empty-block">本机暂时没有等待同步的生成结果</div>}</section></div>;
+  return <div className="desktop-page"><section className="section-card"><header><div><span>GALLERY OUTBOX</span><h2>网页图库同步</h2></div><small>{items.length} 项</small></header>{items.length ? <div className="sync-list">{items.map((item) => <article key={item.id}><Image /><div><strong>{item.localTaskId}</strong><span>{item.privacy === "private" ? "私有" : "公开"} · {syncStatusLabel(item.status)}{item.uploadedBytes > 0 ? ` · 已传 ${formatResourceBytes(item.uploadedBytes)}` : ""}</span>{item.lastError && <em>{item.lastError}</em>}</div><small>{item.galleryItemId || item.artifactSha256.slice(0, 12)}</small></article>)}</div> : <div className="empty-block">本机暂时没有等待同步的生成结果</div>}</section></div>;
 }
 
 /** 设置页把隐私、目录和上传策略真实保存到本机 SQLite。 */

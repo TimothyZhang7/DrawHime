@@ -69,6 +69,11 @@
 | `desktop-local-job-updated` | desktop core/local scheduler | desktop webview | 本地任务状态、进度或产物变化事件；载荷为 `DesktopLocalJobView`，刷新页面后仍以 SQLite 为准 |
 | `desktop_enqueue_gallery_publication` | desktop runtime/UI | desktop core | 校验本地结果文件、计算 SHA-256，并以本地任务和文件哈希幂等写入图库同步队列 |
 | `desktop_list_gallery_sync_queue` | desktop webview | desktop core | 读取当前设备本地图库同步队列；对应 `DesktopGallerySyncItem[]` |
+| `desktop-gallery-sync-updated` | desktop core/gallery sync worker | desktop webview | 图库分片上传、等待登录、网络重试或发布终态变化事件；载荷为最新 `DesktopGallerySyncItem` |
+| `POST /v1/desktop/gallery/uploads` | desktop core | api | 使用设备会话按账号、桌面任务 ID 与产物 SHA-256 幂等创建上传会话；固化隐私、尺寸、提示词、模型和参数快照，返回服务端真实偏移与 4 MiB 分片大小 |
+| `GET/PUT /v1/desktop/gallery/uploads/:id` | desktop core | api | 查询真实断点或按 `x-upload-offset` 追加单个分片；上传会话严格绑定创建账号，偏移冲突返回服务端真实偏移 |
+| `POST /v1/desktop/gallery/uploads/:id/complete` | desktop core | api/main backend | 校验完整字节数、SHA-256、图片格式与尺寸后原子写入对象存储，再通过桌面专用主站集成端点幂等发布正式图库；重试复用同一产物和发布键 |
+| `POST /internal/integrations/local-model/desktop-generations/:externalTaskId/publish` | api | main backend | 使用主站服务凭证发布已由设备会话绑定用户并完整校验的本机作品；不创建共享 GPU 计费，仍事务创建正式图库任务、媒体参数快照和发布镜像 |
 | `POST /v1/auth/session/exchange` | web/admin | api | 主站 Bearer JWT 换取 `LocalPlatformSessionView` |
 | `GET /v1/auth/me` | web/admin | api | `LocalPlatformSessionView` |
 | `DELETE /v1/auth/session` | web/admin | api | 撤销当前独立平台会话 |

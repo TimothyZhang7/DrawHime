@@ -4,6 +4,7 @@ mod captioner;
 mod auth;
 mod environment;
 mod generation;
+mod gallery_sync;
 mod local_model;
 mod models;
 mod resource;

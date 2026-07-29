@@ -1,6 +1,7 @@
 //! 本模块管理桌面端独立 SQLite、目录设置和图库同步队列，不连接网页或独立平台数据库。
 
 use crate::captioner::CaptionScheduler;
+use crate::gallery_sync::GallerySyncScheduler;
 use crate::models::{DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraView, DesktopLocalModelView, DesktopSettings, DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetView, DesktopTrainingJobCreateInput, DesktopTrainingJobView, GalleryPublicationInput, GallerySyncItem};
 use crate::runtime::RuntimeController;
 use crate::scheduler::LocalScheduler;
@@ -19,6 +20,7 @@ pub struct DesktopState {
     pub scheduler: Option<LocalScheduler>,
     pub caption_scheduler: Option<CaptionScheduler>,
     pub training_scheduler: Option<TrainingScheduler>,
+    pub gallery_sync_scheduler: Option<GallerySyncScheduler>,
     pub runtime: Arc<RuntimeController>,
     pub gpu_workload: Arc<GpuWorkloadCoordinator>,
 }
@@ -32,7 +34,7 @@ impl DesktopState {
         connection.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
             CREATE TABLE IF NOT EXISTS desktop_settings (id INTEGER PRIMARY KEY CHECK(id=1), theme_mode TEXT NOT NULL DEFAULT 'system', dependency_source TEXT NOT NULL DEFAULT 'auto', default_privacy TEXT NOT NULL, model_root TEXT NOT NULL, output_root TEXT NOT NULL, runtime_root TEXT NOT NULL, upload_concurrency INTEGER NOT NULL, wifi_only INTEGER NOT NULL, bandwidth_limit_kib INTEGER, updated_at TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS environment_snapshots (id INTEGER PRIMARY KEY AUTOINCREMENT, report_json TEXT NOT NULL, checked_at TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS gallery_sync_queue (id TEXT PRIMARY KEY, local_task_id TEXT NOT NULL, artifact_path TEXT NOT NULL, artifact_sha256 TEXT NOT NULL, privacy TEXT NOT NULL, status TEXT NOT NULL, uploaded_bytes INTEGER NOT NULL DEFAULT 0, retry_count INTEGER NOT NULL DEFAULT 0, gallery_item_id TEXT, last_error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(local_task_id, artifact_sha256));
+            CREATE TABLE IF NOT EXISTS gallery_sync_queue (id TEXT PRIMARY KEY, local_task_id TEXT NOT NULL, artifact_path TEXT NOT NULL, artifact_sha256 TEXT NOT NULL, privacy TEXT NOT NULL, status TEXT NOT NULL, uploaded_bytes INTEGER NOT NULL DEFAULT 0, retry_count INTEGER NOT NULL DEFAULT 0, gallery_item_id TEXT, last_error TEXT, owner_issuer TEXT, owner_subject TEXT, server_upload_id TEXT, next_attempt_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(local_task_id, artifact_sha256));
             CREATE TABLE IF NOT EXISTS local_models (id TEXT PRIMARY KEY, display_name TEXT NOT NULL, family TEXT NOT NULL, workflow_kind TEXT NOT NULL, model_file_name TEXT NOT NULL, model_relative_path TEXT NOT NULL, model_sha256 TEXT NOT NULL, byte_size INTEGER NOT NULL, model_modified_ms INTEGER NOT NULL, text_encoder_file_name TEXT, text_encoder_relative_path TEXT, text_encoder_sha256 TEXT, vae_file_name TEXT, vae_relative_path TEXT, vae_sha256 TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(model_sha256, workflow_kind));
             CREATE TABLE IF NOT EXISTS local_loras (id TEXT PRIMARY KEY, title TEXT NOT NULL, type TEXT NOT NULL, file_name TEXT NOT NULL, relative_path TEXT NOT NULL, sha256 TEXT NOT NULL UNIQUE, byte_size INTEGER NOT NULL, modified_ms INTEGER NOT NULL, trigger_words_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS local_training_datasets (id TEXT PRIMARY KEY, title TEXT NOT NULL, type TEXT NOT NULL, trigger_words_json TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
@@ -68,6 +70,10 @@ impl DesktopState {
         ensure_column(&connection, "local_job_loras", "byte_size", "INTEGER NOT NULL DEFAULT 0")?;
         ensure_column(&connection, "local_job_loras", "modified_ms", "INTEGER NOT NULL DEFAULT 0")?;
         ensure_column(&connection, "local_training_assets", "caption_source", "TEXT")?;
+        ensure_column(&connection, "gallery_sync_queue", "owner_issuer", "TEXT")?;
+        ensure_column(&connection, "gallery_sync_queue", "owner_subject", "TEXT")?;
+        ensure_column(&connection, "gallery_sync_queue", "server_upload_id", "TEXT")?;
+        ensure_column(&connection, "gallery_sync_queue", "next_attempt_at", "TEXT")?;
         connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS local_caption_jobs_active_dataset_idx ON local_caption_jobs(dataset_id) WHERE status IN ('queued','running')", []).map_err(|error| format!("创建打标任务活动索引失败：{error}"))?;
         connection.execute("CREATE INDEX IF NOT EXISTS local_caption_jobs_created_idx ON local_caption_jobs(created_at DESC)", []).map_err(|error| format!("创建打标任务时间索引失败：{error}"))?;
         // 旧开发版本已经生成的 LoRA 快照补齐文件元数据，避免升级后任务失去可执行性。
@@ -77,7 +83,7 @@ impl DesktopState {
         let output_root = picture_dir.join("DrawHime");
         for directory in [&model_root, &runtime_root, &output_root] { fs::create_dir_all(directory).map_err(|error| format!("创建本地目录失败：{error}"))?; }
         connection.execute("INSERT OR IGNORE INTO desktop_settings (id, theme_mode, dependency_source, default_privacy, model_root, output_root, runtime_root, upload_concurrency, wifi_only, bandwidth_limit_kib, updated_at) VALUES (1, 'system', 'auto', 'private', ?1, ?2, ?3, 2, 0, NULL, ?4)", params![path_text(&model_root), path_text(&output_root), path_text(&runtime_root), Utc::now().to_rfc3339()]).map_err(|error| format!("写入默认设置失败：{error}"))?;
-        Ok(Self { database: Mutex::new(connection), app_data_dir: app_data_dir.to_path_buf(), database_path, scheduler: None, caption_scheduler: None, training_scheduler: None, runtime: Arc::new(RuntimeController::new()), gpu_workload: GpuWorkloadCoordinator::new() })
+        Ok(Self { database: Mutex::new(connection), app_data_dir: app_data_dir.to_path_buf(), database_path, scheduler: None, caption_scheduler: None, training_scheduler: None, gallery_sync_scheduler: None, runtime: Arc::new(RuntimeController::new()), gpu_workload: GpuWorkloadCoordinator::new() })
     }
 
     /** 数据库初始化完成后启动唯一后台调度线程。 */
@@ -85,7 +91,8 @@ impl DesktopState {
         if self.scheduler.is_some() { return Ok(()); }
         self.scheduler = Some(LocalScheduler::start(self.database_path.clone(), self.app_data_dir.clone(), self.runtime.clone(), self.gpu_workload.clone(), app.clone())?);
         self.caption_scheduler = Some(CaptionScheduler::start(self.database_path.clone(), self.app_data_dir.clone(), app.clone())?);
-        self.training_scheduler = Some(TrainingScheduler::start(self.database_path.clone(), self.app_data_dir.clone(), self.runtime.clone(), self.gpu_workload.clone(), app)?);
+        self.training_scheduler = Some(TrainingScheduler::start(self.database_path.clone(), self.app_data_dir.clone(), self.runtime.clone(), self.gpu_workload.clone(), app.clone())?);
+        self.gallery_sync_scheduler = Some(GallerySyncScheduler::start(self.database_path.clone(), app)?);
         Ok(())
     }
 
@@ -134,7 +141,7 @@ impl DesktopState {
         let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
         let existing: Option<String> = database.query_row("SELECT id FROM gallery_sync_queue WHERE local_task_id=?1 AND artifact_sha256=?2", params![input.local_task_id, sha256], |row| row.get(0)).optional().map_err(|error| format!("查询图库同步队列失败：{error}"))?;
         let id = existing.unwrap_or_else(|| Uuid::new_v4().to_string());
-        database.execute("INSERT INTO gallery_sync_queue (id, local_task_id, artifact_path, artifact_sha256, privacy, status, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, 'queued', ?6, ?6) ON CONFLICT(local_task_id, artifact_sha256) DO UPDATE SET privacy=excluded.privacy, artifact_path=excluded.artifact_path, updated_at=excluded.updated_at", params![id, input.local_task_id, input.artifact_path, sha256, input.privacy, now]).map_err(|error| format!("写入图库同步队列失败：{error}"))?;
+        database.execute("INSERT INTO gallery_sync_queue (id, local_task_id, artifact_path, artifact_sha256, privacy, status, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, 'queued', ?6, ?6) ON CONFLICT(local_task_id, artifact_sha256) DO UPDATE SET privacy=CASE WHEN gallery_sync_queue.privacy='private' OR excluded.privacy='private' THEN 'private' ELSE 'public' END, artifact_path=excluded.artifact_path,updated_at=excluded.updated_at", params![id, input.local_task_id, input.artifact_path, sha256, input.privacy, now]).map_err(|error| format!("写入图库同步队列失败：{error}"))?;
         drop(database);
         self.gallery_item(&id)?.ok_or_else(|| "图库同步记录写入后不存在".into())
     }
@@ -398,7 +405,8 @@ mod tests {
         let first = state.enqueue_gallery_publication(GalleryPublicationInput { local_task_id: "local-task-1".into(), artifact_path: path_text(&artifact), privacy: "private".into() }).expect("加入队列");
         let second = state.enqueue_gallery_publication(GalleryPublicationInput { local_task_id: "local-task-1".into(), artifact_path: path_text(&artifact), privacy: "public".into() }).expect("幂等更新队列");
         assert_eq!(first.id, second.id);
-        assert_eq!(second.privacy, "public");
+        // 同一产物的隐私冲突始终保留更严格的私有状态。
+        assert_eq!(second.privacy, "private");
         assert_eq!(state.pending_gallery_sync_count().expect("统计队列"), 1);
     }
 

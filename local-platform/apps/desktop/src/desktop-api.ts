@@ -23,6 +23,8 @@ export function inspectDesktopEnvironment(): Promise<DesktopEnvironmentReport> {
 export function saveDesktopSettings(settings: DesktopSettingsUpdate): Promise<DesktopSettings> { return invoke("desktop_save_settings", { settings }); }
 /** 读取本机持久化图库同步队列。 */
 export function listDesktopGallerySyncQueue(): Promise<DesktopGallerySyncItem[]> { return invoke("desktop_list_gallery_sync_queue"); }
+/** 监听图库 Worker 已持久化的断点与终态变化。 */
+export function listenDesktopGallerySyncUpdates(handler: (item: DesktopGallerySyncItem) => void): Promise<UnlistenFn> { return listen<DesktopGallerySyncItem>("desktop-gallery-sync-updated", (event) => handler(event.payload)); }
 /** 把已校验的本地结果加入幂等图库同步队列。 */
 export function enqueueDesktopGalleryPublication(input: { localTaskId: string; artifactPath: string; privacy: DesktopGalleryPrivacy }): Promise<DesktopGallerySyncItem> { return invoke("desktop_enqueue_gallery_publication", { input }); }
 /** 拉取并验签桌面端资源目录；发布通道未配置时返回明确状态。 */

@@ -38,6 +38,7 @@ import { registerBotRoutes } from "./bot-routes.js";
 import { registerTrainingRoutes } from "./training-routes.js";
 import { registerDesktopAuthRoutes } from "./desktop-auth.js";
 import { registerDesktopResourceRoutes } from "./desktop-resources.js";
+import { registerDesktopGalleryRoutes } from "./desktop-gallery.js";
 import { toInferenceJobView } from "./inference-views.js";
 import { getInferenceQueueEstimates } from "./queue-estimates.js";
 import { inferenceSubmissionCooldownRemainingSeconds, normalizeInferenceSubmissionCooldownSeconds } from "./submission-cooldown.js";
@@ -99,6 +100,7 @@ startService({
   registerRoutes(router, getReadiness) {
     registerDesktopResourceRoutes(router);
     registerDesktopAuthRoutes(router, findLocalSessionRecord);
+    registerDesktopGalleryRoutes(router, findLocalSessionRecord);
     registerLoraLibraryRoutes(router, findLocalSessionRecord);
     registerModelLibraryRoutes(router, findLocalSessionRecord);
     registerAdminRuntimeRoutes(router, findLocalSessionRecord);
@@ -223,6 +225,11 @@ startService({
     router.delete("/internal/gallery-publications/:externalTaskId", async ({ request, response, params }) => {
       if (!authenticateMainPlatform(request)) return sendError(response, 403, "main_platform_token_invalid", "主站服务凭证不正确");
       try {
+        const desktopTaskId = desktopLocalTaskId(params.externalTaskId);
+        if (desktopTaskId) {
+          const result = await database.desktopGalleryUpload.updateMany({ where: { localTaskId: desktopTaskId, status: "PUBLISHED" }, data: { status: "REMOTE_DELETED" } });
+          return sendSuccess(response, { id: params.externalTaskId, deleted: result.count > 0 });
+        }
         const deleted = await removeInferenceJob(params.externalTaskId, false);
         sendSuccess(response, { id: params.externalTaskId, deleted });
       } catch (error) {
@@ -247,9 +254,11 @@ startService({
       if (!authenticateMainPlatform(request)) return sendError(response, 403, "main_platform_token_invalid", "主站服务凭证不正确");
       const artifact = await database.jobArtifact.findUnique({
         where: { id: params.id },
-        include: { job: { include: { billingReservation: true } } },
+        include: { job: { include: { billingReservation: true } }, desktopGalleryUpload: true },
       });
-      if (!artifact?.job || artifact.job.deletedAt || artifact.job.status !== "SUCCEEDED" || artifact.job.billingReservation?.status !== "COMMITTED") {
+      const inferencePublishable = Boolean(artifact?.job && !artifact.job.deletedAt && artifact.job.status === "SUCCEEDED" && artifact.job.billingReservation?.status === "COMMITTED");
+      const desktopPublishable = Boolean(artifact?.desktopGalleryUpload && ["READY", "PUBLISHING", "PUBLISHED"].includes(artifact.desktopGalleryUpload.status));
+      if (!artifact || (!inferencePublishable && !desktopPublishable)) {
         return sendError(response, 404, "artifact_not_publishable", "产物不存在或尚未达到发布终态");
       }
       const object = await getObjectBuffer(artifact.objectKey);
@@ -290,6 +299,13 @@ startService({
 
     router.get("/internal/gallery-publications/:externalTaskId/loras", async ({ request, response, params }) => {
       if (!authenticateMainPlatform(request)) return sendError(response, 403, "main_platform_token_invalid", "主站服务凭证不正确");
+      const desktopTaskId = desktopLocalTaskId(params.externalTaskId);
+      if (desktopTaskId) {
+        const upload = await database.desktopGalleryUpload.findFirst({ where: { localTaskId: desktopTaskId, status: "PUBLISHED" } });
+        if (!upload) return sendError(response, 404, "gallery_lora_metadata_not_found", "图库 LoRA 元数据不存在");
+        // 本机私有 LoRA 没有网站仓库版本 ID，首版只返回独立保存的负面提示词。
+        return sendSuccess(response, { loras: [], negativePrompt: upload.negativePrompt?.trim() || null });
+      }
       const job = await database.inferenceJob.findUnique({
         where: { id: params.externalTaskId },
         include: { galleryPublication: true },
@@ -448,6 +464,13 @@ async function findLocalSessionRecord(token: string | null) {
 function readIdentityRoles(value: unknown): Array<"user" | "admin"> {
   const roles = Array.isArray(value) ? value.filter((role): role is "user" | "admin" => role === "user" || role === "admin") : [];
   return roles.length ? roles : ["user"];
+}
+
+/** 把主站桌面任务 ID 还原为本地 UUID；非桌面任务返回空值。 */
+function desktopLocalTaskId(value: string): string | null {
+  const compact = value.startsWith("desktop_") ? value.slice(8) : "";
+  if (!/^[0-9a-f]{32}$/i.test(compact)) return null;
+  return `${compact.slice(0, 8)}-${compact.slice(8, 12)}-${compact.slice(12, 16)}-${compact.slice(16, 20)}-${compact.slice(20)}`.toLowerCase();
 }
 
 /** 查询可用模型及其唯一活动工作流。 */

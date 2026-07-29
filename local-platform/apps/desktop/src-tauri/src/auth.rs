@@ -9,6 +9,15 @@ const API_BASE_URL: &str = "https://www.xanime.ink/local-model-api";
 const CREDENTIAL_SERVICE: &str = "ink.xanime.drawhime.desktop";
 const CREDENTIAL_USER: &str = "local-platform-session";
 
+/** 图库同步 Worker 使用的内部会话；该类型绝不进入 Tauri IPC。 */
+pub(crate) struct DesktopAuthenticatedSession {
+    pub token: String,
+    pub identity: DesktopIdentityView,
+}
+
+/** 内部会话检查错误，供同步 Worker 区分断网与服务异常。 */
+pub(crate) enum DesktopSessionError { Network, Service(String) }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DesktopIdentityView {
@@ -99,6 +108,25 @@ pub fn account_status() -> Result<DesktopAccountView, String> {
         Err(ApiFailure::Service(message)) => Err(message),
     }
 }
+
+/** 读取并在线校验内部设备会话，原始密钥只在 Rust 核心内存中流转。 */
+pub(crate) fn authenticated_session() -> Result<Option<DesktopAuthenticatedSession>, DesktopSessionError> {
+    let token = read_credential().map_err(DesktopSessionError::Service)?;
+    let Some(token) = token else { return Ok(None); };
+    let client = api_client().map_err(DesktopSessionError::Service)?;
+    match send_session_request(&client, "GET", "/v1/auth/me", &token) {
+        Ok(session) => Ok(Some(DesktopAuthenticatedSession { token, identity: session.identity })),
+        Err(ApiFailure::Unauthorized) => {
+            delete_credential().map_err(DesktopSessionError::Service)?;
+            Ok(None)
+        }
+        Err(ApiFailure::Network) => Err(DesktopSessionError::Network),
+        Err(ApiFailure::Service(message)) => Err(DesktopSessionError::Service(message)),
+    }
+}
+
+/** 拼接固定生产 API 地址，调用方只能传登记过的相对路径。 */
+pub(crate) fn api_url(path: &str) -> String { format!("{API_BASE_URL}{path}") }
 
 /** 创建一次设备授权请求；设备密钥只停留在当前 WebView 内存直至授权结束。 */
 pub fn start_authorization(input: DesktopAuthorizationStartInput) -> Result<DesktopAuthorizationRequestView, String> {
