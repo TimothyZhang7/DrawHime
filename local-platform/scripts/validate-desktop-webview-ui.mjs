@@ -26,7 +26,7 @@ try {
     validateProbe(result, expectNoGpu);
     const evidence = {
       checkedAt: new Date().toISOString(),
-      targetTitle: target.title,
+      targetTitle: result.documentTitle,
       environmentStatus: result.environmentStatus,
       inferenceReady: result.inferenceReady,
       trainingReady: result.trainingReady,
@@ -164,6 +164,7 @@ function buildProbeExpression() {
     const banner = document.querySelector('.environment-banner');
     return {
       environmentStatus: shell.dataset.environmentStatus || '',
+      documentTitle: document.title,
       inferenceReady: shell.dataset.inferenceReady === 'true',
       trainingReady: shell.dataset.trainingReady === 'true',
       bannerText: banner?.textContent?.trim() || '',
