@@ -819,6 +819,54 @@ export const desktopLocalLoraImportInputSchema = z.object({
   triggerWords: z.array(z.string().trim().min(1).max(100)).max(50),
 });
 
+/** 桌面端本地训练集及逐图 Caption 视图。 */
+export const desktopTrainingDatasetViewSchema = z.object({
+  id: z.string().uuid(),
+  title: z.string().min(1).max(191),
+  type: z.enum(["character", "style", "concept"]),
+  triggerWords: z.array(z.string().min(1).max(100)).max(50),
+  status: z.enum(["draft", "review_ready", "confirmed"]),
+  assets: z.array(z.object({
+    id: z.string().uuid(),
+    fileName: z.string().min(1),
+    path: z.string().min(1),
+    sha256: z.string().regex(/^[a-f0-9]{64}$/),
+    byteSize: z.number().int().positive(),
+    width: z.number().int().positive(),
+    height: z.number().int().positive(),
+    available: z.boolean(),
+    caption: z.string().nullable(),
+    confirmed: z.boolean(),
+    createdAt: z.string().datetime(),
+    updatedAt: z.string().datetime(),
+  })).max(200),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+
+/** 桌面端创建本地训练集的输入。 */
+export const desktopTrainingDatasetCreateInputSchema = z.object({
+  title: z.string().trim().min(1).max(191),
+  type: desktopTrainingDatasetViewSchema.shape.type,
+  triggerWords: z.array(z.string().trim().min(1).max(100)).max(50),
+});
+
+/** 桌面端向训练集批量导入图片的输入。 */
+export const desktopTrainingImagesAddInputSchema = z.object({
+  datasetId: z.string().uuid(),
+  sourcePaths: z.array(z.string().min(1)).min(1).max(200),
+});
+
+/** 桌面端保存单张训练图片 Caption 的输入。 */
+export const desktopTrainingCaptionUpdateInputSchema = z.object({
+  datasetId: z.string().uuid(),
+  assetId: z.string().uuid(),
+  caption: z.string().trim().max(10000).nullable(),
+});
+
+/** 桌面端训练集 ID 输入，供确认等幂等命令使用。 */
+export const desktopTrainingDatasetIdInputSchema = z.object({ datasetId: z.string().uuid() });
+
 /** 单个本地任务的 LoRA 选择和强度。 */
 export const desktopLocalLoraSelectionSchema = z.object({ id: z.string().uuid(), strength: z.number().min(0).max(1.5) });
 
@@ -1058,6 +1106,11 @@ export type DesktopLocalModelImportInput = z.infer<typeof desktopLocalModelImpor
 export type DesktopLocalLoraView = z.infer<typeof desktopLocalLoraViewSchema>;
 export type DesktopLocalLoraImportInput = z.infer<typeof desktopLocalLoraImportInputSchema>;
 export type DesktopLocalLoraSelection = z.infer<typeof desktopLocalLoraSelectionSchema>;
+export type DesktopTrainingDatasetView = z.infer<typeof desktopTrainingDatasetViewSchema>;
+export type DesktopTrainingDatasetCreateInput = z.infer<typeof desktopTrainingDatasetCreateInputSchema>;
+export type DesktopTrainingImagesAddInput = z.infer<typeof desktopTrainingImagesAddInputSchema>;
+export type DesktopTrainingCaptionUpdateInput = z.infer<typeof desktopTrainingCaptionUpdateInputSchema>;
+export type DesktopTrainingDatasetIdInput = z.infer<typeof desktopTrainingDatasetIdInputSchema>;
 export type DesktopLocalJobCreateInput = z.infer<typeof desktopLocalJobCreateInputSchema>;
 export type DesktopLocalJobView = z.infer<typeof desktopLocalJobViewSchema>;
 export type DesktopGallerySyncItem = z.infer<typeof desktopGallerySyncItemSchema>;

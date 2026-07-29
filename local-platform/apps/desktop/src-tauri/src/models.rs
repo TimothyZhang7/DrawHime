@@ -88,6 +88,71 @@ pub struct DesktopLocalLoraSelectionInput {
     pub strength: f64,
 }
 
+/** 本地训练集中的单张真实图片与 Caption 视图。 */
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopTrainingAssetView {
+    pub id: String,
+    pub file_name: String,
+    pub path: String,
+    pub sha256: String,
+    pub byte_size: u64,
+    pub width: u32,
+    pub height: u32,
+    pub available: bool,
+    pub caption: Option<String>,
+    pub confirmed: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/** 本地训练集及当前人工确认阶段。 */
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopTrainingDatasetView {
+    pub id: String,
+    pub title: String,
+    pub r#type: String,
+    pub trigger_words: Vec<String>,
+    pub status: String,
+    pub assets: Vec<DesktopTrainingAssetView>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/** 创建本地训练集的输入。 */
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopTrainingDatasetCreateInput {
+    pub title: String,
+    pub r#type: String,
+    pub trigger_words: Vec<String>,
+}
+
+/** 向本地训练集批量导入图片的输入。 */
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopTrainingImagesAddInput {
+    pub dataset_id: String,
+    pub source_paths: Vec<String>,
+}
+
+/** 保存单张训练图片 Caption 的输入。 */
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopTrainingCaptionUpdateInput {
+    pub dataset_id: String,
+    pub asset_id: String,
+    pub caption: Option<String>,
+}
+
+/** 仅包含训练集 ID 的幂等命令输入。 */
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopTrainingDatasetIdInput {
+    pub dataset_id: String,
+}
+
 /** 提交到本机串行调度器的生成参数。 */
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]

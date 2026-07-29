@@ -1345,6 +1345,333 @@ select:focus-visible {
   color: var(--danger);
 }
 
+/* 本地训练集使用固定步骤事实源；图片、Caption 和确认状态在紧凑窗口仍保持可操作。 */
+.training-page {
+  display: grid;
+  gap: 12px;
+}
+
+.training-create > div {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.2fr) minmax(130px, 0.6fr) minmax(220px, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+}
+
+.training-create label,
+.training-asset-caption {
+  min-width: 0;
+}
+
+.training-create label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.training-create input,
+.training-create select {
+  width: 100%;
+  height: 36px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--control);
+  color: var(--text);
+}
+
+.training-create button,
+.training-editor-actions button,
+.training-asset-caption footer button {
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 12px;
+  border: 1px solid var(--accent-border);
+  border-radius: 5px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 8px;
+  font-weight: 800;
+}
+
+.training-create button:disabled,
+.training-editor-actions button:disabled,
+.training-asset-caption footer button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.training-create button svg,
+.training-editor-actions button svg,
+.training-asset-caption footer button svg {
+  width: 14px;
+}
+
+.training-workspace {
+  min-height: 520px;
+  display: grid;
+  grid-template-columns: 230px minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+}
+
+.training-dataset-list {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+}
+
+.training-dataset-list > header {
+  display: flex;
+  justify-content: space-between;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.training-dataset-list > header strong {
+  font-size: 9px;
+}
+
+.training-dataset-list > header small {
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.training-dataset-list > button {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  padding: 9px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--panel-raised);
+  color: var(--text);
+  text-align: left;
+}
+
+.training-dataset-list > button.active {
+  border-color: var(--accent-border);
+  box-shadow: inset 3px 0 var(--accent);
+}
+
+.training-dataset-list > button span,
+.training-dataset-list > button strong,
+.training-dataset-list > button small {
+  min-width: 0;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.training-dataset-list > button strong {
+  font-size: 8px;
+}
+
+.training-dataset-list > button small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 7px;
+}
+
+.training-dataset-list b,
+.training-gate > b {
+  padding: 4px 6px;
+  border: 1px solid var(--warning-border);
+  border-radius: 4px;
+  background: var(--warning-soft);
+  color: var(--warning);
+  font-size: 7px;
+}
+
+.training-dataset-list b.is-confirmed,
+.training-gate > b.is-confirmed {
+  border-color: var(--success-border);
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.training-dataset-list b.is-review_ready,
+.training-gate > b.is-review_ready {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.training-editor > header,
+.training-editor-actions,
+.training-gate,
+.training-asset-caption header,
+.training-asset-caption footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.training-editor > header {
+  margin-bottom: 9px;
+}
+
+.training-editor > header span {
+  color: var(--muted);
+  font-size: 7px;
+}
+
+.training-editor > header h2 {
+  margin: 3px 0 0;
+  font-size: 15px;
+}
+
+.training-editor-actions button:first-child {
+  border-color: var(--border);
+  background: var(--panel-raised);
+  color: var(--text);
+}
+
+.training-gate {
+  margin-bottom: 10px;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--panel-muted);
+}
+
+.training-gate span strong,
+.training-gate span small {
+  display: block;
+}
+
+.training-gate span strong {
+  font-size: 9px;
+}
+
+.training-gate span small {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 7px;
+}
+
+.training-asset-list {
+  display: grid;
+  gap: 8px;
+}
+
+.training-asset-list > article {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 170px minmax(0, 1fr);
+  gap: 10px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--panel-raised);
+}
+
+.training-asset-image {
+  position: relative;
+  height: 128px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--panel-muted);
+}
+
+.training-asset-image img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+}
+
+.training-asset-image > div {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  color: var(--danger);
+  font-size: 8px;
+}
+
+.training-asset-image > div svg {
+  width: 20px;
+}
+
+.training-asset-list > article.is-missing {
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+}
+
+.training-asset-image > span {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  padding: 3px 5px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.66);
+  color: #fff;
+  font-size: 7px;
+}
+
+.training-asset-caption {
+  display: grid;
+  grid-template-rows: auto minmax(64px, 1fr) auto;
+  gap: 7px;
+}
+
+.training-asset-caption header strong,
+.training-asset-caption header small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.training-asset-caption header strong {
+  font-size: 8px;
+}
+
+.training-asset-caption header small {
+  color: var(--muted);
+  font-size: 7px;
+}
+
+.training-asset-caption textarea {
+  width: 100%;
+  min-height: 64px;
+  resize: vertical;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--control);
+  color: var(--text);
+  font: inherit;
+  font-size: 8px;
+  line-height: 1.5;
+}
+
+.training-asset-caption footer span {
+  color: var(--warning);
+  font-size: 7px;
+  font-weight: 800;
+}
+
+.training-asset-caption footer span.confirmed {
+  color: var(--success);
+}
+
+.training-asset-caption footer span.missing {
+  color: var(--danger);
+}
+
 .local-job-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1698,8 +2025,17 @@ select:focus-visible {
   }
 
   .desktop-sidebar nav button {
+    width: 42px;
     height: 36px;
+    justify-content: center;
+    padding: 0;
+    font-size: 0;
     white-space: nowrap;
+  }
+
+  .desktop-sidebar nav button svg {
+    width: 17px;
+    height: 17px;
   }
 
   .desktop-sidebar nav button i {
@@ -1714,6 +2050,22 @@ select:focus-visible {
   .desktop-main {
     grid-column: 1;
     grid-row: 2;
+  }
+
+  .training-create > div {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .training-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .training-dataset-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .training-dataset-list > header {
+    grid-column: 1 / -1;
   }
 
   .environment-summary {
@@ -1807,6 +2159,24 @@ select:focus-visible {
   .lora-library-grid,
   .local-job-grid {
     grid-template-columns: 1fr;
+  }
+
+  .training-create > div,
+  .training-dataset-list {
+    grid-template-columns: 1fr;
+  }
+
+  .training-asset-list > article {
+    grid-template-columns: 140px minmax(0, 1fr);
+  }
+
+  .training-editor > header {
+    align-items: flex-start;
+  }
+
+  .training-editor-actions {
+    flex-direction: column;
+    align-items: stretch;
   }
 }
 
