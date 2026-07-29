@@ -36,6 +36,7 @@ import { findLoraSelectionConflict } from "./lora-selection.js";
 import { registerAdminRuntimeRoutes } from "./admin-runtime.js";
 import { registerBotRoutes } from "./bot-routes.js";
 import { registerTrainingRoutes } from "./training-routes.js";
+import { registerDesktopAuthRoutes } from "./desktop-auth.js";
 import { registerDesktopResourceRoutes } from "./desktop-resources.js";
 import { toInferenceJobView } from "./inference-views.js";
 import { getInferenceQueueEstimates } from "./queue-estimates.js";
@@ -97,6 +98,7 @@ startService({
   checks,
   registerRoutes(router, getReadiness) {
     registerDesktopResourceRoutes(router);
+    registerDesktopAuthRoutes(router, findLocalSessionRecord);
     registerLoraLibraryRoutes(router, findLocalSessionRecord);
     registerModelLibraryRoutes(router, findLocalSessionRecord);
     registerAdminRuntimeRoutes(router, findLocalSessionRecord);

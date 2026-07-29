@@ -1,0 +1,33 @@
+/* 本文件定义桌面账号连接页的工业工作站视觉与窗口自适应规则。 */
+.account-page { display:grid;grid-template-columns:minmax(0,1.3fr) minmax(300px,.7fr);gap:14px;align-items:start }
+.account-hero { grid-column:1/-1;display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:18px;padding:24px }
+.account-seal { width:66px;height:66px;display:grid;place-items:center;border:1px solid var(--accent-border);border-radius:20px;background:var(--accent-soft);color:var(--accent) }
+.account-seal.is-connected { border-color:var(--success-border);background:var(--success-soft);color:var(--success) }
+.account-seal.is-offline { border-color:var(--warning-border);background:var(--warning-soft);color:var(--warning) }
+.account-seal svg { width:29px;height:29px }
+.account-copy>span,.account-details header span,.account-device-flow header span { color:var(--accent);font-size:10px;font-weight:850;letter-spacing:.13em }
+.account-copy h2,.account-details header h2,.account-device-flow header h2 { margin:3px 0 0;font-size:18px }
+.account-copy p { margin:6px 0 0;color:var(--muted) }
+.account-actions { display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px }
+.account-actions button,.account-device-flow>button { min-height:38px;display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:0 13px;border:1px solid var(--border-strong);border-radius:10px;background:var(--control);color:var(--text);font-weight:720 }
+.account-actions button.primary { border-color:var(--accent-border);background:var(--accent);color:#fff }
+.account-actions button.danger { border-color:var(--danger-border);color:var(--danger) }
+.account-actions button:disabled { opacity:.56;cursor:wait }
+.account-details,.account-device-flow { padding:20px }
+.account-details>header,.account-device-flow>header { display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px }
+.account-details>header svg,.account-device-flow>header svg { color:var(--accent) }
+.account-details dl { display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:0 }
+.account-details dl>div { padding:11px;border:1px solid var(--border);border-radius:10px;background:var(--panel-muted) }
+.account-details dt { color:var(--muted);font-size:10px }
+.account-details dd { margin:4px 0 0;font-weight:740;overflow-wrap:anywhere }
+.account-details>p { margin:14px 0 0;color:var(--muted);font-size:11px;line-height:1.7 }
+.account-device-code { display:grid;justify-items:center;gap:6px;padding:20px;border:1px solid var(--accent-border);border-radius:14px;background:var(--accent-soft);text-align:center }
+.account-device-code small,.account-device-code span { color:var(--muted) }
+.account-device-code strong { color:var(--accent);font-family:"Cascadia Code",Consolas,monospace;font-size:clamp(25px,4vw,34px);letter-spacing:.12em }
+.account-device-flow>button { width:100%;margin-top:12px }
+.account-boundary { grid-column:1/-1;display:flex;align-items:flex-start;gap:13px;padding:18px 20px }
+.account-boundary>svg { flex:0 0 auto;color:var(--success) }
+.account-boundary strong,.account-boundary span { display:block }
+.account-boundary span { margin-top:4px;color:var(--muted);line-height:1.65 }
+@media(max-width:900px){.account-page{grid-template-columns:1fr}.account-hero{grid-template-columns:auto minmax(0,1fr)}.account-actions{grid-column:1/-1;justify-content:stretch}.account-actions button{flex:1}}
+@media(max-width:640px){.account-hero{grid-template-columns:1fr;justify-items:center;text-align:center;padding:20px}.account-actions{width:100%;flex-direction:column}.account-details dl{grid-template-columns:1fr}.account-device-code strong{font-size:24px}}

@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { TrainingPage } from "./TrainingPage";
 import { LoraLibraryPage } from "./LoraLibraryPage";
 import { ModelLibraryPage } from "./ModelLibraryPage";
+import { DesktopAuthorizationPage } from "./DesktopAuthorizationPage";
 import { formatQueueCompletion, formatQueueSummary } from "./queue-display";
 
 const apiBase = import.meta.env.VITE_LOCAL_API_BASE || "/local-model-api";
@@ -264,6 +265,8 @@ export function App() {
       setError("");
     } catch (requestError) { setError(requestError instanceof Error ? requestError.message : "任务删除失败"); }
   };
+  const desktopUserCode = new URLSearchParams(window.location.search).get("desktopCode")?.trim().toUpperCase() || "";
+  if (desktopUserCode) return <DesktopAuthorizationPage apiBase={apiBase} userCode={desktopUserCode} session={session} loading={loading} />;
   return (
     <div className="local-app">
       <header className="site-header">

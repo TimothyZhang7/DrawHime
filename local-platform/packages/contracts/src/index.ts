@@ -88,6 +88,52 @@ export const localPlatformSessionViewSchema = z.object({
   expiresAt: z.string().datetime(),
 });
 
+/** 桌面端发起浏览器设备授权的请求。 */
+export const desktopAuthorizationStartRequestSchema = z.object({
+  deviceName: z.string().trim().min(1).max(80),
+});
+
+/** 桌面端设备授权创建结果；deviceCode 只返回给发起设备。 */
+export const desktopAuthorizationRequestViewSchema = z.object({
+  deviceCode: z.string().min(32),
+  userCode: z.string().regex(/^[ABCDEFGHJKLMNPQRSTUVWXYZ2-9]{4}-[ABCDEFGHJKLMNPQRSTUVWXYZ2-9]{4}$/),
+  verificationUrl: z.string().url(),
+  expiresAt: z.string().datetime(),
+  intervalSeconds: z.number().int().min(2).max(30),
+});
+
+/** 桌面端使用设备密钥轮询授权状态。 */
+export const desktopAuthorizationPollRequestSchema = z.object({
+  deviceCode: z.string().min(32).max(256),
+});
+
+/** 浏览器已登录用户确认设备授权的请求。 */
+export const desktopAuthorizationApproveRequestSchema = z.object({
+  userCode: z.string().trim().min(8).max(9),
+});
+
+/** 设备授权轮询结果；会话只在授权完成后返回。 */
+export const desktopAuthorizationPollViewSchema = z.object({
+  status: z.enum(["pending", "authorized"]),
+  intervalSeconds: z.number().int().min(2).max(30),
+  session: localPlatformSessionViewSchema.nullable(),
+});
+
+/** 浏览器确认设备授权后的公开摘要。 */
+export const desktopAuthorizationApprovalViewSchema = z.object({
+  userCode: z.string().regex(/^[ABCDEFGHJKLMNPQRSTUVWXYZ2-9]{4}-[ABCDEFGHJKLMNPQRSTUVWXYZ2-9]{4}$/),
+  deviceName: z.string().min(1).max(80),
+  approvedAt: z.string().datetime(),
+});
+
+/** 桌面核心向 WebView 返回的账号状态，不包含会话密钥。 */
+export const desktopAccountViewSchema = z.object({
+  status: z.enum(["signed_out", "connected", "offline", "expired"]),
+  identity: mainIdentityExchangeViewSchema.omit({ issuedAt: true }).nullable(),
+  expiresAt: z.string().datetime().nullable(),
+  message: z.string().min(1),
+});
+
 /** 主站授权码交换请求。 */
 export const mainSessionExchangeRequestSchema = z.object({
   code: z.string().min(16),
@@ -1154,6 +1200,13 @@ export type PlatformOverviewView = z.infer<typeof platformOverviewViewSchema>;
 export type ExternalIdentityView = z.infer<typeof externalIdentityViewSchema>;
 export type MainIdentityExchangeView = z.infer<typeof mainIdentityExchangeViewSchema>;
 export type LocalPlatformSessionView = z.infer<typeof localPlatformSessionViewSchema>;
+export type DesktopAuthorizationStartRequest = z.infer<typeof desktopAuthorizationStartRequestSchema>;
+export type DesktopAuthorizationRequestView = z.infer<typeof desktopAuthorizationRequestViewSchema>;
+export type DesktopAuthorizationPollRequest = z.infer<typeof desktopAuthorizationPollRequestSchema>;
+export type DesktopAuthorizationApproveRequest = z.infer<typeof desktopAuthorizationApproveRequestSchema>;
+export type DesktopAuthorizationPollView = z.infer<typeof desktopAuthorizationPollViewSchema>;
+export type DesktopAuthorizationApprovalView = z.infer<typeof desktopAuthorizationApprovalViewSchema>;
+export type DesktopAccountView = z.infer<typeof desktopAccountViewSchema>;
 export type MainSessionExchangeRequest = z.infer<typeof mainSessionExchangeRequestSchema>;
 export type MainSessionExchangeResponse = z.infer<typeof mainSessionExchangeResponseSchema>;
 export type BillingReservationCreateRequest = z.infer<typeof billingReservationCreateRequestSchema>;

@@ -103,6 +103,7 @@ model ExternalIdentity {
   trainingDatasets TrainingDataset[]
   trainingJobs   TrainingJob[]
   sessions       PlatformSession[]
+  desktopAuthorizations DesktopAuthorization[]
   inferenceSubmissionGate InferenceSubmissionGate?
 
   @@unique([issuer, subject])
@@ -122,6 +123,24 @@ model PlatformSession {
 
   @@index([externalIdentityId, expiresAt])
   @@index([expiresAt, revokedAt])
+}
+
+model DesktopAuthorization {
+  id                 String    @id @default(uuid()) @db.VarChar(36)
+  deviceCodeHash     String    @unique @db.Char(64)
+  userCode           String    @unique @db.VarChar(9)
+  deviceName         String    @db.VarChar(80)
+  externalIdentityId String?   @db.VarChar(36)
+  expiresAt          DateTime
+  lastPolledAt       DateTime?
+  approvedAt         DateTime?
+  consumedAt         DateTime?
+  createdAt          DateTime  @default(now())
+
+  externalIdentity ExternalIdentity? @relation(fields: [externalIdentityId], references: [id], onDelete: SetNull)
+
+  @@index([expiresAt])
+  @@index([externalIdentityId, createdAt])
 }
 
 model PlatformRuntimeConfig {

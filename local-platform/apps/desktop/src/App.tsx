@@ -1,15 +1,16 @@
 /**
  * 本文件实现桌面生成、任务、模型、Runtime、资源、环境、图库同步和本地设置的响应式工作区。
  */
-import type { DesktopBootstrapView, DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopEnvironmentReport, DesktopGallerySyncItem, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView, DesktopSettings, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetView, DesktopTrainingJobCreateInput, DesktopTrainingJobView } from "@drawhime/contracts";
-import { Activity, AlertTriangle, BookOpenCheck, CheckCircle2, Cpu, Database, Download, FlaskConical, FolderCog, FolderPlus, Gauge, HardDrive, Image, Images, Layers3, LoaderCircle, MemoryStick, Monitor, Moon, PackageCheck, PackageOpen, Play, Power, RefreshCw, Save, Settings2, ShieldCheck, Sun, Tags, Upload, UploadCloud, X } from "lucide-react";
+import type { DesktopAccountView, DesktopBootstrapView, DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopEnvironmentReport, DesktopGallerySyncItem, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView, DesktopSettings, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetView, DesktopTrainingJobCreateInput, DesktopTrainingJobView } from "@drawhime/contracts";
+import { Activity, AlertTriangle, BookOpenCheck, CheckCircle2, CircleUserRound, Cpu, Database, Download, FlaskConical, FolderCog, FolderPlus, Gauge, HardDrive, Image, Images, Layers3, LoaderCircle, MemoryStick, Monitor, Moon, PackageCheck, PackageOpen, Play, Power, RefreshCw, Save, Settings2, ShieldCheck, Sun, Tags, Upload, UploadCloud, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { addDesktopTrainingImages, cancelDesktopCaptionJob, cancelDesktopLocalJob, cancelDesktopTrainingJob, confirmDesktopTrainingDataset, createDesktopCaptionJob, createDesktopLocalJob, createDesktopTrainingDataset, createDesktopTrainingJob, downloadDesktopResource, importDesktopLocalLora, importDesktopLocalModel, inspectDesktopEnvironment, installDesktopResource, listDesktopCaptionJobs, listDesktopGallerySyncQueue, listDesktopLocalJobs, listDesktopLocalLoras, listDesktopLocalModels, listDesktopTrainingDatasets, listDesktopTrainingJobs, listenDesktopCaptionJobUpdates, listenDesktopLocalJobUpdates, listenDesktopResourceInstallProgress, listenDesktopResourceProgress, listenDesktopTrainingJobUpdates, loadDesktopBootstrap, loadDesktopResourceCatalog, loadDesktopRuntimeStatus, saveDesktopSettings, selfTestDesktopRuntime, startDesktopRuntime, stopDesktopRuntime, updateDesktopTrainingCaption } from "./desktop-api";
+import { addDesktopTrainingImages, cancelDesktopCaptionJob, cancelDesktopLocalJob, cancelDesktopTrainingJob, confirmDesktopTrainingDataset, createDesktopCaptionJob, createDesktopLocalJob, createDesktopTrainingDataset, createDesktopTrainingJob, downloadDesktopResource, importDesktopLocalLora, importDesktopLocalModel, inspectDesktopEnvironment, installDesktopResource, listDesktopCaptionJobs, listDesktopGallerySyncQueue, listDesktopLocalJobs, listDesktopLocalLoras, listDesktopLocalModels, listDesktopTrainingDatasets, listDesktopTrainingJobs, listenDesktopCaptionJobUpdates, listenDesktopLocalJobUpdates, listenDesktopResourceInstallProgress, listenDesktopResourceProgress, listenDesktopTrainingJobUpdates, loadDesktopAccountStatus, loadDesktopBootstrap, loadDesktopResourceCatalog, loadDesktopRuntimeStatus, saveDesktopSettings, selfTestDesktopRuntime, startDesktopRuntime, stopDesktopRuntime, updateDesktopTrainingCaption } from "./desktop-api";
+import { AccountPage } from "./AccountPage";
 
-type DesktopPage = "generate" | "jobs" | "models" | "loras" | "training" | "overview" | "environment" | "resources" | "sync" | "settings";
+type DesktopPage = "generate" | "jobs" | "models" | "loras" | "training" | "overview" | "environment" | "resources" | "sync" | "account" | "settings";
 
 const navigation = [
   { id: "generate" as const, label: "本地生成", Icon: Images },
@@ -21,6 +22,7 @@ const navigation = [
   { id: "environment" as const, label: "环境检测", Icon: Cpu },
   { id: "resources" as const, label: "资源安装", Icon: PackageOpen },
   { id: "sync" as const, label: "图库同步", Icon: UploadCloud },
+  { id: "account" as const, label: "账号连接", Icon: CircleUserRound },
   { id: "settings" as const, label: "本地设置", Icon: Settings2 },
 ];
 
@@ -38,6 +40,7 @@ export function App() {
   const [captionJobs, setCaptionJobs] = useState<DesktopCaptionJobView[]>([]);
   const [trainingJobs, setTrainingJobs] = useState<DesktopTrainingJobView[]>([]);
   const [jobs, setJobs] = useState<DesktopLocalJobView[]>([]);
+  const [account, setAccount] = useState<DesktopAccountView>({ status: "signed_out", identity: null, expiresAt: null, message: "尚未连接绘图姬账号" });
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [checking, setChecking] = useState(false);
@@ -50,7 +53,7 @@ export function App() {
   const captionDatasetRefresh = useRef<number | null>(null);
   const bootstrapReady = bootstrap !== null;
 
-  useEffect(() => { void loadDesktopBootstrap().then(async (state) => { lastEnvironmentCheckAt.current = Date.now(); setBootstrap(state); const [nextQueue, catalog, nextModels, nextJobs, nextLoras, nextTrainingDatasets, nextCaptionJobs, nextTrainingJobs] = await Promise.all([listDesktopGallerySyncQueue(), loadDesktopResourceCatalog(), listDesktopLocalModels(), listDesktopLocalJobs(), listDesktopLocalLoras(), listDesktopTrainingDatasets(), listDesktopCaptionJobs(), listDesktopTrainingJobs()]); setQueue(nextQueue); setResourceCatalog(catalog); setModels(nextModels); setJobs(nextJobs); setLoras(nextLoras); setTrainingDatasets(nextTrainingDatasets); setCaptionJobs(nextCaptionJobs); setTrainingJobs(nextTrainingJobs); }).catch((error) => setMessage(errorMessage(error))).finally(() => setLoading(false)); }, []);
+  useEffect(() => { void loadDesktopBootstrap().then(async (state) => { lastEnvironmentCheckAt.current = Date.now(); setBootstrap(state); const accountRequest = loadDesktopAccountStatus().catch((): DesktopAccountView => ({ status: "offline", identity: null, expiresAt: null, message: "账号服务当前未连接；全部本地功能继续可用" })); const [nextQueue, catalog, nextModels, nextJobs, nextLoras, nextTrainingDatasets, nextCaptionJobs, nextTrainingJobs, nextAccount] = await Promise.all([listDesktopGallerySyncQueue(), loadDesktopResourceCatalog(), listDesktopLocalModels(), listDesktopLocalJobs(), listDesktopLocalLoras(), listDesktopTrainingDatasets(), listDesktopCaptionJobs(), listDesktopTrainingJobs(), accountRequest]); setQueue(nextQueue); setResourceCatalog(catalog); setModels(nextModels); setJobs(nextJobs); setLoras(nextLoras); setTrainingDatasets(nextTrainingDatasets); setCaptionJobs(nextCaptionJobs); setTrainingJobs(nextTrainingJobs); setAccount(nextAccount); }).catch((error) => setMessage(errorMessage(error))).finally(() => setLoading(false)); }, []);
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     void listenDesktopResourceProgress((progress) => setResourceProgress((current) => ({ ...current, [progress.resourceId]: progress }))).then((dispose) => { unlisten = dispose; }).catch((error) => setMessage(errorMessage(error)));
@@ -219,7 +222,7 @@ export function App() {
   if (loading || !bootstrap) return <div className="desktop-loading"><LoaderCircle className="spin" /><strong>正在建立本地工作区</strong><span>{message || "读取硬件、磁盘与本地数据库"}</span></div>;
   const critical = bootstrap.environment.issues.find((issue) => issue.severity === "critical") || bootstrap.environment.issues[0];
   return <div className="desktop-shell">
-    <aside className="desktop-sidebar"><header><div className="desktop-mark">D</div><div><strong>DrawHime</strong><span>DESKTOP</span></div></header><nav>{navigation.map(({ id, label, Icon }) => <button key={id} className={page === id ? "active" : ""} onClick={() => setPage(id)}><Icon size={17} />{label}{((id === "environment" && bootstrap.environment.status !== "ready") || (id === "jobs" && jobs.some((job) => ["queued", "running"].includes(job.status)))) && <i />}</button>)}</nav><footer><span>本地核心</span><strong>{bootstrap.runtime.status === "ready" ? "Runtime 运行中" : "Runtime 已停止"}</strong></footer></aside>
+    <aside className="desktop-sidebar"><header><div className="desktop-mark">D</div><div><strong>DrawHime</strong><span>DESKTOP</span></div></header><nav>{navigation.map(({ id, label, Icon }) => <button key={id} className={page === id ? "active" : ""} onClick={() => setPage(id)}><Icon size={17} />{label}{((id === "environment" && bootstrap.environment.status !== "ready") || (id === "jobs" && jobs.some((job) => ["queued", "running"].includes(job.status))) || (id === "account" && account.status !== "connected")) && <i />}</button>)}</nav><footer><span>本地核心</span><strong>{bootstrap.runtime.status === "ready" ? "Runtime 运行中" : "Runtime 已停止"}</strong></footer></aside>
     <main className="desktop-main">
       <header className="desktop-topbar"><div className="desktop-title"><span>本地模型工作站</span><strong>{pageTitle(page)}</strong></div><div className="topbar-actions"><div className="theme-switch" aria-label="界面主题">{(["system", "dark", "light"] as const).map((mode) => { const Icon = mode === "system" ? Monitor : mode === "dark" ? Moon : Sun; return <button key={mode} className={bootstrap.settings.themeMode === mode ? "active" : ""} aria-label={themeModeLabel(mode)} title={themeModeLabel(mode)} disabled={themeSaving} onClick={() => void changeTheme(mode)}><Icon /></button>; })}</div><button className="recheck-button" onClick={() => void recheck()} disabled={checking}>{checking ? <LoaderCircle className="spin" /> : <RefreshCw />}<span>重新检测</span></button></div></header>
       {bootstrap.environment.status !== "ready" && critical && <section className={`environment-banner is-${critical.severity}`}><AlertTriangle /><div><strong>{critical.title}</strong><span>{critical.message}</span></div><button onClick={() => setPage("environment")}>查看环境详情</button></section>}
@@ -233,6 +236,7 @@ export function App() {
       <div hidden={page !== "environment"}><EnvironmentPage report={bootstrap.environment} /></div>
       <div hidden={page !== "resources"}><ResourcesPage catalog={resourceCatalog} progress={resourceProgress} installProgress={installProgress} loading={catalogLoading} bulkBusy={resourceBulkBusy} onReload={() => void reloadResourceCatalog()} onInstallRequired={() => void installRequiredResources()} onDownload={(resourceId) => void downloadResource(resourceId)} onInstall={(resourceId) => void installResource(resourceId)} /></div>
       <div hidden={page !== "sync"}><SyncPage items={queue} /></div>
+      <div hidden={page !== "account"}><AccountPage account={account} onChanged={setAccount} onError={setMessage} /></div>
       <div hidden={page !== "settings"}><SettingsPage value={bootstrap.settings} onSaved={(settings) => { setBootstrap((current) => current ? { ...current, settings } : current); setMessage("本地设置已保存"); void reloadResourceCatalog(); }} onError={setMessage} /></div>
     </main>
   </div>;
@@ -497,7 +501,7 @@ function CapabilityCard({ label, ready, text }: { label: string; ready: boolean;
 function Metric({ Icon, label, value }: { Icon: typeof Cpu; label: string; value: string }) { return <article><Icon /><span><small>{label}</small><strong>{value}</strong></span></article>; }
 /** 环境状态印章突出当前是否可执行 GPU 任务。 */
 function StatusSeal({ status }: { status: DesktopEnvironmentReport["status"] }) { return <div className={`status-seal is-${status}`}><span>ENV</span><strong>{status === "ready" ? "READY" : status.toUpperCase()}</strong></div>; }
-function pageTitle(page: DesktopPage): string { return { generate: "本地生成", jobs: "任务记录", models: "本地模型", loras: "LoRA 仓库", training: "LoRA 训练", overview: "本机概览", environment: "环境检测", resources: "资源安装", sync: "图库同步", settings: "本地设置" }[page]; }
+function pageTitle(page: DesktopPage): string { return { generate: "本地生成", jobs: "任务记录", models: "本地模型", loras: "LoRA 仓库", training: "LoRA 训练", overview: "本机概览", environment: "环境检测", resources: "资源安装", sync: "图库同步", account: "账号连接", settings: "本地设置" }[page]; }
 /** LoRA 类型统一使用中文外显，数据库和契约仍保存稳定英文枚举。 */
 function loraTypeLabel(type: string): string { return { style: "画风", character: "角色", concept: "概念", clothing: "服装", pose: "姿势", other: "其他" }[type] || type; }
 function trainingTypeLabel(type: DesktopTrainingDatasetView["type"]): string { return { character: "角色", style: "画风", concept: "概念" }[type]; }

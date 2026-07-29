@@ -1,7 +1,19 @@
 /** 本文件封装 WebView 到 Tauri 本地核心的受类型约束命令。 */
-import type { DesktopBootstrapView, DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopEnvironmentReport, DesktopGalleryPrivacy, DesktopGallerySyncItem, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView, DesktopSettings, DesktopSettingsUpdate, DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetIdInput, DesktopTrainingDatasetView, DesktopTrainingImagesAddInput, DesktopTrainingJobCreateInput, DesktopTrainingJobView } from "@drawhime/contracts";
+import type { DesktopAccountView, DesktopAuthorizationRequestView, DesktopAuthorizationStartRequest, DesktopBootstrapView, DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopEnvironmentReport, DesktopGalleryPrivacy, DesktopGallerySyncItem, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView, DesktopSettings, DesktopSettingsUpdate, DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetIdInput, DesktopTrainingDatasetView, DesktopTrainingImagesAddInput, DesktopTrainingJobCreateInput, DesktopTrainingJobView } from "@drawhime/contracts";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+
+/** 设备授权轮询完成时同时返回脱敏账号视图。 */
+export interface DesktopAuthorizationPollOutcome { poll: { status: "pending" | "authorized"; intervalSeconds: number }; account: DesktopAccountView | null }
+
+/** 在线校验 Windows Credential Manager 中的桌面账号。 */
+export function loadDesktopAccountStatus(): Promise<DesktopAccountView> { return invoke("desktop_account_status"); }
+/** 创建浏览器设备授权请求。 */
+export function startDesktopAuthorization(input: DesktopAuthorizationStartRequest): Promise<DesktopAuthorizationRequestView> { return invoke("desktop_start_authorization", { input }); }
+/** 按服务端间隔轮询设备授权，成功后凭据由 Rust 核心保存。 */
+export function pollDesktopAuthorization(deviceCode: string): Promise<DesktopAuthorizationPollOutcome> { return invoke("desktop_poll_authorization", { input: { deviceCode } }); }
+/** 撤销并删除当前桌面账号凭据。 */
+export function signOutDesktopAccount(): Promise<DesktopAccountView> { return invoke("desktop_sign_out"); }
 
 /** 加载本机设置、环境报告和图库待同步数量。 */
 export function loadDesktopBootstrap(): Promise<DesktopBootstrapView> { return invoke("desktop_bootstrap"); }

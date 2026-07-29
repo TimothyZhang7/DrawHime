@@ -1,6 +1,7 @@
 //! 本模块注册 DrawHime Desktop 本地核心、SQLite 和环境检测命令。
 
 mod captioner;
+mod auth;
 mod environment;
 mod generation;
 mod local_model;
@@ -18,6 +19,30 @@ use models::{DesktopBootstrapView, DesktopCaptionJobCreateInput, DesktopCaptionJ
 use std::path::PathBuf;
 use storage::DesktopState;
 use tauri::{Manager, State};
+
+/** 返回不包含会话密钥的桌面账号状态。 */
+#[tauri::command]
+async fn desktop_account_status() -> Result<auth::DesktopAccountView, String> {
+    tauri::async_runtime::spawn_blocking(auth::account_status).await.map_err(|error| format!("账号状态任务异常：{error}"))?
+}
+
+/** 创建浏览器设备授权请求。 */
+#[tauri::command]
+async fn desktop_start_authorization(input: auth::DesktopAuthorizationStartInput) -> Result<auth::DesktopAuthorizationRequestView, String> {
+    tauri::async_runtime::spawn_blocking(move || auth::start_authorization(input)).await.map_err(|error| format!("设备授权任务异常：{error}"))?
+}
+
+/** 轮询设备授权并在成功时写入 Windows Credential Manager。 */
+#[tauri::command]
+async fn desktop_poll_authorization(input: auth::DesktopAuthorizationPollInput) -> Result<auth::DesktopAuthorizationPollOutcome, String> {
+    tauri::async_runtime::spawn_blocking(move || auth::poll_authorization(input)).await.map_err(|error| format!("设备授权轮询异常：{error}"))?
+}
+
+/** 撤销并删除当前桌面账号凭据。 */
+#[tauri::command]
+async fn desktop_sign_out() -> Result<auth::DesktopAccountView, String> {
+    tauri::async_runtime::spawn_blocking(auth::sign_out).await.map_err(|error| format!("桌面退出任务异常：{error}"))?
+}
 
 #[tauri::command]
 fn desktop_bootstrap(state: State<'_, DesktopState>) -> Result<DesktopBootstrapView, String> {
@@ -230,6 +255,7 @@ fn inspect_and_store(state: &DesktopState, settings: &DesktopSettings) -> Result
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let app_data = app.path().app_data_dir().map_err(|error| format!("读取应用数据目录失败：{error}"))?;
             let picture_dir = app.path().picture_dir().unwrap_or_else(|_| PathBuf::from(&app_data).join("pictures"));
@@ -240,7 +266,7 @@ pub fn run() {
             app.manage(state);
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![desktop_bootstrap, desktop_inspect_environment, desktop_save_settings, desktop_enqueue_gallery_publication, desktop_list_gallery_sync_queue, desktop_load_resource_catalog, desktop_download_resource, desktop_install_resource, desktop_runtime_status, desktop_start_runtime, desktop_stop_runtime, desktop_self_test_runtime, desktop_import_local_model, desktop_list_local_models, desktop_import_local_lora, desktop_list_local_loras, desktop_create_training_dataset, desktop_list_training_datasets, desktop_add_training_images, desktop_update_training_caption, desktop_create_caption_job, desktop_list_caption_jobs, desktop_cancel_caption_job, desktop_confirm_training_dataset, desktop_create_training_job, desktop_list_training_jobs, desktop_cancel_training_job, desktop_create_local_job, desktop_list_local_jobs, desktop_cancel_local_job])
+        .invoke_handler(tauri::generate_handler![desktop_account_status, desktop_start_authorization, desktop_poll_authorization, desktop_sign_out, desktop_bootstrap, desktop_inspect_environment, desktop_save_settings, desktop_enqueue_gallery_publication, desktop_list_gallery_sync_queue, desktop_load_resource_catalog, desktop_download_resource, desktop_install_resource, desktop_runtime_status, desktop_start_runtime, desktop_stop_runtime, desktop_self_test_runtime, desktop_import_local_model, desktop_list_local_models, desktop_import_local_lora, desktop_list_local_loras, desktop_create_training_dataset, desktop_list_training_datasets, desktop_add_training_images, desktop_update_training_caption, desktop_create_caption_job, desktop_list_caption_jobs, desktop_cancel_caption_job, desktop_confirm_training_dataset, desktop_create_training_job, desktop_list_training_jobs, desktop_cancel_training_job, desktop_create_local_job, desktop_list_local_jobs, desktop_cancel_local_job])
         .run(tauri::generate_context!())
         .expect("DrawHime Desktop 启动失败");
 }

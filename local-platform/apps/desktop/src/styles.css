@@ -209,9 +209,15 @@ select:focus-visible {
 }
 
 .desktop-sidebar nav {
+  flex: 1;
+  min-height: 0;
   display: grid;
+  align-content: start;
   gap: 4px;
   margin-top: 24px;
+  padding-right: 2px;
+  overflow-y: auto;
+  scrollbar-width: thin;
 }
 
 .desktop-sidebar nav button {

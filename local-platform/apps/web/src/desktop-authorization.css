@@ -1,0 +1,12 @@
+/* 本文件定义桌面设备授权页的精简聚焦布局与窄屏适配。 */
+.desktop-authorization-page{min-height:100vh;display:grid;place-items:center;padding:clamp(24px,6vw,72px);background:radial-gradient(circle at 50% 0%,rgba(99,102,241,.16),transparent 44%),var(--bg)}
+.desktop-authorization-card{width:min(100%,520px);display:flex;flex-direction:column;align-items:center;gap:16px;padding:clamp(28px,6vw,52px);border:1px solid var(--border);border-radius:28px;background:var(--surface);box-shadow:0 30px 90px rgba(0,0,0,.18);text-align:center}
+.desktop-authorization-mark{width:70px;height:70px;display:grid;place-items:center;border-radius:22px;color:var(--primary);background:var(--primary-soft)}
+.desktop-authorization-mark svg{width:32px;height:32px}.desktop-authorization-card>span{color:var(--primary);font-size:12px;font-weight:800;letter-spacing:.16em;text-transform:uppercase}
+.desktop-authorization-card h1{margin:0;font-size:clamp(28px,5vw,38px)}.desktop-authorization-card p{margin:0;color:var(--text2);line-height:1.75}
+.desktop-authorization-code{padding:12px 20px;border-radius:14px;background:var(--primary-soft);font-family:ui-monospace,"Cascadia Code",monospace;font-size:clamp(24px,7vw,34px);letter-spacing:.12em}
+.desktop-authorization-card button,.desktop-authorization-card>a{min-height:46px;display:inline-flex;align-items:center;justify-content:center;gap:9px;padding:0 22px;border:0;border-radius:13px;color:#fff;background:var(--primary);font-weight:750;text-decoration:none;cursor:pointer}
+.desktop-authorization-card button:disabled{cursor:wait;opacity:.68}.desktop-authorization-card button svg,.desktop-authorization-card>a svg{width:17px}
+.desktop-authorization-identity{width:100%;display:flex;align-items:center;gap:12px;padding:12px 14px;border:1px solid var(--border);border-radius:15px;text-align:left}.desktop-authorization-identity img{width:42px;height:42px;border-radius:50%;object-fit:cover}.desktop-authorization-identity span{display:grid;gap:2px}
+.desktop-authorization-identity small,.desktop-authorization-card>small{color:var(--text2)}.desktop-authorization-success,.desktop-authorization-warning,.desktop-authorization-error{width:100%;padding:12px 14px;border-radius:13px;font-size:13px;line-height:1.6}
+.desktop-authorization-success{color:#047857;background:#ecfdf5}.desktop-authorization-success svg{width:16px;vertical-align:-3px;margin-right:6px}.desktop-authorization-warning{color:#92400e;background:#fffbeb}.desktop-authorization-error{color:var(--error);background:#fef2f2}

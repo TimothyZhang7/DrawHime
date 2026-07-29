@@ -28,6 +28,13 @@
 | `desktop_bootstrap` | desktop webview | desktop core | 返回 SQLite 持久设置、真实本机环境报告和待同步图库数量；对应 `DesktopBootstrapView` |
 | `desktop_inspect_environment` | desktop webview | desktop core | 重新检测 Windows 名称、版本、构建号、支持状态、CPU、内存、磁盘、NVIDIA GPU、驱动和本地 Runtime，并持久化脱敏快照 |
 | `desktop_save_settings` | desktop webview | desktop core | 校验并保存主题模式、依赖来源、模型/输出/Runtime 目录以及默认图库隐私和上传策略；对应 `DesktopSettingsUpdate` |
+| `POST /v1/desktop-auth/requests` | desktop core | api | 创建 10 分钟有效的设备授权请求；服务端只保存随机设备密钥 SHA-256，返回用户码、浏览器确认地址和轮询间隔 |
+| `POST /v1/desktop-auth/requests/approve` | local web | api | 由已登录主站并完成本地平台身份交换的用户确认设备码；设备码过期、已确认或账号状态失效时保持拒绝 |
+| `POST /v1/desktop-auth/token` | desktop core | api | 使用设备密钥幂等轮询；确认后把同一随机密钥哈希登记为可撤销独立会话，原始密钥只写入 Windows Credential Manager |
+| `desktop_account_status` | desktop webview | desktop core | 从 Windows Credential Manager 读取会话并在线校验；断网时仅返回离线状态，不向 WebView 暴露会话密钥 |
+| `desktop_start_authorization` | desktop webview | desktop core | 创建浏览器设备授权请求并返回确认地址；不在 SQLite、日志或页面持久化设备密钥 |
+| `desktop_poll_authorization` | desktop webview | desktop core | 按服务端间隔轮询，授权完成后写入 Windows Credential Manager 并只返回脱敏账号视图 |
+| `desktop_sign_out` | desktop webview | desktop core | 尽力撤销服务端会话后删除 Windows Credential Manager 凭据；网络异常不阻止本机退出 |
 | `GET /v1/desktop/resources/manifest` | desktop core | api/CDN | 返回 `{ ok: true, data: DesktopResourceManifestEnvelope }`；`payload` 是原始 UTF-8 JSON，`signature` 是服务端 Ed25519 签名，桌面端使用安装包内固定公钥验签后才解析资源；模型资源额外固化受控安装目录和模型组合的 group/role，只有主文件、文本编码器与 VAE 全部通过哈希安装后才自动登记 Anima 底模 |
 | `GET /v1/desktop/resources/:id/content` | desktop core | api | 从签名清单定位主站镜像资源，只流式返回大小与清单一致的受控文件；支持单段 HTTP Range、`ETag=SHA-256` 和断点续传，不接受客户端文件路径；本地镜像文件缺失时只允许代理同一签名资源登记的 `official` HTTPS 来源，并严格核对上游 `Content-Range`、长度和总大小，私有下载令牌不回显给桌面端 |
 | `desktop_load_resource_catalog` | desktop webview | desktop core | 拉取并验签资源清单，校验过期时间、Windows/架构、文件名、大小、SHA-256 与 HTTPS 来源后返回可展示目录；未配置真实清单和公钥时明确返回未配置状态 |
