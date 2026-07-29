@@ -6,7 +6,8 @@ param(
   [Parameter(Mandatory = $true)][string]$ExpectedVersion,
   [string]$Installer,
   [string]$EvidenceDirectory = ".private/desktop-host-validation",
-  [switch]$ExpectNoGpu
+  [switch]$ExpectNoGpu,
+  [switch]$ValidateUninstall
 )
 
 Set-StrictMode -Version Latest
@@ -81,6 +82,7 @@ $build = [int64]$os.BuildNumber
 if (-not $os.Version.StartsWith("10.") -or $build -lt 17763) { throw "当前 Windows 构建不在支持范围：$($os.Version) ($build)" }
 
 $businessRoot = Join-Path $env:APPDATA "ink.xanime.drawhime.desktop"
+$businessFilesBefore = if (Test-Path -LiteralPath $businessRoot) { @(Get-ChildItem -LiteralPath $businessRoot -Recurse -Force -File).Count } else { 0 }
 $existingProcesses = @(Get-Process -Name "drawhime-desktop" -ErrorAction SilentlyContinue)
 $existingProcesses | Stop-Process -Force
 $existingProcesses | Wait-Process -Timeout 10 -ErrorAction SilentlyContinue
@@ -137,6 +139,42 @@ finally {
 $gpuSummary = @(Get-DrawHimeGpuSummary)
 if ($ExpectNoGpu.IsPresent -and $gpuSummary.Count -ne 0) { throw "当前验收机检测到 NVIDIA GPU，不能作为无 GPU 门禁证据" }
 
+$uninstallValidation = $null
+if ($ValidateUninstall.IsPresent) {
+  # 破坏性卸载门禁只允许在启动前没有 DrawHime 数据文件的临时验收主机执行。
+  if (-not $resolvedInstaller) { throw "卸载门禁必须提供安装包" }
+  if ($businessFilesBefore -ne 0) { throw "当前主机已有 DrawHime 数据文件，禁止执行破坏性卸载门禁" }
+
+  $sentinel = Join-Path $businessRoot "uninstall-preserve-probe.json"
+  [System.IO.Directory]::CreateDirectory($businessRoot) | Out-Null
+  [System.IO.File]::WriteAllText($sentinel, '{"purpose":"uninstall-preserve-validation"}', [System.Text.UTF8Encoding]::new($false))
+  $uninstaller = Join-Path $installRoot "uninstall.exe"
+  $preserveProcess = Start-Process -FilePath $uninstaller -ArgumentList @("/S", "/KEEPDATA") -PassThru -Wait -WindowStyle Hidden
+  if ($preserveProcess.ExitCode -ne 0) { throw "保留数据卸载失败，退出码 $($preserveProcess.ExitCode)" }
+  if (-not (Test-Path -LiteralPath $sentinel -PathType Leaf)) { throw "保留数据卸载删除了验收文件" }
+  if (Get-DrawHimeInstallation) { throw "保留数据卸载后安装登记仍然存在" }
+
+  $reinstallProcess = Start-Process -FilePath $resolvedInstaller -ArgumentList "/S" -PassThru -Wait -WindowStyle Hidden
+  if ($reinstallProcess.ExitCode -ne 0) { throw "默认清理门禁前重新安装失败，退出码 $($reinstallProcess.ExitCode)" }
+  $installationForDelete = Get-DrawHimeInstallation
+  if (-not $installationForDelete) { throw "默认清理门禁前未找到安装登记" }
+  $deleteUninstaller = Join-Path (([string]$installationForDelete.InstallLocation).Trim('"')) "uninstall.exe"
+  $deleteProcess = Start-Process -FilePath $deleteUninstaller -ArgumentList "/S" -PassThru -Wait -WindowStyle Hidden
+  if ($deleteProcess.ExitCode -ne 0) { throw "默认清理卸载失败，退出码 $($deleteProcess.ExitCode)" }
+  foreach ($attempt in 1..50) {
+    if (-not (Test-Path -LiteralPath $businessRoot)) { break }
+    Start-Sleep -Milliseconds 100
+  }
+  if (Test-Path -LiteralPath $businessRoot) { throw "默认清理卸载未及时移出应用数据目录" }
+  if (Get-DrawHimeInstallation) { throw "默认清理卸载后安装登记仍然存在" }
+
+  # 恢复安装供同一 Runner 的后续 WebView 门禁使用，重新安装不得创建业务数据。
+  $finalInstallProcess = Start-Process -FilePath $resolvedInstaller -ArgumentList "/S" -PassThru -Wait -WindowStyle Hidden
+  if ($finalInstallProcess.ExitCode -ne 0) { throw "卸载门禁后恢复安装失败，退出码 $($finalInstallProcess.ExitCode)" }
+  if (-not (Get-DrawHimeInstallation)) { throw "卸载门禁后安装登记未恢复" }
+  $uninstallValidation = [ordered]@{ preserveOptionKeepsData = $true; defaultRemovesData = $true; uninstallReturnsWithoutDirectoryWalk = $true; installationRestored = $true }
+}
+
 $result = [ordered]@{
   checkedAt = [DateTime]::UtcNow.ToString("o")
   os = [ordered]@{ caption = [string]$os.Caption; version = [string]$os.Version; build = $build; architecture = [string]$os.OSArchitecture }
@@ -146,7 +184,8 @@ $result = [ordered]@{
   gpuGate = [ordered]@{ expectedNoNvidiaGpu = [bool]$ExpectNoGpu.IsPresent; detectedCount = $gpuSummary.Count; passed = (-not $ExpectNoGpu.IsPresent) -or $gpuSummary.Count -eq 0 }
   installer = $installerEvidence
   installation = [ordered]@{ version = [string]$installation.DisplayVersion; fileCount = $installedFiles.Count; totalBytes = ($installedFiles | Measure-Object Length -Sum).Sum; containsModelOrTrainer = $false }
-  gates = [ordered]@{ supportedWindows = $true; databasePreservedByInstaller = $true; launchAliveTenSeconds = $true; perMonitorV2 = $true; webView2Present = $true }
+  uninstall = $uninstallValidation
+  gates = [ordered]@{ supportedWindows = $true; databasePreservedByInstaller = $true; launchAliveTenSeconds = $true; perMonitorV2 = $true; webView2Present = $true; uninstallChoice = (-not $ValidateUninstall.IsPresent) -or $null -ne $uninstallValidation }
 }
 
 $resolvedEvidence = [System.IO.Path]::GetFullPath($EvidenceDirectory)

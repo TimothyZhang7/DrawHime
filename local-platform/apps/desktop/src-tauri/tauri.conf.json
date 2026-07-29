@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "DrawHime Desktop",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "identifier": "ink.xanime.drawhime.desktop",
   "build": {
     "beforeDevCommand": "pnpm dev",
@@ -45,7 +45,16 @@
         "silent": true
       },
       "nsis": {
-        "installMode": "currentUser"
+        "installMode": "currentUser",
+        "languages": [
+          "SimpChinese",
+          "English"
+        ],
+        "customLanguageFiles": {
+          "SimpChinese": "nsis/languages/SimpChinese.nsh",
+          "English": "nsis/languages/English.nsh"
+        },
+        "installerHooks": "nsis/installer-hooks.nsh"
       }
     }
   }
