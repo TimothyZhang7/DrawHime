@@ -4117,3 +4117,556 @@ select:focus-visible {
 .desktop-mark {
   border-radius: 3px;
 }
+
+/* 生成页使用固定双栏工作台，左侧参数独立滚动，右侧预览保持稳定。 */
+.generate-layout {
+  height: calc(100vh - 98px);
+  min-height: 560px;
+  grid-template-columns: minmax(500px, .9fr) minmax(390px, 1.1fr);
+  align-items: stretch;
+  overflow: hidden;
+}
+
+.generation-form,
+.generation-preview {
+  min-width: 0;
+  min-height: 0;
+}
+
+.generation-form {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+}
+
+.generation-form-scroll {
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 2px 6px 4px 0;
+  scrollbar-gutter: stable;
+}
+
+.generation-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.generation-parameter {
+  min-width: 0;
+  display: grid;
+  grid-template-rows: 18px 34px;
+  gap: 4px;
+}
+
+.generation-parameter > span,
+.prompt-field > span,
+.generation-switch > span {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-secondary);
+  font-size: 9px;
+  font-weight: 760;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.generation-grid input,
+.generation-grid select,
+.generation-advanced-grid input,
+.generation-advanced-grid select,
+.generation-lora-strengths input {
+  width: 100%;
+  max-width: 100%;
+  height: 34px;
+  min-width: 0;
+  padding: 0 8px;
+  border-color: var(--border);
+  border-radius: 3px;
+  background: var(--control);
+  color: var(--text);
+  font-size: 9px;
+}
+
+.generation-grid input:hover,
+.generation-grid select:hover,
+.generation-advanced-grid input:hover,
+.generation-advanced-grid select:hover,
+.generation-lora-strengths input:hover {
+  border-color: var(--border-strong);
+}
+
+/* 参数说明只在帮助图标悬浮或键盘聚焦时显示，避免长文本改变控件位置。 */
+.parameter-help {
+  position: relative;
+  z-index: 5;
+  width: 15px;
+  height: 15px;
+  display: inline-grid;
+  flex: 0 0 15px;
+  place-items: center;
+  color: var(--subtle);
+  cursor: help;
+}
+
+.parameter-help svg {
+  width: 13px;
+  height: 13px;
+}
+
+.parameter-help::after {
+  position: absolute;
+  top: calc(100% + 7px);
+  left: 50%;
+  z-index: 30;
+  width: max-content;
+  max-width: 250px;
+  padding: 7px 8px;
+  content: attr(data-tooltip);
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  background: var(--panel-raised);
+  color: var(--text);
+  box-shadow: 0 8px 22px var(--shadow);
+  font-size: 8px;
+  font-weight: 500;
+  line-height: 1.55;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -3px);
+  transition: opacity .12s ease, transform .12s ease;
+  white-space: normal;
+}
+
+.parameter-help:hover,
+.parameter-help:focus-visible {
+  color: var(--accent);
+  outline: 0;
+}
+
+.parameter-help:hover::after,
+.parameter-help:focus-visible::after {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+.generation-presets {
+  gap: 7px;
+  margin-bottom: 10px;
+}
+
+.generation-presets > button {
+  min-height: 62px;
+  grid-template-columns: 26px minmax(0, 1fr);
+  align-items: center;
+  padding: 9px;
+  border-radius: 3px;
+}
+
+.generation-presets > button > svg:first-child {
+  width: 25px;
+  height: 25px;
+  padding: 5px;
+  border-radius: 3px;
+}
+
+.generation-presets > button > .preset-selected {
+  top: 7px;
+  right: 7px;
+}
+
+.generation-presets .parameter-help {
+  position: absolute;
+  right: 7px;
+  bottom: 6px;
+}
+
+.generation-presets strong {
+  margin-bottom: 2px;
+  font-size: 10px;
+}
+
+.generation-presets small {
+  overflow: hidden;
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.generation-advanced {
+  margin-top: 9px;
+  border-radius: 3px;
+}
+
+.generation-advanced > summary {
+  min-height: 40px;
+  padding: 0 10px;
+}
+
+.generation-advanced-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 9px;
+}
+
+.generation-switch {
+  min-height: 56px;
+  padding: 8px;
+  border-radius: 3px;
+}
+
+.generation-switch > span strong {
+  font-size: 9px;
+}
+
+.generation-switch > i {
+  flex-basis: 32px;
+  width: 32px;
+  height: 18px;
+}
+
+.generation-loras {
+  padding: 9px;
+  border-radius: 3px;
+}
+
+.generation-loras > div {
+  grid-template-columns: 1fr;
+}
+
+.generation-loras article {
+  border-radius: 3px;
+}
+
+.generation-lora-strengths {
+  grid-template-columns: repeat(2, 112px);
+}
+
+.generation-lora-strengths .generation-parameter {
+  grid-template-columns: minmax(0, 1fr) 54px;
+  grid-template-rows: 30px;
+  align-items: center;
+}
+
+.generation-lora-strengths .generation-parameter > span {
+  overflow: visible;
+}
+
+.prompt-field {
+  grid-template-rows: 18px auto;
+}
+
+.prompt-field textarea {
+  min-height: 112px;
+  border-radius: 3px;
+  font-size: 9px;
+}
+
+.prompt-field.negative textarea {
+  min-height: 68px;
+}
+
+.generation-form > footer {
+  margin-top: 9px;
+  padding-top: 9px;
+}
+
+.generation-preview {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+}
+
+.generation-preview > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.generation-preview > header b {
+  padding: 4px 7px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.generation-preview > header b.is-running,
+.generation-preview > header b.is-queued { border-color: var(--accent-border); background: var(--accent-soft); color: var(--accent); }
+.generation-preview > header b.is-succeeded { border-color: var(--success-border); background: var(--success-soft); color: var(--success); }
+.generation-preview > header b.is-failed,
+.generation-preview > header b.is-cancelled { border-color: var(--danger-border); background: var(--danger-soft); color: var(--danger); }
+
+.generation-preview-stage {
+  position: relative;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background:
+    linear-gradient(45deg, var(--accent-grid) 25%, transparent 25% 75%, var(--accent-grid) 75%),
+    linear-gradient(45deg, var(--accent-grid) 25%, transparent 25% 75%, var(--accent-grid) 75%),
+    var(--panel-muted);
+  background-position: 0 0, 10px 10px;
+  background-size: 20px 20px;
+}
+
+.generation-preview-stage > img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+}
+
+.generation-preview-empty {
+  max-width: 310px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  padding: 20px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.generation-preview-empty svg { width: 34px; height: 34px; color: var(--subtle); }
+.generation-preview-empty strong { color: var(--text); font-size: 11px; }
+.generation-preview-empty span { font-size: 9px; line-height: 1.55; }
+
+.generation-preview-stage > i {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  left: 18px;
+  height: 5px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--border);
+}
+
+.generation-preview-stage > i em {
+  height: 100%;
+  display: block;
+  background: var(--accent);
+  transition: width .2s ease;
+}
+
+.generation-preview > footer {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  padding-top: 10px;
+}
+
+.generation-preview > footer div {
+  min-width: 0;
+  padding: 7px;
+  border-left: 2px solid var(--border-strong);
+  background: var(--panel-muted);
+}
+
+.generation-preview > footer span,
+.generation-preview > footer strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.generation-preview > footer span { color: var(--muted); font-size: 7px; }
+.generation-preview > footer strong { margin-top: 3px; font-size: 8px; }
+
+/* 打标与训练使用独立页面；训练步骤必须逐项通过校验后才能继续。 */
+.captioning-page,
+.lora-training-page {
+  max-width: 1440px;
+}
+
+.training-create > div {
+  grid-template-columns: minmax(190px, 1fr) 140px minmax(190px, 1fr) auto;
+  align-items: end;
+}
+
+.training-create label {
+  min-width: 0;
+  grid-template-rows: 16px 34px;
+}
+
+.training-create input,
+.training-create select {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  border-radius: 3px;
+}
+
+.training-stepper {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border: 1px solid var(--border);
+  background: var(--panel-muted);
+}
+
+.training-stepper button {
+  min-width: 0;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 0;
+  border-right: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 780;
+}
+
+.training-stepper button:last-child { border-right: 0; }
+.training-stepper button:disabled { cursor: not-allowed; opacity: .45; }
+.training-stepper button.active { background: var(--accent-soft); color: var(--accent); box-shadow: inset 0 -2px var(--accent); }
+.training-stepper button.complete { color: var(--success); }
+
+.training-stepper button i {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-size: 8px;
+  font-style: normal;
+}
+
+.training-stepper button i svg { width: 12px; }
+
+.training-step-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.training-step-panel > header,
+.training-step-panel > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.training-step-panel > footer {
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.training-step-panel > footer button {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 12px;
+  border: 1px solid var(--accent-border);
+  background: var(--accent);
+  color: #fff;
+  font-size: 8px;
+  font-weight: 800;
+}
+
+.training-step-panel > footer button.secondary {
+  border-color: var(--border);
+  background: var(--panel-raised);
+  color: var(--text);
+}
+
+.training-step-panel > footer button:disabled { cursor: not-allowed; opacity: .45; }
+.training-step-panel > footer button svg { width: 13px; }
+
+.training-dataset-list.is-expanded {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.training-dataset-list.is-expanded > header { grid-column: 1 / -1; }
+.training-dataset-list.is-expanded > button { min-height: 58px; border: 1px solid var(--border); background: var(--panel-raised); }
+
+.training-selection-check {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid var(--danger-border);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.training-selection-check.ready { border-color: var(--success-border); background: var(--success-soft); color: var(--success); }
+.training-selection-check > svg { width: 18px; }
+.training-selection-check span,
+.training-selection-check strong,
+.training-selection-check small { display: block; }
+.training-selection-check strong { font-size: 9px; }
+.training-selection-check small { margin-top: 2px; color: var(--muted); font-size: 8px; }
+
+.desktop-training-parameters {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.desktop-training-parameters label {
+  grid-template-rows: 17px 34px;
+}
+
+.desktop-training-parameters input,
+.desktop-training-parameters select {
+  height: 34px;
+  border-radius: 3px;
+}
+
+.training-review-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.training-review-grid > div {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border);
+  background: var(--panel-muted);
+}
+
+.training-review-grid span,
+.training-review-grid strong,
+.training-review-grid small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.training-review-grid span { color: var(--muted); font-size: 7px; }
+.training-review-grid strong { margin-top: 4px; font-size: 10px; }
+.training-review-grid small { margin-top: 3px; color: var(--subtle); font-size: 8px; }
+
+@media (max-width: 1180px) {
+  .generate-layout {
+    height: auto;
+    min-height: 0;
+    grid-template-columns: 1fr;
+    overflow: visible;
+  }
+
+  .generation-form { max-height: none; overflow: visible; }
+  .generation-form-scroll { overflow: visible; padding-right: 0; }
+  .generation-preview { min-height: 560px; }
+  .training-create > div { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .training-dataset-list.is-expanded,
+  .desktop-training-parameters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 760px) {
+  .generation-grid,
+  .generation-advanced-grid,
+  .training-create > div,
+  .training-dataset-list.is-expanded,
+  .desktop-training-parameters,
+  .training-review-grid { grid-template-columns: 1fr; }
+
+  .generation-preview { min-height: 430px; }
+  .generation-preview > footer { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .training-stepper button span { display: none; }
+}

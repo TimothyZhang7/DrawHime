@@ -26,6 +26,7 @@ try {
   try {
     const result = await evaluateAfterInitialReload(client, buildProbeExpression());
     validateProbe(result, expectNoGpu);
+    const workflowEvidence = screenshotDirectory ? await captureGenerationAndTrainingPages(client, screenshotDirectory) : null;
     const repositoryEvidence = screenshotDirectory ? await captureRepositoryPages(client, screenshotDirectory) : null;
     const galleryEvidence = screenshotDirectory ? await captureGalleryPage(client, screenshotDirectory) : null;
     const resourceEvidence = screenshotDirectory ? await captureResourceCenter(client, screenshotDirectory) : null;
@@ -40,6 +41,7 @@ try {
       navigationPages: result.navigationPages,
       pageIsolation: result.pageIsolation,
       coreSubmissionBlocked: result.coreSubmissionError.includes("本地生成当前不可用"),
+      workflowEvidence,
       repositoryEvidence,
       galleryEvidence,
       resourceEvidence,
@@ -55,6 +57,62 @@ try {
 } finally {
   terminateProcessTree(child.pid);
   await removeUserDataDirectory(userDataDirectory);
+}
+
+/** 验证生成双栏、悬浮帮助、独立打标入口和分步骤训练入口的真实布局。 */
+async function captureGenerationAndTrainingPages(client, directory) {
+  const targetDirectory = path.resolve(directory);
+  await mkdir(targetDirectory, { recursive: true });
+  const generation = await client.evaluate(String.raw`(async () => {
+    const navigation = [...document.querySelectorAll('.desktop-sidebar nav button')].find((button) => button.textContent.trim() === '本地生成');
+    if (!navigation) throw new Error('未找到本地生成导航');
+    navigation.click();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const layout = document.querySelector('.generate-layout');
+    const form = layout?.querySelector('.generation-form');
+    const preview = layout?.querySelector('.generation-preview');
+    const fields = [...(layout?.querySelectorAll('.generation-parameter') || [])];
+    const controlsFit = fields.every((field) => { const control = field.querySelector('input, select'); return !control || control.getBoundingClientRect().right <= field.getBoundingClientRect().right + 1; });
+    return {
+      layoutVisible: Boolean(layout?.getClientRects().length),
+      twoColumns: Boolean(form && preview && Math.abs(form.getBoundingClientRect().top - preview.getBoundingClientRect().top) < 2 && preview.getBoundingClientRect().left > form.getBoundingClientRect().left),
+      parameterFields: fields.length,
+      helpIcons: layout?.querySelectorAll('.parameter-help').length || 0,
+      emptyState: Boolean(layout?.querySelector('.resource-unconfigured')),
+      previewVisible: Boolean(preview?.getClientRects().length),
+      controlsFit,
+      horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    };
+  })()`);
+  const parameterHelpReady = generation.parameterFields > 0 ? generation.helpIcons >= generation.parameterFields : generation.emptyState;
+  if (!generation.layoutVisible || !generation.twoColumns || !parameterHelpReady || !generation.previewVisible || !generation.controlsFit || generation.horizontalOverflow) throw new Error(`本地生成双栏验收失败：${JSON.stringify(generation)}`);
+  const generationFile = "generation-workspace.png";
+  await writeFile(path.join(targetDirectory, generationFile), Buffer.from(await client.captureScreenshot(), "base64"));
+
+  const captioning = await client.evaluate(String.raw`(async () => {
+    const navigation = [...document.querySelectorAll('.desktop-sidebar nav button')].find((button) => button.textContent.trim() === '训练集打标');
+    if (!navigation) throw new Error('未找到训练集打标导航');
+    navigation.click();
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    const page = document.querySelector('.captioning-page');
+    return { visible: Boolean(page?.getClientRects().length), datasetEditor: Boolean(page?.querySelector('.training-create, .training-editor')), trainingParametersLeaked: Boolean(page?.querySelector('.desktop-training-parameters')), horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth };
+  })()`);
+  if (!captioning.visible || !captioning.datasetEditor || captioning.trainingParametersLeaked || captioning.horizontalOverflow) throw new Error(`训练集打标独立页面验收失败：${JSON.stringify(captioning)}`);
+  const captioningFile = "captioning-workspace.png";
+  await writeFile(path.join(targetDirectory, captioningFile), Buffer.from(await client.captureScreenshot(), "base64"));
+
+  const training = await client.evaluate(String.raw`(async () => {
+    const navigation = [...document.querySelectorAll('.desktop-sidebar nav button')].find((button) => button.textContent.trim() === 'LoRA 训练');
+    if (!navigation) throw new Error('未找到 LoRA 训练导航');
+    navigation.click();
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    const page = document.querySelector('.lora-training-page');
+    return { visible: Boolean(page?.getClientRects().length), steps: page?.querySelectorAll('.training-stepper button').length || 0, captionControlsLeaked: Boolean(page?.querySelector('.caption-control')), horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth };
+  })()`);
+  if (!training.visible || training.steps !== 3 || training.captionControlsLeaked || training.horizontalOverflow) throw new Error(`LoRA 分步骤训练页面验收失败：${JSON.stringify(training)}`);
+  const trainingFile = "training-workflow.png";
+  await writeFile(path.join(targetDirectory, trainingFile), Buffer.from(await client.captureScreenshot(), "base64"));
+  return { generation: { ...generation, screenshot: generationFile }, captioning: { ...captioning, screenshot: captioningFile }, training: { ...training, screenshot: trainingFile } };
 }
 
 /** 验证图库作品子页面和全宽记录列表；存在真实数据时继续验证任务详情弹窗。 */
@@ -380,7 +438,7 @@ async function evaluateAfterInitialReload(client, expression) {
 
 /** 对无 GPU Runner 执行强门禁；其他硬件仍至少要求导航横幅状态一致。 */
 function validateProbe(result, expectNoGpu) {
-  const expectedNavigation = ["启动 / 账号", "本地生成", "LoRA 训练", "模型仓库", "LoRA 仓库", "图库 / 记录", "设置"];
+  const expectedNavigation = ["启动 / 账号", "本地生成", "训练集打标", "LoRA 训练", "模型仓库", "LoRA 仓库", "图库 / 记录", "设置"];
   const actualNavigation = Array.isArray(result?.navigationPages) ? result.navigationPages.map((item) => item.label) : [];
   if (JSON.stringify(actualNavigation) !== JSON.stringify(expectedNavigation)) throw new Error(`桌面导航结构异常：${actualNavigation.join(" / ")}`);
   if (!Array.isArray(result.pageIsolation) || result.pageIsolation.some((item) => item.visibleMainPanels !== 1 || item.secondaryCounts.some((count) => count !== 1))) throw new Error("桌面主分页或二级分页存在内容堆叠");
