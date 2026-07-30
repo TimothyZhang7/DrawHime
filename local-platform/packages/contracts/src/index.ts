@@ -699,6 +699,8 @@ export const desktopEnvironmentReportSchema = z.object({
 /** 桌面端保存在本机 SQLite 中的用户设置。 */
 export const desktopSettingsSchema = z.object({
   themeMode: z.enum(["system", "dark", "light"]),
+  /** 桌面界面缩放使用受控离散比例，避免任意值破坏最小窗口布局。 */
+  fontScale: z.number().min(1).max(1.3).multipleOf(0.05),
   dependencySource: z.enum(["auto", "official", "mirror"]),
   defaultPrivacy: desktopGalleryPrivacySchema,
   /** 登录账号后是否把新完成的本机图片自动同步到网页图库。 */

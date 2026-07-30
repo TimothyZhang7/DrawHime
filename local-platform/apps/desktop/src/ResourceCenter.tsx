@@ -102,14 +102,15 @@ export function DownloadQueueDialog({ open, catalog, progress, installProgress, 
 function DependencyRow({ resource, current, installing, bulkBusy, onDownload, onPause, onInstall }: { resource: ResourceItem; current?: DesktopResourceDownloadView; installing?: DesktopResourceInstallView; bulkBusy: boolean } & ResourceActions) {
   const busy = isResourceBusy(resource.id, current ? { [resource.id]: current } : {}, installing ? { [resource.id]: installing } : {});
   const state = resource.installed ? "loaded" : busy ? "downloading" : "waiting";
-  return <article><ResourceIcon installed={resource.installed} /><div className="resource-info"><strong>{resourceDisplayName(resource)}</strong><span>{resourceKindLabel(resource.kind)} · {formatResourceBytes(resource.byteSize)} · {resource.sourceKinds.length ? resource.sourceKinds.map(sourceKindLabel).join(" / ") : "当前来源不可用"}</span></div><div className="dependency-row-tail"><b className={`dependency-state is-${state}`}>{state === "loaded" ? "已加载" : state === "downloading" ? "下载中" : current?.status === "paused" ? "已暂停" : current?.status === "failed" ? "需重试" : resource.downloaded ? "等待安装" : "等待下载"}</b><ResourceAction resource={resource} current={current} installing={installing} bulkBusy={bulkBusy} onDownload={onDownload} onPause={onPause} onInstall={onInstall} /></div></article>;
+  return <article><ResourceIcon installed={resource.installed} /><div className="resource-info"><strong>{resourceDisplayName(resource)}</strong><span>{resourceKindLabel(resource.kind)} · {formatResourceBytes(resource.byteSize)} · {resource.sourceKinds.length ? resource.sourceKinds.map(sourceKindLabel).join(" / ") : "当前来源不可用"}</span></div><div className="dependency-row-tail"><b className={`dependency-state is-${state}`}>{state === "loaded" ? "已加载" : state === "downloading" ? "下载中" : resource.downloaded ? "等待安装" : current?.status === "paused" ? "已暂停" : current?.status === "failed" ? "需重试" : "等待下载"}</b><ResourceAction resource={resource} current={current} installing={installing} bulkBusy={bulkBusy} onDownload={onDownload} onPause={onPause} onInstall={onInstall} /></div></article>;
 }
 
 /** 队列卡把百分比与传输元数据分行展示，避免小字号文本压在进度条内。 */
 function QueueRow({ resource, current, installing, bulkBusy, onDownload, onPause, onInstall }: { resource: ResourceItem; current?: DesktopResourceDownloadView; installing?: DesktopResourceInstallView; bulkBusy: boolean } & ResourceActions) {
   const installBusy = Boolean(installing && ACTIVE_INSTALL_STATES.has(installing.status));
-  const percent = installBusy ? Math.round(installing!.progress) : current ? Math.min(100, Math.round(current.downloadedBytes / current.totalBytes * 100)) : resource.installed || resource.downloaded ? 100 : 0;
-  const status = installBusy ? installStatusLabel(installing!.status) : current ? downloadStatusLabel(current.status) : resource.installed ? "已加载" : "等待下载";
+  const downloadComplete = resource.downloaded || current?.status === "downloaded";
+  const percent = installBusy ? Math.round(installing!.progress) : resource.installed || downloadComplete ? 100 : current ? Math.min(100, Math.round(current.downloadedBytes / current.totalBytes * 100)) : 0;
+  const status = installBusy ? installStatusLabel(installing!.status) : resource.installed ? "已加载" : downloadComplete ? "下载完成" : current ? downloadStatusLabel(current.status) : "等待下载";
   const meta = progressMeta(resource, current, installing);
   return <article className="queue-resource"><header><div><strong>{resourceDisplayName(resource)}</strong><span>{resource.fileName}</span></div><b>{percent}%</b></header><div className="resource-progress-head"><strong>{status}</strong><span>{current ? `${formatResourceBytes(current.downloadedBytes)} / ${formatResourceBytes(current.totalBytes)}` : resource.installed ? "文件已加载" : formatResourceBytes(resource.byteSize)}</span></div><div className={`resource-progress-track is-${current?.status || (installBusy ? "installing" : resource.installed ? "downloaded" : "queued")}`}><i style={{ width: `${percent}%` }} /></div><div className="resource-progress-meta">{meta.map((item) => <span key={item}>{item}</span>)}</div>{current?.switchReason && <small className="resource-switch-reason">{current.switchReason}</small>}<footer><ResourceAction resource={resource} current={current} installing={installing} bulkBusy={bulkBusy} onDownload={onDownload} onPause={onPause} onInstall={onInstall} /></footer></article>;
 }
@@ -130,6 +131,7 @@ function ResourceAction({ resource, current, installing, bulkBusy, onDownload, o
 /** 进度辅助信息按阶段隐藏失效速度和 ETA。 */
 function progressMeta(resource: ResourceItem, current?: DesktopResourceDownloadView, installing?: DesktopResourceInstallView): string[] {
   if (installing && ACTIVE_INSTALL_STATES.has(installing.status)) return ["正在写入并校验安装目录"];
+  if (resource.downloaded && !resource.installed) return ["下载与哈希校验已完成，可以直接安装"];
   if (!current) return [resource.installed ? "依赖已加载" : "尚未进入下载队列"];
   const source = current.sourceKind ? `来源 ${sourceKindLabel(current.sourceKind)}` : null;
   if (current.status === "downloading") return [current.bytesPerSecond > 0 ? `速度 ${formatTransferRate(current.bytesPerSecond)}` : "正在稳定测速", current.etaSeconds !== null ? `预计 ${formatEta(current.etaSeconds)}` : "正在估算剩余时间", source].filter(Boolean) as string[];

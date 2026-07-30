@@ -74,7 +74,10 @@ export function App() {
   useEffect(() => { void loadDesktopSoftwareUpdateStatus().then(setSoftwareUpdate).catch((error) => setMessage(errorMessage(error))); }, []);
   useEffect(() => {
     let unlisten: (() => void) | undefined;
-    void listenDesktopResourceProgress((progress) => setResourceProgress((current) => ({ ...current, [progress.resourceId]: progress }))).then((dispose) => { unlisten = dispose; }).catch((error) => setMessage(errorMessage(error)));
+    void listenDesktopResourceProgress((progress) => {
+      setResourceProgress((current) => ({ ...current, [progress.resourceId]: progress }));
+      if (progress.status === "downloaded") setMessage((current) => isTransientNetworkNotice(current) ? "" : current);
+    }).then((dispose) => { unlisten = dispose; }).catch((error) => setMessage(errorMessage(error)));
     return () => unlisten?.();
   }, []);
   useEffect(() => {
@@ -106,9 +109,18 @@ export function App() {
   }, []);
   useEffect(() => {
     let unlisten: (() => void) | undefined;
-    void listenDesktopResourceInstallProgress((progress) => setInstallProgress((current) => ({ ...current, [progress.resourceId]: progress }))).then((dispose) => { unlisten = dispose; }).catch((error) => setMessage(errorMessage(error)));
+    void listenDesktopResourceInstallProgress((progress) => {
+      setInstallProgress((current) => ({ ...current, [progress.resourceId]: progress }));
+      if (progress.status === "installed") setMessage((current) => isTransientNetworkNotice(current) ? "" : current);
+    }).then((dispose) => { unlisten = dispose; }).catch((error) => setMessage(errorMessage(error)));
     return () => unlisten?.();
   }, []);
+  /** 顶部操作提示是瞬时反馈，超时类错误不会在后续页面中永久残留。 */
+  useEffect(() => {
+    if (!message) return undefined;
+    const timer = window.setTimeout(() => setMessage(""), isTransientNetworkNotice(message) ? 6_000 : 9_000);
+    return () => window.clearTimeout(timer);
+  }, [message]);
   useEffect(() => {
     if (!bootstrapReady) return;
     const timer = window.setInterval(() => void recheck(true), 90_000);
@@ -130,12 +142,13 @@ export function App() {
       const resolved = bootstrap.settings.themeMode === "system" ? (media.matches ? "dark" : "light") : bootstrap.settings.themeMode;
       document.documentElement.dataset.theme = resolved;
       document.documentElement.style.colorScheme = resolved;
+      document.documentElement.style.setProperty("--desktop-font-scale", String(bootstrap.settings.fontScale));
       void getCurrentWindow().setTheme(resolved).catch(() => undefined);
     };
     applyTheme();
     media.addEventListener("change", applyTheme);
     return () => media.removeEventListener("change", applyTheme);
-  }, [bootstrap?.settings.themeMode]);
+  }, [bootstrap?.settings.themeMode, bootstrap?.settings.fontScale]);
 
   /** 快速复检结果立即覆盖旧状态，GPU 恢复前警告不会消失。 */
   const recheck = async (quiet = false) => {
@@ -164,7 +177,7 @@ export function App() {
   /** 资源目录刷新始终重新执行远端签名和有效期校验。 */
   const reloadResourceCatalog = async () => {
     setCatalogLoading(true);
-    try { setResourceCatalog(await loadDesktopResourceCatalog()); }
+    try { setResourceCatalog(await loadDesktopResourceCatalog()); setMessage((current) => isTransientNetworkNotice(current) ? "" : current); }
     catch (error) { setMessage(errorMessage(error)); }
     finally { setCatalogLoading(false); }
   };
@@ -173,14 +186,14 @@ export function App() {
   const downloadResource = async (resourceId: string, catalogOverride?: DesktopResourceCatalogView) => {
     const totalBytes = (catalogOverride || resourceCatalog)?.resources.find((item) => item.id === resourceId)?.byteSize || 1;
     setResourceProgress((current) => ({ ...current, [resourceId]: { resourceId, status: "queued", sourceKind: current[resourceId]?.sourceKind || null, downloadedBytes: current[resourceId]?.downloadedBytes || 0, totalBytes, bytesPerSecond: 0, etaSeconds: null, switchReason: current[resourceId]?.switchReason || null, targetPath: null, error: null } }));
-    try { const progress = await downloadDesktopResource(resourceId); setResourceProgress((current) => ({ ...current, [resourceId]: progress })); await reloadResourceCatalog(); return true; }
+    try { const progress = await downloadDesktopResource(resourceId); setResourceProgress((current) => ({ ...current, [resourceId]: progress })); await reloadResourceCatalog(); setMessage((current) => isTransientNetworkNotice(current) ? "" : current); return true; }
     catch (error) { const message = errorMessage(error); setResourceProgress((current) => ({ ...current, [resourceId]: { resourceId, status: "failed", sourceKind: current[resourceId]?.sourceKind || null, downloadedBytes: current[resourceId]?.downloadedBytes || 0, totalBytes, bytesPerSecond: 0, etaSeconds: null, switchReason: current[resourceId]?.switchReason || null, targetPath: null, error: message } })); setMessage(message); return false; }
   };
 
   /** 安装使用已验证缓存；完成后同步刷新资源状态与 Runtime 环境门禁。 */
   const installResource = async (resourceId: string) => {
     setInstallProgress((current) => ({ ...current, [resourceId]: { resourceId, status: "verifying", progress: 0, installPath: null, rollbackPath: null, error: null } }));
-    try { const progress = await installDesktopResource(resourceId); setInstallProgress((current) => ({ ...current, [resourceId]: progress })); const [, , nextModels] = await Promise.all([reloadResourceCatalog(), recheck(true), listDesktopLocalModels()]); setModels(nextModels); return true; }
+    try { const progress = await installDesktopResource(resourceId); setInstallProgress((current) => ({ ...current, [resourceId]: progress })); const [, , nextModels] = await Promise.all([reloadResourceCatalog(), recheck(true), listDesktopLocalModels()]); setModels(nextModels); setMessage((current) => isTransientNetworkNotice(current) ? "" : current); return true; }
     catch (error) { const message = errorMessage(error); setInstallProgress((current) => ({ ...current, [resourceId]: { resourceId, status: "failed", progress: current[resourceId]?.progress || 0, installPath: null, rollbackPath: null, error: message } })); setMessage(message); return false; }
   };
 
@@ -368,10 +381,10 @@ function UpdatesPage({ value, onChanged, onError }: { value: DesktopSoftwareUpda
 function SettingsPage({ value, onSaved, onError }: { value: DesktopSettings; onSaved: (settings: DesktopSettings) => void; onError: (message: string) => void }) {
   const [form, setForm] = useState(value);
   const [busy, setBusy] = useState(false);
-  useEffect(() => setForm((current) => ({ ...current, themeMode: value.themeMode })), [value.themeMode]);
+  useEffect(() => setForm((current) => ({ ...current, themeMode: value.themeMode, fontScale: value.fontScale })), [value.themeMode, value.fontScale]);
   const changed = useMemo(() => JSON.stringify(form) !== JSON.stringify(value), [form, value]);
   const save = async () => { setBusy(true); try { onSaved(await saveDesktopSettings(form)); } catch (error) { onError(errorMessage(error)); } finally { setBusy(false); } };
-  return <div className="desktop-page"><section className="section-card settings-card"><header><div><span>LOCAL SETTINGS</span><h2>界面、下载与存储</h2></div><ShieldCheck /></header><div className="settings-grid"><label><span>界面主题</span><select value={form.themeMode} onChange={(event) => setForm({ ...form, themeMode: event.target.value as DesktopSettings["themeMode"] })}><option value="system">跟随系统</option><option value="dark">深色</option><option value="light">亮色</option></select><small>保存后同步更新窗口与页面</small></label><label><span>依赖来源</span><select value={form.dependencySource} onChange={(event) => setForm({ ...form, dependencySource: event.target.value as DesktopSettings["dependencySource"] })}><option value="auto">自动：优先官方，异常切换镜像</option><option value="official">仅官方来源</option><option value="mirror">仅主站镜像</option></select><small>所有来源仍需通过相同签名和哈希校验</small></label><label><span>默认图库权限</span><select value={form.defaultPrivacy} onChange={(event) => setForm({ ...form, defaultPrivacy: event.target.value as DesktopSettings["defaultPrivacy"] })}><option value="public">公开</option><option value="private">私有</option></select><small>自动上传默认公开，每次生成仍可单独覆盖</small></label><label><span>上传并发数</span><select value={form.uploadConcurrency} onChange={(event) => setForm({ ...form, uploadConcurrency: Number(event.target.value) })}>{[1, 2, 3, 4].map((value) => <option key={value} value={value}>{value}</option>)}</select><small>弱网环境建议 1–2</small></label><PathField label="模型目录" value={form.modelRoot} /><PathField label="作品目录" value={form.outputRoot} /><PathField label="Runtime 目录" value={form.runtimeRoot} /><label className="settings-check"><input type="checkbox" checked={form.autoUpload} onChange={(event) => setForm({ ...form, autoUpload: event.target.checked })} /><span>登录后自动上传新图片到网页图库</span></label><label className="settings-check"><input type="checkbox" checked={form.wifiOnly} onChange={(event) => setForm({ ...form, wifiOnly: event.target.checked })} /><span>仅在非计费网络同步图库</span></label></div><footer><button disabled={!changed || busy} onClick={() => void save()}>{busy ? <LoaderCircle className="spin" /> : <FolderCog />}{busy ? "保存中" : "保存本地设置"}</button></footer></section></div>;
+  return <div className="desktop-page"><section className="section-card settings-card"><header><div><span>LOCAL SETTINGS</span><h2>界面、下载与存储</h2></div><ShieldCheck /></header><div className="settings-grid"><label><span>界面主题</span><select value={form.themeMode} onChange={(event) => setForm({ ...form, themeMode: event.target.value as DesktopSettings["themeMode"] })}><option value="system">跟随系统</option><option value="dark">深色</option><option value="light">亮色</option></select><small>保存后同步更新窗口与页面</small></label><label><span>字体大小</span><select value={form.fontScale} onChange={(event) => setForm({ ...form, fontScale: Number(event.target.value) })}><option value={1}>紧凑（100%）</option><option value={1.1}>默认（110%）</option><option value={1.2}>较大（120%）</option><option value={1.3}>特大（130%）</option></select><small>调整整个工作区文字和控件比例</small></label><label><span>依赖来源</span><select value={form.dependencySource} onChange={(event) => setForm({ ...form, dependencySource: event.target.value as DesktopSettings["dependencySource"] })}><option value="auto">自动：优先官方，异常切换镜像</option><option value="official">仅官方来源</option><option value="mirror">仅主站镜像</option></select><small>所有来源仍需通过相同签名和哈希校验</small></label><label><span>默认图库权限</span><select value={form.defaultPrivacy} onChange={(event) => setForm({ ...form, defaultPrivacy: event.target.value as DesktopSettings["defaultPrivacy"] })}><option value="public">公开</option><option value="private">私有</option></select><small>自动上传默认公开，每次生成仍可单独覆盖</small></label><label><span>上传并发数</span><select value={form.uploadConcurrency} onChange={(event) => setForm({ ...form, uploadConcurrency: Number(event.target.value) })}>{[1, 2, 3, 4].map((value) => <option key={value} value={value}>{value}</option>)}</select><small>弱网环境建议 1–2</small></label><PathField label="模型目录" value={form.modelRoot} /><PathField label="作品目录" value={form.outputRoot} /><PathField label="Runtime 目录" value={form.runtimeRoot} /><label className="settings-check"><input type="checkbox" checked={form.autoUpload} onChange={(event) => setForm({ ...form, autoUpload: event.target.checked })} /><span>登录后自动上传新图片到网页图库</span></label><label className="settings-check"><input type="checkbox" checked={form.wifiOnly} onChange={(event) => setForm({ ...form, wifiOnly: event.target.checked })} /><span>仅在非计费网络同步图库</span></label></div><footer><button disabled={!changed || busy} onClick={() => void save()}>{busy ? <LoaderCircle className="spin" /> : <FolderCog />}{busy ? "保存中" : "保存本地设置"}</button></footer></section></div>;
 }
 
 /** AI 设置卡统一管理真实 OpenAI 兼容端点、系统凭据和图片分析验证。 */
@@ -427,3 +440,5 @@ function themeModeLabel(mode: DesktopSettings["themeMode"]): string { return { s
 function formatResourceBytes(value: number): string { if (value < 1024 ** 2) return `${Math.max(1, Math.round(value / 1024))} KiB`; if (value < 1024 ** 3) return `${(value / 1024 ** 2).toFixed(1)} MiB`; return `${(value / 1024 ** 3).toFixed(2)} GiB`; }
 function formatBytes(value: number): string { if (value <= 0) return "0 GB"; return `${(value / 1024 ** 3).toFixed(value >= 10 * 1024 ** 3 ? 0 : 1)} GB`; }
 function errorMessage(error: unknown): string { return error instanceof Error ? error.message : String(error || "桌面端操作失败"); }
+/** 只自动清理由临时网络状态产生的旧提示，业务校验错误仍按统一时限展示。 */
+function isTransientNetworkNotice(message: string): boolean { return ["超时", "连接失败", "网络传输失败", "资源清单", "下载来源"].some((fragment) => message.includes(fragment)); }

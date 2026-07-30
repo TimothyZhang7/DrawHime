@@ -457,6 +457,8 @@ pub struct EnvironmentIssue { pub code: String, pub severity: String, pub title:
 #[serde(rename_all = "camelCase")]
 pub struct DesktopSettings {
     pub theme_mode: String,
+    /** 字体缩放仅允许 100%–130%，默认 110%。 */
+    pub font_scale: f64,
     pub dependency_source: String,
     pub default_privacy: String,
     /** 登录账号后是否自动把新完成的本机图片加入网页图库同步队列。 */

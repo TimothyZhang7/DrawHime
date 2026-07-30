@@ -56,7 +56,7 @@ pub fn load_catalog(settings: &DesktopSettings, app_data_dir: &Path) -> Result<D
     let Some((manifest_url, key_id, public_key)) = manifest_configuration() else {
         return Ok(DesktopResourceCatalogView { configured: false, key_id: None, generated_at: None, expires_at: None, message: "当前安装包尚未配置经过签名的资源发布通道".into(), resources: Vec::new() });
     };
-    let payload = fetch_verified_manifest(manifest_url, key_id, public_key)?;
+    let (payload, cached_manifest) = load_resource_manifest(manifest_url, key_id, public_key, app_data_dir)?;
     let cache_dir = resource_cache_dir(app_data_dir);
     let resources = payload.resources.iter().filter(|item| item.kind != "application" && resource_matches_current_platform(item)).map(|item| {
         let target = cache_dir.join(&item.file_name);
@@ -77,7 +77,8 @@ pub fn load_catalog(settings: &DesktopSettings, app_data_dir: &Path) -> Result<D
             model_registration: item.model_registration.clone(),
         }
     }).collect();
-    Ok(DesktopResourceCatalogView { configured: true, key_id: Some(key_id.into()), generated_at: Some(payload.generated_at), expires_at: Some(payload.expires_at), message: "资源清单签名和有效期校验通过".into(), resources })
+    let message = if cached_manifest { "网络暂不可用，已使用仍在有效期内的本机签名清单" } else { "资源清单签名和有效期校验通过" };
+    Ok(DesktopResourceCatalogView { configured: true, key_id: Some(key_id.into()), generated_at: Some(payload.generated_at), expires_at: Some(payload.expires_at), message: message.into(), resources })
 }
 
 /** 把已验证缓存安全安装到受控目录，并在切换失败时恢复旧版本。 */
@@ -89,7 +90,7 @@ pub fn install_resource(settings: &DesktopSettings, app_data_dir: &Path, resourc
 
 fn install_resource_inner(settings: &DesktopSettings, app_data_dir: &Path, resource_id: &str, app: &tauri::AppHandle) -> Result<ResourceInstallOutcome, String> {
     let Some((manifest_url, key_id, public_key)) = manifest_configuration() else { return Err("当前安装包尚未配置经过签名的资源发布通道".into()); };
-    let payload = fetch_verified_manifest(manifest_url, key_id, public_key)?;
+    let (payload, _) = load_resource_manifest(manifest_url, key_id, public_key, app_data_dir)?;
     let item = payload.resources.iter().find(|candidate| candidate.id == resource_id && resource_matches_current_platform(candidate)).cloned().ok_or_else(|| "资源不存在或不适用于当前系统".to_string())?;
     // 应用程序包只能经过软件更新控制器重新验签并启动，禁止作为普通依赖写入模型目录。
     if item.kind == "application" { return Err("应用程序包请在软件更新页面应用".into()); }
@@ -157,7 +158,7 @@ fn ensure_sufficient_space(available: u64, required: u64) -> Result<(), String> 
 pub fn download_resource(settings: &DesktopSettings, app_data_dir: &Path, resource_id: &str, app: &tauri::AppHandle) -> Result<DesktopResourceDownloadView, String> {
     clear_download_pause(resource_id);
     let Some((manifest_url, key_id, public_key)) = manifest_configuration() else { return Err("当前安装包尚未配置经过签名的资源发布通道".into()); };
-    let payload = fetch_verified_manifest(manifest_url, key_id, public_key)?;
+    let (payload, _) = load_resource_manifest(manifest_url, key_id, public_key, app_data_dir)?;
     let item = payload.resources.into_iter().find(|candidate| candidate.id == resource_id && resource_matches_current_platform(candidate)).ok_or_else(|| "资源不存在或不适用于当前系统".to_string())?;
     let sources = ordered_sources(&item, &settings.dependency_source);
     if sources.is_empty() { return Err("当前依赖来源设置下没有可用下载地址".into()); }
@@ -291,6 +292,49 @@ pub(crate) fn offline_envelope_path(installer_path: &Path) -> PathBuf { installe
 
 fn fetch_verified_manifest(manifest_url: &str, expected_key_id: &str, public_key: &str) -> Result<DesktopResourceManifestPayload, String> {
     verify_manifest(fetch_manifest_envelope(manifest_url)?, expected_key_id, public_key)
+}
+
+/** 普通依赖优先使用在线签名清单，网络异常时回退到仍有效的本机签名信封。 */
+fn load_resource_manifest(manifest_url: &str, expected_key_id: &str, public_key: &str, app_data_dir: &Path) -> Result<(DesktopResourceManifestPayload, bool), String> {
+    match fetch_manifest_envelope(manifest_url) {
+        Ok(envelope) => {
+            let payload = verify_manifest(envelope.clone(), expected_key_id, public_key)?;
+            persist_cached_resource_manifest(app_data_dir, &envelope)?;
+            Ok((payload, false))
+        }
+        Err(online_error) => {
+            let cached = read_cached_resource_manifest(app_data_dir).and_then(|envelope| verify_manifest(envelope, expected_key_id, public_key));
+            cached.map(|payload| (payload, true)).map_err(|cached_error| format!("{online_error}；本机签名清单不可用：{cached_error}"))
+        }
+    }
+}
+
+/** 签名信封使用同目录临时文件和回滚文件原子更新，缓存损坏不会覆盖上一份可用清单。 */
+fn persist_cached_resource_manifest(app_data_dir: &Path, envelope: &DesktopResourceManifestEnvelope) -> Result<(), String> {
+    let directory = resource_cache_dir(app_data_dir);
+    fs::create_dir_all(&directory).map_err(|error| format!("创建资源缓存目录失败：{error}"))?;
+    let target = cached_resource_manifest_path(app_data_dir);
+    let temporary = directory.join(format!("manifest-envelope.tmp-{}", Uuid::new_v4()));
+    let backup = directory.join("manifest-envelope.previous.json");
+    let bytes = serde_json::to_vec(envelope).map_err(|error| format!("序列化资源签名清单失败：{error}"))?;
+    fs::write(&temporary, bytes).map_err(|error| format!("写入资源签名清单临时文件失败：{error}"))?;
+    if backup.exists() { fs::remove_file(&backup).map_err(|error| format!("清理旧资源清单回滚文件失败：{error}"))?; }
+    if target.exists() { fs::rename(&target, &backup).map_err(|error| format!("备份旧资源签名清单失败：{error}"))?; }
+    if let Err(error) = fs::rename(&temporary, &target) {
+        if backup.exists() { let _ = fs::rename(&backup, &target); }
+        return Err(format!("提交资源签名清单缓存失败：{error}"));
+    }
+    if backup.exists() { let _ = fs::remove_file(backup); }
+    Ok(())
+}
+
+/** 读取缓存信封时限制体积，随后仍执行固定公钥、时间和完整载荷校验。 */
+fn read_cached_resource_manifest(app_data_dir: &Path) -> Result<DesktopResourceManifestEnvelope, String> {
+    let path = cached_resource_manifest_path(app_data_dir);
+    let metadata = path.metadata().map_err(|_| "尚无本机签名清单缓存".to_string())?;
+    if !metadata.is_file() || metadata.len() > MAX_MANIFEST_BYTES { return Err("本机签名清单缓存大小异常".into()); }
+    let bytes = fs::read(path).map_err(|error| format!("读取本机签名清单失败：{error}"))?;
+    serde_json::from_slice(&bytes).map_err(|error| format!("解析本机签名清单失败：{error}"))
 }
 
 /** 有界读取 HTTPS 清单信封；签名验证由调用方在返回后立即执行。 */
@@ -508,6 +552,7 @@ fn source_kind_name(kind: &str) -> &'static str { if kind == "official" { "官�
 
 fn resource_matches_current_platform(item: &DesktopResourceManifestItem) -> bool { item.os == "windows" && item.arch == std::env::consts::ARCH }
 fn resource_cache_dir(app_data_dir: &Path) -> PathBuf { app_data_dir.join("resource-cache") }
+fn cached_resource_manifest_path(app_data_dir: &Path) -> PathBuf { resource_cache_dir(app_data_dir).join("manifest-envelope.json") }
 fn partial_path(target: &Path) -> PathBuf { target.with_file_name(format!("{}.part", target.file_name().unwrap_or_default().to_string_lossy())) }
 fn marker_path(target: &Path) -> PathBuf { target.with_file_name(format!("{}.verified", target.file_name().unwrap_or_default().to_string_lossy())) }
 fn verified_marker_matches(target: &Path, item: &DesktopResourceManifestItem) -> bool { target.metadata().is_ok_and(|metadata| metadata.len() == item.byte_size) && fs::read_to_string(marker_path(target)).is_ok_and(|value| value.trim() == item.sha256) }
@@ -858,6 +903,19 @@ mod tests {
         assert!(verify_manifest(DesktopResourceManifestEnvelope { key_id: "test".into(), payload: format!("{payload} "), signature }, "test", &public_key).is_err());
     }
 
+    /** 本机清单缓存仍必须通过原始签名和有效期验证。 */
+    #[test]
+    fn cached_manifest_preserves_verified_envelope() {
+        let temporary = tempfile::tempdir().expect("创建清单缓存测试目录");
+        let signing_key = SigningKey::from_bytes(&[11_u8; 32]);
+        let envelope = signed_application_envelope(application_item(b"cached-installer"), &signing_key);
+        persist_cached_resource_manifest(temporary.path(), &envelope).expect("原子保存签名清单");
+        let restored = read_cached_resource_manifest(temporary.path()).expect("读取签名清单缓存");
+        let public_key = BASE64.encode(signing_key.verifying_key().to_bytes());
+        let payload = verify_manifest(restored, "test", &public_key).expect("缓存清单重新验签");
+        assert_eq!(payload.resources[0].id, "application.desktop.stable");
+    }
+
     #[test]
     fn application_resource_requires_complete_update_metadata() {
         let mut application = application_item(b"signed-installer");
@@ -1069,7 +1127,7 @@ mod tests {
         item.byte_size = cache.metadata().expect("读取 Runtime 缓存大小").len();
         item.installed_size = 4096;
         item.sha256 = sha256_file(&cache).expect("计算 Runtime 缓存哈希");
-        let settings = DesktopSettings { theme_mode: "system".into(), dependency_source: "auto".into(), default_privacy: "private".into(), auto_upload: true, model_root: temporary.path().join("models").to_string_lossy().into_owned(), output_root: temporary.path().join("outputs").to_string_lossy().into_owned(), runtime_root: temporary.path().join("runtime").to_string_lossy().into_owned(), upload_concurrency: 2, wifi_only: false, bandwidth_limit_kib: None };
+        let settings = DesktopSettings { theme_mode: "system".into(), font_scale: 1.1, dependency_source: "auto".into(), default_privacy: "private".into(), auto_upload: true, model_root: temporary.path().join("models").to_string_lossy().into_owned(), output_root: temporary.path().join("outputs").to_string_lossy().into_owned(), runtime_root: temporary.path().join("runtime").to_string_lossy().into_owned(), upload_concurrency: 2, wifi_only: false, bandwidth_limit_kib: None };
         let result = install_cached_resource(&settings, &item, &cache, &|_| {}).expect("安装已验证 Runtime");
         assert_eq!(result.status, "installed");
         assert!(installed_resource_matches(&item, &settings));
@@ -1090,7 +1148,7 @@ mod tests {
         item.sha256 = "6af1b60b6a1fad780b07871e4ff356ac04a1807755ee13c6050e3ec3a4157cc0".into();
         item.archive = "7z".into();
         item.root_directory = Some("ComfyUI_windows_portable".into());
-        let settings = DesktopSettings { theme_mode: "system".into(), dependency_source: "auto".into(), default_privacy: "private".into(), auto_upload: true, model_root: temporary.path().join("models").to_string_lossy().into_owned(), output_root: temporary.path().join("outputs").to_string_lossy().into_owned(), runtime_root: temporary.path().join("runtime").to_string_lossy().into_owned(), upload_concurrency: 2, wifi_only: false, bandwidth_limit_kib: None };
+        let settings = DesktopSettings { theme_mode: "system".into(), font_scale: 1.1, dependency_source: "auto".into(), default_privacy: "private".into(), auto_upload: true, model_root: temporary.path().join("models").to_string_lossy().into_owned(), output_root: temporary.path().join("outputs").to_string_lossy().into_owned(), runtime_root: temporary.path().join("runtime").to_string_lossy().into_owned(), upload_concurrency: 2, wifi_only: false, bandwidth_limit_kib: None };
         let result = install_cached_resource(&settings, &item, Path::new(&archive_path), &|_| {}).expect("安全安装官方 Runtime");
         assert_eq!(result.status, "installed");
         assert!(installed_resource_matches(&item, &settings));
@@ -1122,7 +1180,7 @@ mod tests {
         let runtime_root = temporary.path().join("runtime");
         fs::create_dir_all(runtime_root.join("current")).expect("创建测试 Runtime");
         fs::write(runtime_root.join("current/runtime-manifest.json"), b"{\"status\":\"ready\"}").expect("写入测试 Runtime 清单");
-        let settings = DesktopSettings { theme_mode: "system".into(), dependency_source: "auto".into(), default_privacy: "private".into(), auto_upload: true, model_root: temporary.path().join("models").to_string_lossy().into_owned(), output_root: temporary.path().join("outputs").to_string_lossy().into_owned(), runtime_root: runtime_root.to_string_lossy().into_owned(), upload_concurrency: 2, wifi_only: false, bandwidth_limit_kib: None };
+        let settings = DesktopSettings { theme_mode: "system".into(), font_scale: 1.1, dependency_source: "auto".into(), default_privacy: "private".into(), auto_upload: true, model_root: temporary.path().join("models").to_string_lossy().into_owned(), output_root: temporary.path().join("outputs").to_string_lossy().into_owned(), runtime_root: runtime_root.to_string_lossy().into_owned(), upload_concurrency: 2, wifi_only: false, bandwidth_limit_kib: None };
         let result = install_cached_resource(&settings, &item, Path::new(&archive_path), &|_| {}).expect("安装已发布 Captioner");
         assert_eq!(result.status, "installed");
         let root = PathBuf::from(result.install_path.expect("读取 Captioner 安装路径"));
@@ -1150,7 +1208,7 @@ mod tests {
         fs::write(model_root.join("diffusion_models/anima.safetensors"), b"test").expect("写入测试 DiT");
         fs::write(model_root.join("text_encoders/qwen_3_06b_base.safetensors"), b"test").expect("写入测试文本编码器");
         fs::write(model_root.join("vae/qwen_image_vae.safetensors"), b"test").expect("写入测试 VAE");
-        let settings = DesktopSettings { theme_mode: "system".into(), dependency_source: "auto".into(), default_privacy: "private".into(), auto_upload: true, model_root: model_root.to_string_lossy().into_owned(), output_root: temporary.path().join("outputs").to_string_lossy().into_owned(), runtime_root: runtime_root.to_string_lossy().into_owned(), upload_concurrency: 2, wifi_only: false, bandwidth_limit_kib: None };
+        let settings = DesktopSettings { theme_mode: "system".into(), font_scale: 1.1, dependency_source: "auto".into(), default_privacy: "private".into(), auto_upload: true, model_root: model_root.to_string_lossy().into_owned(), output_root: temporary.path().join("outputs").to_string_lossy().into_owned(), runtime_root: runtime_root.to_string_lossy().into_owned(), upload_concurrency: 2, wifi_only: false, bandwidth_limit_kib: None };
         let result = install_cached_resource(&settings, &item, Path::new(&archive_path), &|_| {}).expect("安装已发布 Trainer");
         assert_eq!(result.status, "installed");
         let root = PathBuf::from(result.install_path.expect("读取 Trainer 安装路径"));
@@ -1163,7 +1221,7 @@ mod tests {
     #[test]
     fn installed_anima_resource_group_becomes_one_registered_model() {
         let temporary = tempfile::tempdir().expect("创建模型组合临时目录");
-        let settings = DesktopSettings { theme_mode: "system".into(), dependency_source: "auto".into(), default_privacy: "private".into(), auto_upload: true, model_root: temporary.path().join("models").to_string_lossy().into_owned(), output_root: temporary.path().join("outputs").to_string_lossy().into_owned(), runtime_root: temporary.path().join("runtime").to_string_lossy().into_owned(), upload_concurrency: 2, wifi_only: false, bandwidth_limit_kib: None };
+        let settings = DesktopSettings { theme_mode: "system".into(), font_scale: 1.1, dependency_source: "auto".into(), default_privacy: "private".into(), auto_upload: true, model_root: temporary.path().join("models").to_string_lossy().into_owned(), output_root: temporary.path().join("outputs").to_string_lossy().into_owned(), runtime_root: temporary.path().join("runtime").to_string_lossy().into_owned(), upload_concurrency: 2, wifi_only: false, bandwidth_limit_kib: None };
         let definitions = [("primary", "diffusion_models", "model.safetensors", b"model".as_slice()), ("text_encoder", "text_encoders", "clip.safetensors", b"clip".as_slice()), ("vae", "vae", "vae.safetensors", b"vae".as_slice())];
         let mut items = Vec::new();
         for (role, directory, file_name, bytes) in definitions {
@@ -1185,7 +1243,7 @@ mod tests {
     #[test]
     fn identical_raw_model_resource_is_shared_across_groups() {
         let temporary = tempfile::tempdir().expect("创建共享模型资源临时目录");
-        let settings = DesktopSettings { theme_mode: "system".into(), dependency_source: "auto".into(), default_privacy: "private".into(), auto_upload: true, model_root: temporary.path().join("models").to_string_lossy().into_owned(), output_root: temporary.path().join("outputs").to_string_lossy().into_owned(), runtime_root: temporary.path().join("runtime").to_string_lossy().into_owned(), upload_concurrency: 2, wifi_only: false, bandwidth_limit_kib: None };
+        let settings = DesktopSettings { theme_mode: "system".into(), font_scale: 1.1, dependency_source: "auto".into(), default_privacy: "private".into(), auto_upload: true, model_root: temporary.path().join("models").to_string_lossy().into_owned(), output_root: temporary.path().join("outputs").to_string_lossy().into_owned(), runtime_root: temporary.path().join("runtime").to_string_lossy().into_owned(), upload_concurrency: 2, wifi_only: false, bandwidth_limit_kib: None };
         let cache = temporary.path().join("shared-encoder.safetensors");
         fs::write(&cache, b"shared-encoder").expect("写入共享文本编码器缓存");
         let mut first = item();

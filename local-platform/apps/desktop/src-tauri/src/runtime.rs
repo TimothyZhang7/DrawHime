@@ -610,6 +610,7 @@ mod tests {
         let temporary = tempfile::tempdir().expect("创建临时 Runtime 目录");
         let settings = DesktopSettings {
             theme_mode: "system".into(),
+            font_scale: 1.1,
             dependency_source: "auto".into(),
             default_privacy: "private".into(),
             auto_upload: true,
@@ -646,6 +647,7 @@ mod tests {
         let temporary = tempfile::tempdir().expect("创建 Runtime 自检数据目录");
         let settings = DesktopSettings {
             theme_mode: "system".into(),
+            font_scale: 1.1,
             dependency_source: "auto".into(),
             default_privacy: "private".into(),
             auto_upload: true,

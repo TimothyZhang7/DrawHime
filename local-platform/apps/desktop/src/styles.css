@@ -35,6 +35,8 @@
   --warning-control: #302419;
   --success-border: #2c644f;
   --success-border-strong: #2b805f;
+  /* 默认提升到 110%，用户可在设置中选择 100%–130%。 */
+  --desktop-font-scale: 1.1;
 }
 
 :root[data-theme="light"] {
@@ -84,6 +86,12 @@ body,
   min-height: 100%;
 }
 
+#root {
+  width: calc(100% / var(--desktop-font-scale));
+  min-height: calc(100vh / var(--desktop-font-scale));
+  zoom: var(--desktop-font-scale);
+}
+
 html {
   /* 始终预留纵向滚动条槽位，长短页面切换时主内容宽度不发生位移。 */
   scrollbar-gutter: stable;
@@ -129,7 +137,7 @@ select:focus-visible {
 }
 
 .desktop-loading {
-  min-height: 100vh;
+  min-height: calc(100vh / var(--desktop-font-scale));
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -154,7 +162,7 @@ select:focus-visible {
 }
 
 .desktop-shell {
-  min-height: 100vh;
+  min-height: calc(100vh / var(--desktop-font-scale));
   display: grid;
   grid-template-columns: 214px minmax(0, 1fr);
 }
@@ -4120,9 +4128,9 @@ select:focus-visible {
 
 /* 生成页使用固定双栏工作台，左侧参数独立滚动，右侧预览保持稳定。 */
 .generate-layout {
-  height: calc(100vh - 98px);
+  height: calc(100vh / var(--desktop-font-scale) - 98px);
   min-height: 560px;
-  grid-template-columns: minmax(500px, .9fr) minmax(390px, 1.1fr);
+  grid-template-columns: minmax(430px, .9fr) minmax(330px, 1.1fr);
   align-items: stretch;
   overflow: hidden;
 }

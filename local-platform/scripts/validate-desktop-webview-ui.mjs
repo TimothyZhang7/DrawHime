@@ -27,6 +27,7 @@ try {
     const result = await evaluateAfterInitialReload(client, buildProbeExpression());
     validateProbe(result, expectNoGpu);
     const workflowEvidence = screenshotDirectory ? await captureGenerationAndTrainingPages(client, screenshotDirectory) : null;
+    const fontSettingsEvidence = screenshotDirectory ? await captureFontSettings(client, screenshotDirectory) : null;
     const repositoryEvidence = screenshotDirectory ? await captureRepositoryPages(client, screenshotDirectory) : null;
     const galleryEvidence = screenshotDirectory ? await captureGalleryPage(client, screenshotDirectory) : null;
     const resourceEvidence = screenshotDirectory ? await captureResourceCenter(client, screenshotDirectory) : null;
@@ -36,12 +37,14 @@ try {
       environmentStatus: result.environmentStatus,
       inferenceReady: result.inferenceReady,
       trainingReady: result.trainingReady,
+      fontScale: result.fontScale,
       bannerText: result.bannerText,
       coreStatusText: result.coreStatusText,
       navigationPages: result.navigationPages,
       pageIsolation: result.pageIsolation,
       coreSubmissionBlocked: result.coreSubmissionError.includes("本地生成当前不可用"),
       workflowEvidence,
+      fontSettingsEvidence,
       repositoryEvidence,
       galleryEvidence,
       resourceEvidence,
@@ -57,6 +60,44 @@ try {
 } finally {
   terminateProcessTree(child.pid);
   await removeUserDataDirectory(userDataDirectory);
+}
+
+/** 通过真实 IPC 保存并恢复字体比例，确认设置、CSS 缩放与 SQLite 持久链路一致。 */
+async function captureFontSettings(client, directory) {
+  const targetDirectory = path.resolve(directory);
+  await mkdir(targetDirectory, { recursive: true });
+  const result = await client.evaluate(String.raw`(async () => {
+    const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+    const navigation = [...document.querySelectorAll('.desktop-sidebar nav button')].find((button) => button.textContent.trim() === '设置');
+    navigation?.click();
+    await delay(180);
+    const basicTab = [...document.querySelectorAll('.workspace-tabs button')].find((button) => button.textContent.includes('基础设置'));
+    basicTab?.click();
+    await delay(120);
+    const label = [...document.querySelectorAll('.settings-grid label')].find((item) => item.querySelector(':scope > span')?.textContent.trim() === '字体大小');
+    const select = label?.querySelector('select');
+    const save = [...document.querySelectorAll('.settings-card footer button')].find((button) => button.textContent.includes('保存本地设置'));
+    if (!select || !save) throw new Error('未找到字体大小设置');
+    const original = Number(select.value);
+    const target = original === 1.3 ? 1.2 : 1.3;
+    select.value = String(target);
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    await delay(80);
+    save.click();
+    await delay(350);
+    const applied = Number(getComputedStyle(document.documentElement).getPropertyValue('--desktop-font-scale'));
+    select.value = String(original);
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    await delay(80);
+    save.click();
+    await delay(350);
+    const restored = Number(getComputedStyle(document.documentElement).getPropertyValue('--desktop-font-scale'));
+    return { original, target, applied, restored, optionValues: [...select.options].map((option) => Number(option.value)), horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth };
+  })()`);
+  if (result.applied !== result.target || result.restored !== result.original || JSON.stringify(result.optionValues) !== JSON.stringify([1, 1.1, 1.2, 1.3]) || result.horizontalOverflow) throw new Error(`字体设置验收失败：${JSON.stringify(result)}`);
+  const screenshot = "font-settings.png";
+  await writeFile(path.join(targetDirectory, screenshot), Buffer.from(await client.captureScreenshot(), "base64"));
+  return { ...result, screenshot };
 }
 
 /** 验证生成双栏、悬浮帮助、独立打标入口和分步骤训练入口的真实布局。 */
@@ -415,6 +456,7 @@ function buildProbeExpression() {
       documentTitle: document.title,
       inferenceReady: shell.dataset.inferenceReady === 'true',
       trainingReady: shell.dataset.trainingReady === 'true',
+      fontScale: Number(getComputedStyle(document.documentElement).getPropertyValue('--desktop-font-scale')),
       bannerText: banner?.textContent?.trim() || '',
       coreStatusText: document.querySelector('.desktop-sidebar .core-status')?.textContent?.trim() || '',
       navigationPages,
@@ -446,6 +488,7 @@ function validateProbe(result, expectNoGpu) {
   if (JSON.stringify(actualNavigation) !== JSON.stringify(expectedNavigation)) throw new Error(`桌面导航结构异常：${actualNavigation.join(" / ")}`);
   if (!Array.isArray(result.pageIsolation) || result.pageIsolation.some((item) => item.visibleMainPanels !== 1 || item.secondaryCounts.some((count) => count !== 1))) throw new Error("桌面主分页或二级分页存在内容堆叠");
   if (new Set(result.pageIsolation.map((item) => item.mainWidth)).size !== 1) throw new Error("桌面分页切换时滚动条导致主布局宽度抖动");
+  if (!Number.isFinite(result.fontScale) || result.fontScale < 1 || result.fontScale > 1.3) throw new Error(`桌面字体缩放不正确：${result.fontScale}`);
   // Runtime、自检与必需依赖统一由左下角本地核心承载；其他阻断问题仍使用全局横幅。
   const centralizedCoreIssue = ["本地核心未就绪", "本地核心等待自检", "本地核心不可用", "本地核心错误", "依赖通道未配置", "依赖清单不完整"].some((label) => result.coreStatusText.includes(label));
   if (result.environmentStatus !== "ready" && result.navigationPages.some((item) => !item.bannerVisible) && !centralizedCoreIssue) throw new Error("环境异常既未显示全局横幅，也未集中显示在本地核心");

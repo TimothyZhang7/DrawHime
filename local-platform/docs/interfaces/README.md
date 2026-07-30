@@ -27,7 +27,7 @@
 | `GET /v1/system/overview` | web/admin | api | `PlatformOverviewView` |
 | `desktop_bootstrap` | desktop webview | desktop core | 返回 SQLite 持久设置、真实本机环境报告和待同步图库数量；对应 `DesktopBootstrapView` |
 | `desktop_inspect_environment` | desktop webview | desktop core | 重新检测 Windows 名称、版本、构建号、支持状态、CPU、内存、磁盘、NVIDIA GPU、驱动和本地 Runtime，并持久化脱敏快照 |
-| `desktop_save_settings` | desktop webview | desktop core | 校验并保存主题模式、依赖来源、模型/输出/Runtime 目录、默认图库隐私、`autoUpload` 和上传策略；自动上传默认开启且默认公开，用户可在设置中关闭或改为私有 |
+| `desktop_save_settings` | desktop webview | desktop core | 校验并保存主题模式、100%–130% 字体缩放、依赖来源、模型/输出/Runtime 目录、默认图库隐私、`autoUpload` 和上传策略；字体默认 110%，自动上传默认开启且默认公开，用户可在设置中修改 |
 | `POST /v1/desktop-auth/requests` | desktop core | api | 创建 10 分钟有效的设备授权请求；服务端只保存随机设备密钥 SHA-256，返回用户码、浏览器确认地址和轮询间隔 |
 | `POST /v1/desktop-auth/requests/approve` | local web | api | 由已登录主站并完成本地平台身份交换的用户确认设备码；设备码过期、已确认或账号状态失效时保持拒绝 |
 | `POST /v1/desktop-auth/token` | desktop core | api | 使用设备密钥幂等轮询；确认后把同一随机密钥哈希登记为可撤销独立会话，原始密钥只写入 Windows Credential Manager |
@@ -37,11 +37,11 @@
 | `desktop_sign_out` | desktop webview | desktop core | 尽力撤销服务端会话后删除 Windows Credential Manager 凭据；网络异常不阻止本机退出 |
 | `GET /v1/desktop/resources/manifest` | desktop core | api/CDN | 返回 `{ ok: true, data: DesktopResourceManifestEnvelope }`；`payload` 是原始 UTF-8 JSON，`signature` 是服务端 Ed25519 签名，桌面端使用安装包内固定公钥验签后才解析资源；模型资源额外固化受控安装目录和模型组合的 group/role，只有主文件、文本编码器与 VAE 全部通过哈希安装后才自动登记 Anima 底模 |
 | `GET /v1/desktop/resources/:id/content` | desktop core | api | 从签名清单定位主站镜像资源，只流式返回大小与清单一致的受控文件；支持单段 HTTP Range、`ETag=SHA-256` 和断点续传，不接受客户端文件路径；本地镜像文件缺失时只允许代理同一签名资源登记的 `official` HTTPS 来源，并严格核对上游 `Content-Range`、长度和总大小，私有下载令牌不回显给桌面端 |
-| `desktop_load_resource_catalog` | desktop webview | desktop core | 拉取并验签资源清单，校验过期时间、Windows/架构、文件名、大小、SHA-256 与 HTTPS 来源后返回可展示目录；未配置真实清单和公钥时明确返回未配置状态 |
+| `desktop_load_resource_catalog` | desktop webview | desktop core | 拉取并验签资源清单，校验过期时间、Windows/架构、文件名、大小、SHA-256 与 HTTPS 来源后返回可展示目录；在线成功后原子保存签名信封，临时网络异常时可读取仍在有效期内的本机已验签清单 |
 | `desktop_download_resource` | desktop webview | desktop core | 按资源 ID 执行断点下载；`auto` 优先官方，连接失败或持续低速后从相同哈希的主站镜像续传，完成整体 SHA-256 后原子写入本机下载缓存 |
 | `desktop_pause_resource_download` | desktop webview | desktop core | 将指定活动下载标记为暂停，后台流在下一个分片边界停止并保留 `.part`；再次下载同一资源从真实偏移继续 |
 | `desktop-resource-progress` | desktop core | desktop webview | 资源下载进度事件；对应 `DesktopResourceDownloadView`，包含当前来源、已下载字节、总字节、速度、剩余秒数、最近切源原因、状态与脱敏错误；切源后沿用同一已校验偏移 |
-| `desktop_install_resource` | desktop webview | desktop core | 再次校验缓存 SHA-256 与磁盘空间后安装资源；ZIP 拒绝路径穿越、链接和 Windows 保留名，在临时目录完成后原子切换，旧版本保留为可回滚目录 |
+| `desktop_install_resource` | desktop webview | desktop core | 使用在线或仍有效的本机已验签清单再次校验缓存 SHA-256 与磁盘空间后安装资源；安装不因临时清单请求超时而阻断，ZIP 拒绝路径穿越、链接和 Windows 保留名，在临时目录完成后原子切换，旧版本保留为可回滚目录 |
 | `desktop-resource-install-progress` | desktop core | desktop webview | 资源校验、解压、切换和回滚事件；对应 `DesktopResourceInstallView` |
 | `desktop_runtime_status` | desktop webview | desktop core | 返回当前设备 ComfyUI 子进程状态、PID、回环端口、启动时间、最近健康检查和脱敏错误；对应 `DesktopRuntimeStatusView` |
 | `desktop_start_runtime` | desktop webview/local scheduler | desktop core | 校验已安装 Runtime 后，以私有 Python、动态回环端口和受控模型目录配置启动 ComfyUI；等待 `/system_stats` 真实就绪后返回，不向局域网或公网监听 |

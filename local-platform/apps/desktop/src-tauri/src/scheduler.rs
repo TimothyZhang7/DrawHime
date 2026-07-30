@@ -651,7 +651,7 @@ fn controlled_join(root: &Path, relative: &str) -> Result<PathBuf, String> {
 }
 
 fn load_settings(database: &Connection) -> Result<DesktopSettings, GenerationFailure> {
-    database.query_row("SELECT theme_mode,dependency_source,default_privacy,auto_upload,model_root,output_root,runtime_root,upload_concurrency,wifi_only,bandwidth_limit_kib FROM desktop_settings WHERE id=1", [], |row| Ok(DesktopSettings { theme_mode: row.get(0)?, dependency_source: row.get(1)?, default_privacy: row.get(2)?, auto_upload: row.get::<_, i64>(3)? != 0, model_root: row.get(4)?, output_root: row.get(5)?, runtime_root: row.get(6)?, upload_concurrency: row.get(7)?, wifi_only: row.get::<_, i64>(8)? != 0, bandwidth_limit_kib: row.get(9)? })).map_err(|error| GenerationFailure::Failed(format!("读取本地调度设置失败：{error}")))
+    database.query_row("SELECT theme_mode,font_scale,dependency_source,default_privacy,auto_upload,model_root,output_root,runtime_root,upload_concurrency,wifi_only,bandwidth_limit_kib FROM desktop_settings WHERE id=1", [], |row| Ok(DesktopSettings { theme_mode: row.get(0)?, font_scale: row.get(1)?, dependency_source: row.get(2)?, default_privacy: row.get(3)?, auto_upload: row.get::<_, i64>(4)? != 0, model_root: row.get(5)?, output_root: row.get(6)?, runtime_root: row.get(7)?, upload_concurrency: row.get(8)?, wifi_only: row.get::<_, i64>(9)? != 0, bandwidth_limit_kib: row.get(10)? })).map_err(|error| GenerationFailure::Failed(format!("读取本地调度设置失败：{error}")))
 }
 
 fn read_job(database: &Connection, id: &str) -> Result<Option<DesktopLocalJobView>, String> {

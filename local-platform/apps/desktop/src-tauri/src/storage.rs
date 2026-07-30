@@ -32,7 +32,7 @@ impl DesktopState {
         let database_path = app_data_dir.join("desktop.sqlite3");
         let connection = Connection::open(&database_path).map_err(|error| format!("打开桌面数据库失败：{error}"))?;
         connection.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
-            CREATE TABLE IF NOT EXISTS desktop_settings (id INTEGER PRIMARY KEY CHECK(id=1), theme_mode TEXT NOT NULL DEFAULT 'system', dependency_source TEXT NOT NULL DEFAULT 'auto', default_privacy TEXT NOT NULL DEFAULT 'public', auto_upload INTEGER NOT NULL DEFAULT 1, model_root TEXT NOT NULL, output_root TEXT NOT NULL, runtime_root TEXT NOT NULL, upload_concurrency INTEGER NOT NULL, wifi_only INTEGER NOT NULL, bandwidth_limit_kib INTEGER, updated_at TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS desktop_settings (id INTEGER PRIMARY KEY CHECK(id=1), theme_mode TEXT NOT NULL DEFAULT 'system', font_scale REAL NOT NULL DEFAULT 1.1, dependency_source TEXT NOT NULL DEFAULT 'auto', default_privacy TEXT NOT NULL DEFAULT 'public', auto_upload INTEGER NOT NULL DEFAULT 1, model_root TEXT NOT NULL, output_root TEXT NOT NULL, runtime_root TEXT NOT NULL, upload_concurrency INTEGER NOT NULL, wifi_only INTEGER NOT NULL, bandwidth_limit_kib INTEGER, updated_at TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS desktop_ai_settings (id INTEGER PRIMARY KEY CHECK(id=1), enabled INTEGER NOT NULL DEFAULT 0, endpoint_type TEXT NOT NULL DEFAULT 'openai_chat', base_url TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS environment_snapshots (id INTEGER PRIMARY KEY AUTOINCREMENT, report_json TEXT NOT NULL, checked_at TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS software_updates (version TEXT PRIMARY KEY, resource_id TEXT NOT NULL, file_name TEXT NOT NULL, sha256 TEXT NOT NULL, byte_size INTEGER NOT NULL, source TEXT NOT NULL, status TEXT NOT NULL, error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, applied_at TEXT);
@@ -67,6 +67,7 @@ impl DesktopState {
         connection.execute("UPDATE local_training_jobs SET status='cancelled',progress=100,completed_at=?1,updated_at=?1 WHERE status='running' AND cancel_requested=1", [&recovery_time]).map_err(|error| format!("恢复已取消的训练任务失败：{error}"))?;
         connection.execute("UPDATE local_training_jobs SET status='queued',progress=0,current_epoch=0,started_at=NULL,error=NULL,suggestion_json=NULL,updated_at=?1 WHERE status='running' AND cancel_requested=0", [&recovery_time]).map_err(|error| format!("恢复中断的训练任务失败：{error}"))?;
         ensure_column(&connection, "desktop_settings", "theme_mode", "TEXT NOT NULL DEFAULT 'system'")?;
+        ensure_column(&connection, "desktop_settings", "font_scale", "REAL NOT NULL DEFAULT 1.1")?;
         ensure_column(&connection, "desktop_settings", "dependency_source", "TEXT NOT NULL DEFAULT 'auto'")?;
         ensure_column(&connection, "desktop_settings", "auto_upload", "INTEGER NOT NULL DEFAULT 1")?;
         ensure_column(&connection, "local_job_loras", "relative_path", "TEXT NOT NULL DEFAULT ''")?;
@@ -98,7 +99,7 @@ impl DesktopState {
         let runtime_root = app_data_dir.join("runtime");
         let output_root = app_data_dir.join("outputs");
         for directory in [&model_root, &runtime_root, &output_root] { fs::create_dir_all(directory).map_err(|error| format!("创建本地目录失败：{error}"))?; }
-        connection.execute("INSERT OR IGNORE INTO desktop_settings (id, theme_mode, dependency_source, default_privacy, auto_upload, model_root, output_root, runtime_root, upload_concurrency, wifi_only, bandwidth_limit_kib, updated_at) VALUES (1, 'system', 'auto', 'public', 1, ?1, ?2, ?3, 2, 0, NULL, ?4)", params![path_text(&model_root), path_text(&output_root), path_text(&runtime_root), Utc::now().to_rfc3339()]).map_err(|error| format!("写入默认设置失败：{error}"))?;
+        connection.execute("INSERT OR IGNORE INTO desktop_settings (id, theme_mode, font_scale, dependency_source, default_privacy, auto_upload, model_root, output_root, runtime_root, upload_concurrency, wifi_only, bandwidth_limit_kib, updated_at) VALUES (1, 'system', 1.1, 'auto', 'public', 1, ?1, ?2, ?3, 2, 0, NULL, ?4)", params![path_text(&model_root), path_text(&output_root), path_text(&runtime_root), Utc::now().to_rfc3339()]).map_err(|error| format!("写入默认设置失败：{error}"))?;
         connection.execute("INSERT OR IGNORE INTO desktop_ai_settings (id, enabled, endpoint_type, base_url, model, updated_at) VALUES (1, 0, 'openai_chat', '', '', ?1)", [Utc::now().to_rfc3339()]).map_err(|error| format!("写入默认 AI 设置失败：{error}"))?;
         Ok(Self { database: Mutex::new(connection), app_data_dir: app_data_dir.to_path_buf(), database_path, scheduler: None, caption_scheduler: None, training_scheduler: None, gallery_sync_scheduler: None, runtime: Arc::new(RuntimeController::initialize(app_data_dir)?), gpu_workload: GpuWorkloadCoordinator::new() })
     }
@@ -116,12 +117,13 @@ impl DesktopState {
     /** 读取唯一桌面设置记录。 */
     pub fn load_settings(&self) -> Result<DesktopSettings, String> {
         let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
-        database.query_row("SELECT theme_mode, dependency_source, default_privacy, auto_upload, model_root, output_root, runtime_root, upload_concurrency, wifi_only, bandwidth_limit_kib FROM desktop_settings WHERE id=1", [], |row| Ok(DesktopSettings { theme_mode: row.get(0)?, dependency_source: row.get(1)?, default_privacy: row.get(2)?, auto_upload: row.get::<_, i64>(3)? != 0, model_root: row.get(4)?, output_root: row.get(5)?, runtime_root: row.get(6)?, upload_concurrency: row.get(7)?, wifi_only: row.get::<_, i64>(8)? != 0, bandwidth_limit_kib: row.get(9)? })).map_err(|error| format!("读取桌面设置失败：{error}"))
+        database.query_row("SELECT theme_mode, font_scale, dependency_source, default_privacy, auto_upload, model_root, output_root, runtime_root, upload_concurrency, wifi_only, bandwidth_limit_kib FROM desktop_settings WHERE id=1", [], |row| Ok(DesktopSettings { theme_mode: row.get(0)?, font_scale: row.get(1)?, dependency_source: row.get(2)?, default_privacy: row.get(3)?, auto_upload: row.get::<_, i64>(4)? != 0, model_root: row.get(5)?, output_root: row.get(6)?, runtime_root: row.get(7)?, upload_concurrency: row.get(8)?, wifi_only: row.get::<_, i64>(9)? != 0, bandwidth_limit_kib: row.get(10)? })).map_err(|error| format!("读取桌面设置失败：{error}"))
     }
 
     /** 校验目录和上传策略后事务化更新设置。 */
     pub fn save_settings(&self, mut settings: DesktopSettings) -> Result<DesktopSettings, String> {
         if !matches!(settings.theme_mode.as_str(), "system" | "dark" | "light") { return Err("主题模式不正确".into()); }
+        if !settings.font_scale.is_finite() || !(1.0..=1.3).contains(&settings.font_scale) || ((settings.font_scale * 20.0).round() - settings.font_scale * 20.0).abs() > 0.001 { return Err("字体大小必须是 100%–130% 的 5% 档位".into()); }
         if !matches!(settings.dependency_source.as_str(), "auto" | "official" | "mirror") { return Err("依赖来源不正确".into()); }
         if !matches!(settings.default_privacy.as_str(), "public" | "private") { return Err("默认图库权限不正确".into()); }
         if !(1..=4).contains(&settings.upload_concurrency) { return Err("上传并发数必须是 1–4".into()); }
@@ -137,7 +139,7 @@ impl DesktopState {
             fs::remove_file(probe).map_err(|error| format!("目录清理测试失败：{path}：{error}"))?;
         }
         let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
-        database.execute("UPDATE desktop_settings SET theme_mode=?1, dependency_source=?2, default_privacy=?3, auto_upload=?4, model_root=?5, output_root=?6, runtime_root=?7, upload_concurrency=?8, wifi_only=?9, bandwidth_limit_kib=?10, updated_at=?11 WHERE id=1", params![settings.theme_mode, settings.dependency_source, settings.default_privacy, settings.auto_upload, settings.model_root, settings.output_root, settings.runtime_root, settings.upload_concurrency, settings.wifi_only, settings.bandwidth_limit_kib, Utc::now().to_rfc3339()]).map_err(|error| format!("保存桌面设置失败：{error}"))?;
+        database.execute("UPDATE desktop_settings SET theme_mode=?1, font_scale=?2, dependency_source=?3, default_privacy=?4, auto_upload=?5, model_root=?6, output_root=?7, runtime_root=?8, upload_concurrency=?9, wifi_only=?10, bandwidth_limit_kib=?11, updated_at=?12 WHERE id=1", params![settings.theme_mode, settings.font_scale, settings.dependency_source, settings.default_privacy, settings.auto_upload, settings.model_root, settings.output_root, settings.runtime_root, settings.upload_concurrency, settings.wifi_only, settings.bandwidth_limit_kib, Utc::now().to_rfc3339()]).map_err(|error| format!("保存桌面设置失败：{error}"))?;
         drop(database);
         self.load_settings()
     }
@@ -453,14 +455,17 @@ mod tests {
         let state = DesktopState::initialize(temporary.path()).expect("初始化数据库");
         let mut settings = state.load_settings().expect("读取设置");
         assert_eq!(settings.theme_mode, "system");
+        assert!((settings.font_scale - 1.1).abs() < f64::EPSILON);
         assert_eq!(settings.dependency_source, "auto");
         assert_eq!(settings.default_privacy, "public");
         assert!(settings.auto_upload);
         settings.default_privacy = "public".into();
         settings.auto_upload = false;
+        settings.font_scale = 1.2;
         let saved = state.save_settings(settings).expect("保存设置");
         assert_eq!(saved.default_privacy, "public");
         assert!(!saved.auto_upload);
+        assert!((saved.font_scale - 1.2).abs() < f64::EPSILON);
         let artifact = temporary.path().join("result.webp");
         fs::write(&artifact, b"verified-local-result").expect("写入结果");
         let first = state.enqueue_gallery_publication(GalleryPublicationInput { local_task_id: "local-task-1".into(), artifact_path: path_text(&artifact), privacy: "private".into() }).expect("加入队列");
