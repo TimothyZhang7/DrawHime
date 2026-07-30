@@ -176,6 +176,10 @@ function serviceOnlyProductionScript(serviceTarget, definition) {
     ? "pnpm run db:generate\npnpm run db:migrate:deploy"
     : "";
   const postBuildCommands = definition.prisma ? "pnpm run bootstrap:tag-translations\npnpm run bootstrap:anima" : "";
+  // 调度器增量发布必须同步负载互斥配置，避免只部署服务时继续沿用会饿死训练的旧值。
+  const schedulerEnvironmentCommands = serviceTarget === "scheduler"
+    ? "if grep -q '^GPU_WORKLOADS_SHARE_DEVICE=' .env; then sed -i 's/^GPU_WORKLOADS_SHARE_DEVICE=.*/GPU_WORKLOADS_SHARE_DEVICE=true/' .env; else echo 'GPU_WORKLOADS_SHARE_DEVICE=true' >> .env; fi"
+    : "";
   return `set -euo pipefail
 ROOT=/local-platform
 TMP=/tmp/drawhime-local-${serviceTarget}-${stamp}
@@ -191,13 +195,19 @@ ${definition.prisma ? 'rm -rf "$ROOT/prisma"\ncp -a "$TMP/prisma" "$ROOT/prisma"
 ${definition.prisma ? 'mkdir -p "$ROOT/scripts"\ncp -a "$TMP/scripts/bootstrap-anima-catalog.mjs" "$ROOT/scripts/bootstrap-anima-catalog.mjs"' : ""}
 for item in package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json .npmrc; do cp -a "$TMP/$item" "$ROOT/$item"; done
 cd "$ROOT"
+${schedulerEnvironmentCommands}
+# 单服务重启前重新导入私有环境文件，确保本次配置变更真实进入 PM2 进程环境。
+set -a
+. ./.env
+set +a
 export PUPPETEER_SKIP_DOWNLOAD=true
 pnpm install --frozen-lockfile
 pnpm run build:packages
 ${prismaCommands}
 pnpm --filter ${definition.workspace} run build
 ${postBuildCommands}
-pm2 restart ecosystem.config.cjs --only ${definition.pm2} --update-env
+# 单服务增量发布按进程名更新完整环境；ecosystem 重启会保留该进程的旧扩展环境值。
+pm2 restart ${definition.pm2} --update-env
 pm2 save
 code=000
 for attempt in $(seq 1 20); do
@@ -289,7 +299,7 @@ LOCAL_INFERENCE_WORKER_BASE_URL=http://127.0.0.1:7111
 LOCAL_TRAINING_WORKER_BASE_URL=http://127.0.0.1:7112
 LOCAL_ARTIFACT_SERVICE_BASE_URL=http://127.0.0.1:7113
 GPU_AGENT_TOKEN=$GPU_TOKEN
-GPU_WORKLOADS_SHARE_DEVICE=false
+GPU_WORKLOADS_SHARE_DEVICE=true
 TRAINING_RUNTIME_TOKEN=$TRAINING_TOKEN
 TRAINING_RUNTIME_BASE_URL=${trainingRuntimeBaseUrl}
 LOCAL_PUBLIC_API_BASE_URL=https://www.xanime.ink/local-model-api
@@ -297,8 +307,8 @@ EOF
 fi
 # 已存在的生产私有环境文件只幂等补齐真实 ComfyUI 地址，不覆盖任何既有凭证。
 grep -q '^COMFYUI_BASE_URL=' .env || echo 'COMFYUI_BASE_URL=${comfyUiBaseUrl}' >> .env
-# 生产推理固定 GPU 0、训练固定 GPU 1，两个工作负载使用独立显卡并允许并行。
-grep -q '^GPU_WORKLOADS_SHARE_DEVICE=' .env || echo 'GPU_WORKLOADS_SHARE_DEVICE=false' >> .env
+# 当前生产 ComfyUI 与训练 Runtime 共用物理 GPU 1，必须让调度器从租约层阻止新推理继续挤占训练。
+if grep -q '^GPU_WORKLOADS_SHARE_DEVICE=' .env; then sed -i 's/^GPU_WORKLOADS_SHARE_DEVICE=.*/GPU_WORKLOADS_SHARE_DEVICE=true/' .env; else echo 'GPU_WORKLOADS_SHARE_DEVICE=true' >> .env; fi
 # 既有生产环境幂等补齐训练链路配置，随机令牌只写入私有环境文件。
 grep -q '^TRAINING_RUNTIME_TOKEN=' .env || echo "TRAINING_RUNTIME_TOKEN=$(openssl rand -hex 32)" >> .env
 grep -q '^TRAINING_RUNTIME_BASE_URL=' .env || echo 'TRAINING_RUNTIME_BASE_URL=${trainingRuntimeBaseUrl}' >> .env
