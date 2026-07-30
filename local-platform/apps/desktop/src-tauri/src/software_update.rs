@@ -5,7 +5,6 @@ use crate::{
         DesktopOfflineUpdateImportInput, DesktopResourceManifestItem,
         DesktopSoftwareUpdateView, DesktopSettings,
     },
-    process::hide_window,
     resource,
 };
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
@@ -15,9 +14,52 @@ use std::{
     path::Path,
     process::{Command, Stdio},
 };
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 const APPLY_STALE_MINUTES: i64 = 30;
+const UPDATE_HELPER_SCRIPT: &str = r#"@echo off
+setlocal
+chcp 65001 >nul
+title DrawHime 更新助手
+set "INSTALLER=%DRAWHIME_UPDATE_INSTALLER%"
+set "EXPECTED_HASH=%DRAWHIME_UPDATE_SHA256%"
+set "RESULT_PATH=%DRAWHIME_UPDATE_RESULT%"
+set "RELAUNCH_PATH=%DRAWHIME_UPDATE_RELAUNCH%"
+echo.
+echo [DrawHime] 正在准备软件更新，请保留此窗口。
+echo [1/4] 重新校验安装包...
+set "DH_INSTALLER=%INSTALLER%"
+for /f "usebackq delims=" %%H in (`powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "(Get-FileHash -LiteralPath $env:DH_INSTALLER -Algorithm SHA256).Hash.ToLowerInvariant()"`) do set "ACTUAL_HASH=%%H"
+if /I not "%ACTUAL_HASH%"=="%EXPECTED_HASH%" (
+  > "%RESULT_PATH%" echo 97
+  echo [失败] 安装包校验未通过，更新已经停止。
+  pause
+  exit /b 97
+)
+echo [2/4] 等待 DrawHime 主程序退出...
+timeout /t 3 /nobreak >nul
+echo [3/4] 正在安装新版本，请勿关闭窗口...
+start "" /wait "%INSTALLER%" /S
+set "INSTALL_EXIT=%ERRORLEVEL%"
+> "%RESULT_PATH%" echo %INSTALL_EXIT%
+if not "%INSTALL_EXIT%"=="0" (
+  echo [失败] 安装器退出码 %INSTALL_EXIT%。
+  pause
+  exit /b %INSTALL_EXIT%
+)
+echo [4/4] 安装完成，正在重新启动 DrawHime...
+if exist "%RELAUNCH_PATH%" (
+  start "" "%RELAUNCH_PATH%"
+) else (
+  echo [提示] 原程序路径不存在，请从开始菜单启动 DrawHime。
+  pause
+  exit /b 0
+)
+timeout /t 2 /nobreak >nul
+exit /b 0
+"#;
 
 #[derive(Clone)]
 struct UpdateRecord {
@@ -96,13 +138,14 @@ pub fn import_offline(
 pub fn apply(
     database_path: &Path,
     app_data_dir: &Path,
+    relaunch_path: &Path,
 ) -> Result<DesktopSoftwareUpdateView, String> {
     let database = open_database(database_path)?;
     reconcile_applying_records(&database, app_data_dir, CURRENT_VERSION, Utc::now())?;
     let trusted = latest_trusted_update(&database, app_data_dir, |order| order > 0)?
         .ok_or_else(|| "没有已验证的软件更新包".to_string())?;
     let mut view = build_status(&database, app_data_dir)?;
-    launch_record(&database, app_data_dir, &trusted.record)?;
+    launch_record(&database, app_data_dir, &trusted.record, relaunch_path)?;
     view.status = "applying".into();
     view.latest_version = Some(trusted.record.version);
     Ok(view)
@@ -112,13 +155,14 @@ pub fn apply(
 pub fn rollback(
     database_path: &Path,
     app_data_dir: &Path,
+    relaunch_path: &Path,
 ) -> Result<DesktopSoftwareUpdateView, String> {
     let database = open_database(database_path)?;
     reconcile_applying_records(&database, app_data_dir, CURRENT_VERSION, Utc::now())?;
     let trusted = latest_trusted_update(&database, app_data_dir, |order| order < 0)?
         .ok_or_else(|| "没有保留可信的上一版本安装包".to_string())?;
     let mut view = build_status(&database, app_data_dir)?;
-    launch_record(&database, app_data_dir, &trusted.record)?;
+    launch_record(&database, app_data_dir, &trusted.record, relaunch_path)?;
     view.status = "applying".into();
     view.latest_version = Some(trusted.record.version);
     Ok(view)
@@ -212,6 +256,7 @@ fn launch_record(
     database: &Connection,
     app_data_dir: &Path,
     record: &UpdateRecord,
+    relaunch_path: &Path,
 ) -> Result<(), String> {
     let installer = app_data_dir.join("resource-cache").join(&record.file_name);
     let envelope = resource::offline_envelope_path(&installer);
@@ -231,31 +276,9 @@ fn launch_record(
             metadata.minimum_version
         ));
     }
-    let helper = app_data_dir.join(format!("apply-update-{}.ps1", record.version));
+    let helper = app_data_dir.join(format!("apply-update-{}.cmd", record.version));
     let result_path = apply_result_path(app_data_dir, &record.version);
-    let helper_script = r#"param(
-    [Parameter(Mandatory=$true)][string]$Installer,
-    [Parameter(Mandatory=$true)][string]$ExpectedSha256,
-    [Parameter(Mandatory=$true)][string]$ResultPath
-)
-Start-Sleep -Seconds 2
-$stream = [System.IO.File]::OpenRead($Installer)
-try {
-    $sha256 = [System.Security.Cryptography.SHA256]::Create()
-    $actualSha256 = [System.BitConverter]::ToString($sha256.ComputeHash($stream)).Replace('-', '').ToLowerInvariant()
-} finally {
-    if ($sha256) { $sha256.Dispose() }
-    $stream.Dispose()
-}
-if ($actualSha256 -ne $ExpectedSha256.ToLowerInvariant()) {
-    '97' | Set-Content -LiteralPath $ResultPath -Encoding ascii
-    exit 97
-}
-$process = Start-Process -FilePath $Installer -ArgumentList '/S' -Wait -PassThru
-$process.ExitCode | Set-Content -LiteralPath $ResultPath -Encoding ascii
-exit $process.ExitCode
-"#;
-    fs::write(&helper, helper_script)
+    fs::write(&helper, UPDATE_HELPER_SCRIPT)
         .map_err(|error| format!("写入更新辅助脚本失败：{error}"))?;
     if result_path.exists() {
         fs::remove_file(&result_path)
@@ -267,27 +290,23 @@ exit $process.ExitCode
             params![record.version, Utc::now().to_rfc3339()],
         )
         .map_err(|error| format!("保存更新应用状态失败：{error}"))?;
-    let mut command = Command::new("powershell.exe");
-    hide_window(&mut command);
+    let mut command = Command::new("cmd.exe");
+    #[cfg(target_os = "windows")]
+    command.creation_flags(0x00000010);
     command
         .args([
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-WindowStyle",
-            "Hidden",
-            "-File",
+            "/D",
+            "/S",
+            "/C",
         ])
-        .arg(&helper)
-        .arg("-Installer")
-        .arg(&installer)
-        .arg("-ExpectedSha256")
-        .arg(&record.sha256)
-        .arg("-ResultPath")
-        .arg(&result_path)
+        .arg(format!("call \"{}\"", helper.display()))
+        .env("DRAWHIME_UPDATE_INSTALLER", &installer)
+        .env("DRAWHIME_UPDATE_SHA256", &record.sha256)
+        .env("DRAWHIME_UPDATE_RESULT", &result_path)
+        .env("DRAWHIME_UPDATE_RELAUNCH", relaunch_path)
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit());
     command.spawn().map_err(|error| {
         let message = format!("启动更新程序失败：{error}");
         let _ = database.execute(
@@ -594,5 +613,13 @@ mod tests {
         let (status, error): (String, Option<String>) = database.query_row("SELECT status,error FROM software_updates WHERE version='1.2.6'", [], |row| Ok((row.get(0)?, row.get(1)?))).expect("读取更新超时状态");
         assert_eq!(status, "failed");
         assert_eq!(error.as_deref(), Some("软件更新在规定时间内未完成"));
+    }
+
+    #[test]
+    fn visible_update_helper_reports_progress_and_relaunches() {
+        assert!(UPDATE_HELPER_SCRIPT.contains("title DrawHime 更新助手"));
+        assert!(UPDATE_HELPER_SCRIPT.contains("[1/4]"));
+        assert!(UPDATE_HELPER_SCRIPT.contains("start \"\" /wait \"%INSTALLER%\" /S"));
+        assert!(UPDATE_HELPER_SCRIPT.contains("start \"\" \"%RELAUNCH_PATH%\""));
     }
 }

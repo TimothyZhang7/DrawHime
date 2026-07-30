@@ -86,6 +86,8 @@ async function captureFontSettings(client, directory) {
     save.click();
     await delay(350);
     const applied = Number(getComputedStyle(document.documentElement).getPropertyValue('--desktop-font-scale'));
+    const rootBounds = document.querySelector('#root')?.getBoundingClientRect();
+    const scaledWidthCoverage = rootBounds ? rootBounds.width / document.documentElement.clientWidth : 0;
     select.value = String(original);
     select.dispatchEvent(new Event('change', { bubbles: true }));
     await delay(80);
@@ -96,9 +98,9 @@ async function captureFontSettings(client, directory) {
     const noticePosition = notice ? getComputedStyle(notice).position : null;
     await delay(4_300);
     const noticeCleared = !document.querySelector('.desktop-notice');
-    return { original, target, applied, restored, optionValues: [...select.options].map((option) => Number(option.value)), noticePosition, noticeCleared, horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth };
+    return { original, target, applied, restored, scaledWidthCoverage, optionValues: [...select.options].map((option) => Number(option.value)), noticePosition, noticeCleared, horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth };
   })()`);
-  if (result.applied !== result.target || result.restored !== result.original || JSON.stringify(result.optionValues) !== JSON.stringify([1, 1.1, 1.2, 1.3]) || result.noticePosition !== 'fixed' || !result.noticeCleared || result.horizontalOverflow) throw new Error(`字体与瞬时提示验收失败：${JSON.stringify(result)}`);
+  if (result.applied !== result.target || result.restored !== result.original || result.scaledWidthCoverage < 0.98 || JSON.stringify(result.optionValues) !== JSON.stringify([1, 1.1, 1.2, 1.3]) || result.noticePosition !== 'fixed' || !result.noticeCleared || result.horizontalOverflow) throw new Error(`字体与瞬时提示验收失败：${JSON.stringify(result)}`);
   const screenshot = "font-settings.png";
   await writeFile(path.join(targetDirectory, screenshot), Buffer.from(await client.captureScreenshot(), "base64"));
   return { ...result, screenshot };
@@ -190,9 +192,9 @@ async function captureGalleryPage(client, directory) {
     if (galleryTab.getAttribute('aria-selected') !== 'true') throw new Error('图库二级入口未切换为选中状态');
     const selectedStyle = getComputedStyle(galleryTab);
     const idleStyle = getComputedStyle(recordTab);
-    return { tabCount: tabs.length, selectedBackground: selectedStyle.backgroundColor, idleBackground: idleStyle.backgroundColor, sourceCards: document.querySelectorAll('.gallery-card').length, horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth };
+    return { tabCount: tabs.length, selectedBackground: selectedStyle.backgroundColor, idleBackground: idleStyle.backgroundColor, sourceCards: document.querySelectorAll('.gallery-card').length, redundantLocalTags: document.querySelectorAll('.gallery-card .gallery-source, .gallery-detail-tags > b').length, horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth };
   })()`);
-  if (result.tabCount !== 2 || result.horizontalOverflow || result.selectedBackground === result.idleBackground) throw new Error(`图库分页样式验收失败：${JSON.stringify(result)}`);
+  if (result.tabCount !== 2 || result.redundantLocalTags !== 0 || result.horizontalOverflow || result.selectedBackground === result.idleBackground) throw new Error(`图库分页样式验收失败：${JSON.stringify(result)}`);
   const galleryFile = 'gallery-list.png';
   await writeFile(path.join(targetDirectory, galleryFile), Buffer.from(await client.captureScreenshot(), 'base64'));
   let galleryDetail = null;

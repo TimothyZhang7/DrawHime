@@ -1,12 +1,16 @@
 /**
  * 本文件把独立训练集打标工具与分步骤 LoRA 训练流程拆分为两个桌面页面。
  */
-import type { DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopLocalModelView, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetView, DesktopTrainingJobCreateInput, DesktopTrainingJobView } from "@drawhime/contracts";
+import type { DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopLocalModelView, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetView, DesktopTrainingJobCreateInput, DesktopTrainingJobView, TrainingTagTranslationView } from "@drawhime/contracts";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { AlertTriangle, ArrowLeft, ArrowRight, BookOpenCheck, Check, Copy, Download, FlaskConical, FolderPlus, Images, LoaderCircle, Save, Tags, Upload, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import { addDesktopTrainingImages, cancelDesktopCaptionJob, cancelDesktopTrainingJob, confirmDesktopTrainingDataset, createDesktopCaptionJob, createDesktopTrainingDataset, createDesktopTrainingJob, updateDesktopTrainingCaption, updateDesktopTrainingTriggerWords } from "./desktop-api";
+import { AlertTriangle, ArrowLeft, ArrowRight, BookOpenCheck, Check, Copy, Download, FlaskConical, FolderPlus, Images, LoaderCircle, Plus, Save, Tags, Trash2, Upload, X } from "lucide-react";
+import type { CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { addDesktopTrainingImages, cancelDesktopCaptionJob, cancelDesktopTrainingJob, confirmDesktopTrainingDataset, createDesktopCaptionJob, createDesktopTrainingDataset, createDesktopTrainingJob, deleteDesktopTrainingAsset, translateDesktopTrainingTags, updateDesktopTrainingCaption, updateDesktopTrainingTriggerWords } from "./desktop-api";
+
+type TagTranslation = TrainingTagTranslationView["translations"][number];
+type TranslationMap = Record<string, TagTranslation>;
 
 interface CaptioningPageProps {
   datasets: DesktopTrainingDatasetView[];
@@ -34,13 +38,33 @@ export function CaptioningPage({ datasets, captionJobs, captioningReady, onUpdat
   const [form, setForm] = useState<DesktopTrainingDatasetCreateInput>({ title: "", type: "character", triggerWords: [] });
   const [triggerText, setTriggerText] = useState("");
   const [detailTriggerText, setDetailTriggerText] = useState("");
+  const [translations, setTranslations] = useState<TranslationMap>({});
+  const [translationError, setTranslationError] = useState("");
+  const requestedTranslations = useRef(new Set<string>());
   const [busy, setBusy] = useState(false);
   const [captionOptions, setCaptionOptions] = useState<Pick<DesktopCaptionJobCreateInput, "generalThreshold" | "characterThreshold" | "includeCharacterTags">>({ generalThreshold: 0.35, characterThreshold: 0.85, includeCharacterTags: false });
   const selected = datasets.find((dataset) => dataset.id === selectedId) || null;
   const activeCaptionJob = captionJobs.find((job) => job.datasetId === selectedId && ["queued", "running"].includes(job.status)) || null;
   const latestCaptionJob = captionJobs.find((job) => job.datasetId === selectedId) || null;
+  const allTags = useMemo(() => [...new Set((selected?.assets || []).flatMap((asset) => splitTags(asset.caption || "")))], [selected?.assets]);
   useEffect(() => { if (selectedId && !datasets.some((dataset) => dataset.id === selectedId)) setSelectedId(""); }, [datasets, selectedId]);
   useEffect(() => { setDetailTriggerText(selected?.triggerWords.join(", ") || ""); }, [selected?.id, selected?.triggerWords]);
+  useEffect(() => { setTranslations({}); setTranslationError(""); requestedTranslations.current.clear(); }, [selected?.id]);
+  useEffect(() => {
+    const missing = allTags.filter((tag) => !translations[tag] && !requestedTranslations.current.has(tag));
+    if (!missing.length) return;
+    missing.forEach((tag) => requestedTranslations.current.add(tag));
+    let cancelled = false;
+    void (async () => {
+      for (let index = 0; index < missing.length; index += 200) {
+        const result = await translateDesktopTrainingTags({ tags: missing.slice(index, index + 200) });
+        if (cancelled) return;
+        setTranslations((current) => ({ ...current, ...Object.fromEntries(result.translations.map((item) => [item.tag, item])) }));
+      }
+      if (!cancelled) setTranslationError("");
+    })().catch((error) => { if (!cancelled) setTranslationError(errorMessage(error)); });
+    return () => { cancelled = true; };
+  }, [allTags, translations]);
 
   /** 新训练集只登记元数据，图片仍由用户明确选择后原子导入。 */
   const create = async () => {
@@ -97,6 +121,14 @@ export function CaptioningPage({ datasets, captionJobs, captioningReady, onUpdat
     catch (error) { onError(errorMessage(error)); }
     finally { setBusy(false); }
   };
+  /** 删除单图前明确确认；核心会阻止删除已经进入训练任务快照的图片。 */
+  const deleteAsset = async (assetId: string) => {
+    if (!selected || busy || !window.confirm("删除这张训练图片及其当前标签？原始导入文件不会被修改。")) return;
+    setBusy(true);
+    try { onUpdated(await deleteDesktopTrainingAsset({ datasetId: selected.id, assetId })); }
+    catch (error) { onError(errorMessage(error)); }
+    finally { setBusy(false); }
+  };
   const missingCaptions = selected?.assets.filter((asset) => !asset.caption?.trim()).length || 0;
   const unavailableAssets = selected?.assets.filter((asset) => !asset.available).length || 0;
   const batchCandidates = selected?.assets.filter((asset) => asset.captionSource !== "manual").length || 0;
@@ -111,8 +143,8 @@ export function CaptioningPage({ datasets, captionJobs, captioningReady, onUpdat
         <header><div><button className="training-back" type="button" onClick={() => setSelectedId("")}><ArrowLeft />返回训练集</button><span>{trainingTypeLabel(selected.type)} · {selected.assets.length} 张图片</span><h2>{selected.title}</h2></div><div className="training-editor-actions"><button disabled={busy || selected.assets.length >= 200} onClick={() => void addImages()}><Upload />导入图片</button><button disabled={busy || Boolean(activeCaptionJob) || selected.assets.length < 5 || missingCaptions > 0 || unavailableAssets > 0} onClick={() => void confirm()}><BookOpenCheck />{selected.status === "confirmed" ? "重新确认" : "确认可训练"}</button></div></header>
         <div className="training-trigger-editor"><label><span>训练触发词</span><input value={detailTriggerText} maxLength={5049} onChange={(event) => setDetailTriggerText(event.target.value)} placeholder="使用英文逗号分隔；建议填写唯一、无语义的标签" /></label><button disabled={busy || parseTriggerWords(detailTriggerText).join("\n") === selected.triggerWords.join("\n")} onClick={() => void saveTriggerWords()}>{busy ? <LoaderCircle className="spin" /> : <Save />}保存触发词</button></div>
         <div className="training-gate"><span><strong>{selected.assets.length}/200 张</strong><small>{unavailableAssets ? `${unavailableAssets} 张文件缺失或已变化` : missingCaptions ? `${missingCaptions} 张缺少 Caption` : selected.assets.length >= 5 ? "全部 Caption 已填写，可随时继续编辑" : `还需 ${5 - selected.assets.length} 张图片`}</small></span><b className={`is-${selected.status}`}>{trainingStatusLabel(selected.status)}</b></div>
-        <section className="caption-control"><div className="caption-control-title"><Tags /><span><strong>离线自动打标</strong><small>每张图片均可单独识别；批量操作只补齐非人工内容</small></span></div>{captioningReady ? <div className="caption-options"><label><span>通用阈值</span><input type="number" min={0.05} max={0.95} step={0.05} value={captionOptions.generalThreshold} onChange={(event) => setCaptionOptions({ ...captionOptions, generalThreshold: Number(event.target.value) })} /></label><label><span>角色阈值</span><input type="number" min={0.05} max={0.99} step={0.05} value={captionOptions.characterThreshold} onChange={(event) => setCaptionOptions({ ...captionOptions, characterThreshold: Number(event.target.value) })} /></label><label className="caption-character-toggle"><input type="checkbox" checked={captionOptions.includeCharacterTags} onChange={(event) => setCaptionOptions({ ...captionOptions, includeCharacterTags: event.target.checked })} /><span>包含角色标签</span></label><button disabled={busy || Boolean(activeCaptionJob) || batchCandidates === 0 || unavailableAssets > 0} onClick={() => void caption(null)}>{busy ? <LoaderCircle className="spin" /> : <Tags />}{activeCaptionJob ? "打标进行中" : `批量补齐 ${batchCandidates} 张`}</button></div> : <button className="caption-install" onClick={onOpenResources}><Download />安装打标组件</button>}{latestCaptionJob && <CaptionJobStatus job={latestCaptionJob} active={Boolean(activeCaptionJob)} busy={busy} onCancel={() => void cancelCaption()} />}</section>
-        {selected.assets.length ? <div className="training-asset-list">{selected.assets.map((asset) => <TrainingAssetRow key={asset.id} datasetId={selected.id} asset={asset} captionItem={latestCaptionJob?.items.find((item) => item.assetId === asset.id) || null} captioningReady={captioningReady} captionJobActive={Boolean(activeCaptionJob)} onRetag={() => void caption(asset.id)} onUpdated={onUpdated} onError={onError} />)}</div> : <div className="empty-block">导入 5–200 张 PNG、JPEG 或 WebP 开始整理训练集</div>}
+        <section className="caption-control"><div className="caption-control-title"><Tags /><span><strong>离线自动打标</strong><small>每张图片均可单独识别；批量操作只补齐非人工内容</small></span></div>{captioningReady ? <div className="caption-options"><label><span>通用阈值</span><input type="number" min={0.05} max={0.95} step={0.05} value={captionOptions.generalThreshold} onChange={(event) => setCaptionOptions({ ...captionOptions, generalThreshold: Number(event.target.value) })} /></label><label><span>角色阈值</span><input type="number" min={0.05} max={0.99} step={0.05} value={captionOptions.characterThreshold} onChange={(event) => setCaptionOptions({ ...captionOptions, characterThreshold: Number(event.target.value) })} /></label><label className="caption-character-toggle"><input type="checkbox" checked={captionOptions.includeCharacterTags} onChange={(event) => setCaptionOptions({ ...captionOptions, includeCharacterTags: event.target.checked })} /><span>包含角色标签</span></label><button disabled={busy || Boolean(activeCaptionJob) || batchCandidates === 0 || unavailableAssets > 0} onClick={() => void caption(null)}>{busy ? <LoaderCircle className="spin" /> : <Tags />}{activeCaptionJob ? "打标进行中" : `批量补齐 ${batchCandidates} 张`}</button></div> : <button className="caption-install" onClick={onOpenResources}><Download />安装打标组件</button>}{translationError && <small className="caption-translation-error">{translationError}；英文标签和编辑功能仍可使用。</small>}{latestCaptionJob && <CaptionJobStatus job={latestCaptionJob} active={Boolean(activeCaptionJob)} busy={busy} onCancel={() => void cancelCaption()} />}</section>
+        {selected.assets.length ? <div className="training-asset-list">{selected.assets.map((asset) => <TrainingAssetRow key={asset.id} datasetId={selected.id} asset={asset} captionItem={latestCaptionJob?.items.find((item) => item.assetId === asset.id) || null} translations={translations} captioningReady={captioningReady} captionJobActive={Boolean(activeCaptionJob)} onRetag={() => void caption(asset.id)} onDelete={() => void deleteAsset(asset.id)} onUpdated={onUpdated} onError={onError} />)}</div> : <div className="empty-block">导入 5–200 张 PNG、JPEG 或 WebP 开始整理训练集</div>}
     </section>
   </div>;
 }
@@ -186,12 +218,21 @@ function CaptionJobStatus({ job, active, busy, onCancel }: { job: DesktopCaption
   return <div className={`caption-job is-${job.status}`}><div><span><strong>{captionJobStatusLabel(job.status)}</strong><small>{job.processedAssets}/{job.totalAssets} · 成功 {job.succeededAssets} · 失败 {job.failedAssets} · 保留人工 {job.skippedAssets}</small></span><b>{job.progress}%</b></div><i><em style={{ width: `${job.progress}%` }} /></i>{job.error && <small>{job.error}</small>}{active && <button disabled={busy} onClick={onCancel}><X />取消任务</button>}</div>;
 }
 
-/** 单图编辑器独立保存草稿，并支持直接复制标准 Caption。 */
-function TrainingAssetRow({ datasetId, asset, captionItem, captioningReady, captionJobActive, onRetag, onUpdated, onError }: { datasetId: string; asset: DesktopTrainingDatasetView["assets"][number]; captionItem: DesktopCaptionJobView["items"][number] | null; captioningReady: boolean; captionJobActive: boolean; onRetag: () => void; onUpdated: (dataset: DesktopTrainingDatasetView) => void; onError: (message: string) => void }) {
+/** 单图编辑器使用中英标签卡片保存标准 Caption，并提供独立打标和删除入口。 */
+function TrainingAssetRow({ datasetId, asset, captionItem, translations, captioningReady, captionJobActive, onRetag, onDelete, onUpdated, onError }: { datasetId: string; asset: DesktopTrainingDatasetView["assets"][number]; captionItem: DesktopCaptionJobView["items"][number] | null; translations: TranslationMap; captioningReady: boolean; captionJobActive: boolean; onRetag: () => void; onDelete: () => void; onUpdated: (dataset: DesktopTrainingDatasetView) => void; onError: (message: string) => void }) {
   const [caption, setCaption] = useState(asset.caption || "");
+  const [newTag, setNewTag] = useState("");
   const [busy, setBusy] = useState(false);
   useEffect(() => setCaption(asset.caption || ""), [asset.caption]);
   const changed = caption.trim() !== (asset.caption || "").trim();
+  const tags = splitTags(caption);
+  const addTag = () => {
+    const tag = normalizeTag(newTag);
+    if (!tag || tags.includes(tag)) return;
+    setCaption([...tags, tag].join(", "));
+    setNewTag("");
+  };
+  const removeTag = (tag: string) => setCaption(tags.filter((item) => item !== tag).join(", "));
   const save = async () => {
     if (busy || !changed) return;
     setBusy(true);
@@ -200,7 +241,7 @@ function TrainingAssetRow({ datasetId, asset, captionItem, captioningReady, capt
     finally { setBusy(false); }
   };
   const sourceText = asset.captionSource === "manual" ? "人工 Caption" : asset.captionSource === "auto" ? "自动 Caption" : "尚未打标";
-  return <article className={asset.available ? "" : "is-missing"}><div className="training-asset-image">{asset.available ? <img loading="lazy" src={convertFileSrc(asset.path)} alt={asset.fileName} /> : <div><AlertTriangle /><span>文件缺失</span></div>}<span>{asset.width}×{asset.height}</span></div><div className="training-asset-caption"><header><strong>{asset.fileName}</strong><small>{asset.sha256.slice(0, 12)} · {formatResourceBytes(asset.byteSize)}</small></header><textarea value={caption} onChange={(event) => setCaption(event.target.value)} placeholder="使用英文逗号分隔准确标签；人工保存后批量任务不会改写" /><footer><span className={asset.available ? asset.confirmed ? "confirmed" : "pending" : "missing"}>{asset.available ? asset.confirmed ? "已确认" : `${sourceText}${captionItem ? ` · ${captionItemStatusLabel(captionItem.status)}` : ""}` : "文件缺失或已变化"}</span><div><button className="caption-row-action" disabled={!caption.trim()} onClick={() => void navigator.clipboard.writeText(caption.trim())}><Copy />复制</button><button className="caption-row-action" disabled={!captioningReady || captionJobActive || busy || !asset.available} onClick={onRetag}><Tags />{asset.caption?.trim() ? "重新打标" : "单图打标"}</button><button disabled={!changed || busy} onClick={() => void save()}>{busy ? <LoaderCircle className="spin" /> : <Save />}{busy ? "保存中" : "保存 Caption"}</button></div></footer>{captionItem?.error && <small className="caption-item-error">{captionItem.error}</small>}</div></article>;
+  return <article className={asset.available ? "" : "is-missing"}><div className="training-asset-image">{asset.available ? <img loading="lazy" src={convertFileSrc(asset.path)} alt={asset.fileName} /> : <div><AlertTriangle /><span>文件缺失</span></div>}<span>{asset.width}×{asset.height}</span></div><div className="training-asset-caption"><header><strong>{asset.fileName}</strong><small>{asset.sha256.slice(0, 12)} · {formatResourceBytes(asset.byteSize)}</small></header><div className="desktop-caption-tag-list">{tags.length ? tags.map((tag) => { const translation = translations[tag]; return <span key={tag} className={translation ? "" : "is-pending"} style={{ "--tag-color": translation?.color || tagColor(tag) } as CSSProperties}><b>{tag}</b><small>{translation?.translated || "待翻译"}</small><button onClick={() => removeTag(tag)} aria-label={`删除标签 ${tag}`}><X /></button></span>; }) : <p>尚未添加标签，可单图打标或手动添加。</p>}</div><div className="desktop-caption-add"><input value={newTag} onChange={(event) => setNewTag(event.target.value)} placeholder="输入英文标签" onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addTag(); } }} /><button disabled={!normalizeTag(newTag)} onClick={addTag}><Plus />添加</button></div><footer><span className={asset.available ? asset.confirmed ? "confirmed" : "pending" : "missing"}>{asset.available ? asset.confirmed ? "已确认" : `${sourceText}${captionItem ? ` · ${captionItemStatusLabel(captionItem.status)}` : ""}` : "文件缺失或已变化"}</span><div><button className="caption-row-action" disabled={!tags.length} onClick={() => void navigator.clipboard.writeText(tags.join(", "))}><Copy />复制</button><button className="caption-row-action" disabled={!captioningReady || captionJobActive || busy || !asset.available} onClick={onRetag}><Tags />{asset.caption?.trim() ? "重新打标" : "单图打标"}</button><button disabled={!changed || busy} onClick={() => void save()}>{busy ? <LoaderCircle className="spin" /> : <Save />}{busy ? "保存中" : "保存标签"}</button><button className="caption-delete-image" disabled={captionJobActive || busy} onClick={onDelete}><Trash2 />删除图片</button></div></footer>{captionItem?.error && <small className="caption-item-error">{captionItem.error}</small>}</div></article>;
 }
 
 /** 当前训练集的历史任务不会反向锁定训练集编辑。 */
@@ -222,6 +263,11 @@ function captionJobStatusLabel(status: DesktopCaptionJobView["status"]): string 
 function captionItemStatusLabel(status: DesktopCaptionJobView["items"][number]["status"]): string { return { queued: "等待打标", running: "识别中", succeeded: "识别完成", failed: "识别失败", skipped: "保留人工内容", cancelled: "已取消" }[status]; }
 function desktopTrainingStatusLabel(status: DesktopTrainingJobView["status"]): string { return { queued: "排队中", running: "训练中", succeeded: "训练完成", failed: "训练失败", cancelled: "已取消" }[status]; }
 function formatResourceBytes(value: number): string { if (value < 1024) return `${value} B`; if (value < 1024 ** 2) return `${(value / 1024).toFixed(1)} KiB`; return `${(value / 1024 ** 2).toFixed(1)} MiB`; }
+/** 把 Caption 拆成去重的标准英文标签，翻译只影响展示而不写入训练内容。 */
+function splitTags(value: string): string[] { return [...new Set(value.split(/[,，\n;；]+/).map(normalizeTag).filter(Boolean))]; }
+function normalizeTag(value: string): string { return value.trim().replace(/_/g, " ").replace(/\s+/g, " ").toLowerCase(); }
+/** 未返回服务端颜色时仍使用标签哈希生成稳定可读颜色。 */
+function tagColor(tag: string): string { let hash = 0; for (const character of tag) hash = (hash * 31 + character.charCodeAt(0)) >>> 0; return `hsl(${hash % 360} 55% 43%)`; }
 /** 训练触发词按英文或中文逗号和换行拆分，并在提交前保持用户顺序去重。 */
 function parseTriggerWords(value: string): string[] {
   const seen = new Set<string>();

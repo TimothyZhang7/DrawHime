@@ -2,7 +2,7 @@
 
 use crate::models::{
     DesktopTrainingAssetView, DesktopTrainingCaptionUpdateInput,
-    DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetView, DesktopTrainingImagesAddInput,
+    DesktopTrainingAssetDeleteInput, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetView, DesktopTrainingImagesAddInput,
     DesktopTrainingTriggerWordsUpdateInput,
 };
 use chrono::Utc;
@@ -113,6 +113,38 @@ pub fn update_caption(database: &Connection, app_data_dir: &Path, input: Desktop
     transaction.execute("UPDATE local_training_assets SET confirmed=0 WHERE dataset_id=?1", [&input.dataset_id]).map_err(|error| format!("重置图片确认状态失败：{error}"))?;
     update_dataset_review_status(&transaction, &input.dataset_id, &now)?;
     transaction.commit().map_err(|error| format!("提交 Caption 事务失败：{error}"))?;
+    read_dataset_with_assets(database, app_data_dir, &input.dataset_id)
+}
+
+/** 删除未被训练快照引用的单张图片，并同步清理打标历史关联和重新计算确认门禁。 */
+pub fn delete_asset(database: &Connection, app_data_dir: &Path, input: DesktopTrainingAssetDeleteInput) -> Result<DesktopTrainingDatasetView, String> {
+    validate_uuid(&input.dataset_id, "训练集 ID")?;
+    validate_uuid(&input.asset_id, "训练图片 ID")?;
+    let relative_path: String = database.query_row("SELECT relative_path FROM local_training_assets WHERE id=?1 AND dataset_id=?2", params![input.asset_id,input.dataset_id], |row| row.get(0)).optional().map_err(|error| format!("读取待删除训练图片失败：{error}"))?.ok_or_else(|| "训练图片不存在".to_string())?;
+    let referenced: bool = database.query_row("SELECT EXISTS(SELECT 1 FROM local_training_job_assets WHERE asset_id=?1)", [&input.asset_id], |row| row.get(0)).map_err(|error| format!("检查训练图片快照失败：{error}"))?;
+    if referenced { return Err("该图片已用于训练任务快照，为保留任务审计不可删除".into()); }
+    let captioning: bool = database.query_row("SELECT EXISTS(SELECT 1 FROM local_caption_jobs WHERE dataset_id=?1 AND status IN ('queued','running'))", [&input.dataset_id], |row| row.get(0)).map_err(|error| format!("检查活动打标任务失败：{error}"))?;
+    if captioning { return Err("当前训练集仍有打标任务运行，请完成或取消后再删除图片".into()); }
+    let dataset_root = app_data_dir.join("datasets").join(&input.dataset_id);
+    let source = app_data_dir.join(&relative_path);
+    if !source.starts_with(&dataset_root) { return Err("训练图片存储路径不受控".into()); }
+    let staged = source.is_file().then(|| source.with_file_name(format!(".deleting-{}", Uuid::new_v4())));
+    if let Some(staged) = &staged { fs::rename(&source, staged).map_err(|error| format!("暂存待删除训练图片失败：{error}"))?; }
+    let outcome = (|| {
+        let now = Utc::now().to_rfc3339();
+        let transaction = database.unchecked_transaction().map_err(|error| format!("开启删除训练图片事务失败：{error}"))?;
+        transaction.execute("DELETE FROM local_caption_job_items WHERE asset_id=?1", [&input.asset_id]).map_err(|error| format!("清理训练图片打标关联失败：{error}"))?;
+        if transaction.execute("DELETE FROM local_training_assets WHERE id=?1 AND dataset_id=?2", params![input.asset_id,input.dataset_id]).map_err(|error| format!("删除训练图片记录失败：{error}"))? != 1 { return Err("训练图片不存在".into()); }
+        transaction.execute("UPDATE local_training_assets SET confirmed=0 WHERE dataset_id=?1", [&input.dataset_id]).map_err(|error| format!("重置训练集确认状态失败：{error}"))?;
+        update_dataset_review_status(&transaction, &input.dataset_id, &now)?;
+        transaction.commit().map_err(|error| format!("提交删除训练图片事务失败：{error}"))?;
+        Ok(())
+    })();
+    if let Err(error) = outcome {
+        if let Some(staged) = &staged { let _ = fs::rename(staged, &source); }
+        return Err(error);
+    }
+    if let Some(staged) = &staged { let _ = fs::remove_file(staged); }
     read_dataset_with_assets(database, app_data_dir, &input.dataset_id)
 }
 
@@ -268,5 +300,26 @@ mod tests {
         let restored = state.list_training_datasets().expect("恢复训练集");
         assert_eq!(restored[0].assets.len(), 5);
         assert_eq!(restored[0].status, "confirmed");
+    }
+
+    #[test]
+    fn deleting_unreferenced_asset_preserves_original_source() {
+        let temporary = tempfile::tempdir().expect("创建删除图片测试目录");
+        let state = DesktopState::initialize(temporary.path()).expect("初始化桌面状态");
+        let dataset = state.create_training_dataset(DesktopTrainingDatasetCreateInput { title: "删除测试".into(), r#type: "style".into(), trigger_words: vec![] }).expect("创建训练集");
+        let source = temporary.path().join("delete-source.png");
+        RgbImage::from_pixel(64, 64, Rgb([40, 80, 120])).save(&source).expect("写入原始图片");
+        let imported = {
+            let mut database = state.database.lock().expect("锁定训练集数据库");
+            add_images(&mut database, &state.app_data_dir, DesktopTrainingImagesAddInput { dataset_id: dataset.id.clone(), source_paths: vec![source.to_string_lossy().into_owned()] }).expect("导入训练图片")
+        };
+        let managed_path = imported.assets[0].path.clone();
+        let deleted = {
+            let database = state.database.lock().expect("锁定训练集数据库");
+            delete_asset(&database, &state.app_data_dir, DesktopTrainingAssetDeleteInput { dataset_id: dataset.id, asset_id: imported.assets[0].id.clone() }).expect("删除训练图片")
+        };
+        assert!(deleted.assets.is_empty());
+        assert!(source.is_file());
+        assert!(!Path::new(&managed_path).exists());
     }
 }

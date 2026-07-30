@@ -50,12 +50,14 @@
 | `desktop_import_local_model` | desktop webview | desktop core | 校验用户选择的 safetensors、计算 SHA-256、原子复制到受控模型目录并登记 `DesktopLocalModelView`；Anima 同时校验独立 UNet、文本编码器和 VAE，不加载 pickle 权重 |
 | `desktop_list_local_models` | desktop webview | desktop core | 返回当前设备已登记且文件元数据仍匹配的本地底模，不扫描或读取未登记文件内容 |
 | `desktop_import_local_lora` | desktop webview | desktop core | 校验并原子导入单个 safetensors LoRA，固化标题、类型、触发词、SHA-256、字节数和修改时间；同内容幂等复用，不覆盖其他文件 |
-| `desktop_list_local_loras` | desktop webview | desktop core | 返回当前设备已登记 LoRA 及实时文件可用性；本地任务最多选择 4 个不同内容的 LoRA，每个独立设置 0–1.5 强度 |
+| `desktop_list_local_loras` | desktop webview | desktop core | 返回当前设备已登记 LoRA 及实时文件可用性；本地任务可选择任意数量的不同内容 LoRA，每个独立设置模型与 CLIP 强度 |
 | `desktop_create_training_dataset` | desktop webview | desktop core | 创建角色、画风或概念训练集并持久化标题和触发词，返回 `DesktopTrainingDatasetView` |
 | `desktop_list_training_datasets` | desktop webview | desktop core | 返回当前设备训练集、真实图片文件摘要、逐图 Caption 和确认状态；应用重启后仍以 SQLite 为准 |
 | `desktop_update_training_trigger_words` | desktop webview | desktop core | 校验、去重并更新当前训练集触发词；既有训练任务继续使用自己的不可变快照，新任务读取更新后的触发词 |
 | `desktop_add_training_images` | desktop webview | desktop core | 校验并原子复制用户选择的 PNG/JPEG/WebP，读取真实尺寸和 SHA-256；同训练集内容去重且总量不超过 200，添加后重新执行确认门禁 |
 | `desktop_update_training_caption` | desktop webview | desktop core | 逐图保存人工 Caption；修改后只使当前训练集回到待确认，不改写其他图片内容 |
+| `desktop_delete_training_asset` | desktop webview | desktop core | 原子删除未被训练任务快照引用的单张训练图片和打标关联，保留用户原始导入文件并重新计算确认门禁 |
+| `desktop_translate_training_tags` | desktop webview | desktop core/main API | 通过 Rust 核心内的设备会话批量读取真实标签翻译集和稳定颜色；会话密钥不进入页面 |
 | `desktop_create_caption_job` | desktop webview | desktop core/caption scheduler | 按训练集或单张图片创建持久化离线打标任务；批量任务跳过人工 Caption，单图重新打标属于用户明确覆盖操作；对应 `DesktopCaptionJobCreateInput` 和 `DesktopCaptionJobView` |
 | `desktop_list_caption_jobs` | desktop webview | desktop core | 返回最近 100 个打标任务、逐图状态、阈值、进度和脱敏错误；应用重启后仍以 SQLite 为准 |
 | `desktop_cancel_caption_job` | desktop webview | desktop core/caption scheduler | 幂等取消排队或运行中的打标任务，已经成功落库的逐图 Caption 保留 |
@@ -65,7 +67,7 @@
 | `desktop_list_training_jobs` | desktop webview | desktop core | 返回最近 100 个训练任务、尝试、排队位置、进度、产物 LoRA ID 与 OOM 降档建议 |
 | `desktop_cancel_training_job` | desktop webview | desktop core/training scheduler | 幂等取消排队或运行中的本地训练；运行中进程树由核心终止，已成功登记的 LoRA 不回滚 |
 | `desktop-training-job-updated` | desktop core/training scheduler | desktop webview | 本地训练任务状态变化事件；载荷为 `DesktopTrainingJobView` |
-| `desktop_create_local_job` | desktop webview | desktop core/local scheduler | 校验底模、组件与最多 4 个 LoRA 的受控路径、文件名和不可变快照后立即创建 `DesktopLocalJobView`；支持快速、质量、极致和自定义参数，非自定义预设由核心按底模重新解析，固化提示词、负面提示词、采样预算、极端画幅步数、缩放算法以及 LoRA 模型/CLIP 独立强度，后台串行调度不会阻塞页面 |
+| `desktop_create_local_job` | desktop webview | desktop core/local scheduler | 校验底模、组件与全部所选 LoRA 的受控路径、文件名和不可变快照后立即创建 `DesktopLocalJobView`；输出最长边限制 1536，尺寸与比例独立选择；支持快速、质量、极致和自定义参数，后台串行调度不会阻塞页面 |
 | `desktop_list_local_jobs` | desktop webview | desktop core | 分页前的首版接口返回当前设备最近 100 个本地任务及产物摘要，任务、尝试和错误在应用重启后保留 |
 | `desktop_cancel_local_job` | desktop webview | desktop core/local scheduler | 幂等取消排队任务；运行中任务向当前 ComfyUI prompt 发出删除和中断请求，终态任务保持不变 |
 | `desktop-local-job-updated` | desktop core/local scheduler | desktop webview | 本地任务状态、进度或产物变化事件；载荷为 `DesktopLocalJobView`，刷新页面后仍以 SQLite 为准 |

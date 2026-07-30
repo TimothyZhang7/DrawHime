@@ -1,5 +1,5 @@
 /** 本文件封装 WebView 到 Tauri 本地核心的受类型约束命令。 */
-import type { DesktopAccountView, DesktopAuthorizationRequestView, DesktopAuthorizationStartRequest, DesktopBootstrapView, DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopEnvironmentReport, DesktopGalleryPrivacy, DesktopGallerySyncItem, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopOfflineUpdateImportInput, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView, DesktopSettings, DesktopSettingsUpdate, DesktopSoftwareUpdateView, DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetIdInput, DesktopTrainingDatasetView, DesktopTrainingImagesAddInput, DesktopTrainingJobCreateInput, DesktopTrainingJobView, DesktopTrainingTriggerWordsUpdateInput, DesktopWebsiteLoraInstallProgress, DesktopWebsiteLoraView, DesktopWebsiteModelView } from "@drawhime/contracts";
+import type { DesktopAccountView, DesktopAuthorizationRequestView, DesktopAuthorizationStartRequest, DesktopBootstrapView, DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopEnvironmentReport, DesktopGalleryPrivacy, DesktopGallerySyncItem, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopOfflineUpdateImportInput, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView, DesktopSettings, DesktopSettingsUpdate, DesktopSoftwareUpdateView, DesktopTrainingAssetDeleteInput, DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetIdInput, DesktopTrainingDatasetView, DesktopTrainingImagesAddInput, DesktopTrainingJobCreateInput, DesktopTrainingJobView, DesktopTrainingTagTranslationInput, DesktopTrainingTriggerWordsUpdateInput, DesktopWebsiteLoraInstallProgress, DesktopWebsiteLoraView, DesktopWebsiteModelView, TrainingTagTranslationView } from "@drawhime/contracts";
 import type { DesktopAiAnalyzeInput, DesktopAiAnalyzeView, DesktopAiSettings, DesktopAiSettingsUpdate } from "@drawhime/contracts";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -93,6 +93,10 @@ export function updateDesktopTrainingTriggerWords(input: DesktopTrainingTriggerW
 export function addDesktopTrainingImages(input: DesktopTrainingImagesAddInput): Promise<DesktopTrainingDatasetView> { return invoke("desktop_add_training_images", { input }); }
 /** 保存单张训练图片 Caption。 */
 export function updateDesktopTrainingCaption(input: DesktopTrainingCaptionUpdateInput): Promise<DesktopTrainingDatasetView> { return invoke("desktop_update_training_caption", { input }); }
+/** 删除单张未被训练任务快照引用的训练图片。 */
+export function deleteDesktopTrainingAsset(input: DesktopTrainingAssetDeleteInput): Promise<DesktopTrainingDatasetView> { return invoke("desktop_delete_training_asset", { input }); }
+/** 使用设备会话批量读取训练标签的中文翻译和颜色。 */
+export function translateDesktopTrainingTags(input: DesktopTrainingTagTranslationInput): Promise<TrainingTagTranslationView> { return invoke("desktop_translate_training_tags", { input }); }
 /** 创建批量或单图离线自动打标任务。 */
 export function createDesktopCaptionJob(input: DesktopCaptionJobCreateInput): Promise<DesktopCaptionJobView> { return invoke("desktop_create_caption_job", { input }); }
 /** 读取最近的持久化离线自动打标任务。 */

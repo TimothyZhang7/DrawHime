@@ -228,7 +228,7 @@ fn build_workflow(request: &GenerationRequest) -> Result<Value, String> {
     Ok(workflow)
 }
 
-/** 串联最多四个 LoRA，并让正负提示词与采样器共同使用最终模型和 CLIP。 */
+/** 按用户选择顺序串联全部 LoRA，并让正负提示词与采样器共同使用最终模型和 CLIP。 */
 fn attach_loras(workflow: &mut Value, request: &GenerationRequest, base_model_node: &str, base_clip_slot: usize, positive_node: &str, negative_node: &str, sampler_node: &str) -> Result<(), String> {
     let object = workflow.as_object_mut().ok_or_else(|| "ComfyUI 工作流结构异常".to_string())?;
     let mut model_input = json!([base_model_node, 0]);

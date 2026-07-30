@@ -255,9 +255,27 @@ fn write_request(path: &Path, request: &TrainerRequest) -> Result<(), String> {
 }
 
 fn read_runner_lines(stdout: impl Read, sender: mpsc::SyncSender<Result<String, String>>) {
-    for line in BufReader::new(stdout).lines() {
-        let value = match line { Ok(value) if value.len() <= MAX_RUNNER_LINE_BYTES => Ok(value), Ok(_) => Err("Trainer 单条进度超过限制".into()), Err(error) => Err(format!("读取 Trainer 进度失败：{error}")) };
-        if sender.send(value).is_err() { break; }
+    let mut reader = BufReader::new(stdout);
+    loop {
+        let mut bytes = Vec::new();
+        let read = match reader.read_until(b'\n', &mut bytes) {
+            Ok(read) => read,
+            Err(error) => {
+                let _ = sender.send(Err(format!("读取 Trainer 进度失败：{error}")));
+                break;
+            }
+        };
+        if read == 0 { break; }
+        if bytes.len() > MAX_RUNNER_LINE_BYTES {
+            let _ = sender.send(Err("Trainer 单条进度超过限制".into()));
+            break;
+        }
+        while matches!(bytes.last(), Some(b'\n' | b'\r')) { bytes.pop(); }
+        // Python 依赖偶尔向 stdout 写入本地代码页字节；仅提取 JSON 事件，非协议日志由 stderr 负责展示。
+        let text = String::from_utf8_lossy(&bytes);
+        let Some(start) = text.find('{') else { continue; };
+        let Some(end) = text.rfind('}') else { continue; };
+        if sender.send(Ok(text[start..=end].to_string())).is_err() { break; }
     }
 }
 
@@ -286,3 +304,20 @@ fn modified_millis(metadata: &fs::Metadata) -> Result<u64, String> { metadata.mo
 fn safe_output_name(id: &str) -> String { format!("drawhime-{}", id.replace('-', "")) }
 fn failed(message: impl Into<String>) -> TrainingStop { TrainingStop::Failed { message: message.into(), oom: false } }
 fn wait_for_work(wake_signal: &(Mutex<bool>, Condvar), stopping: &AtomicBool) { let (lock, condition) = wake_signal; if let Ok(pending) = lock.lock() { if !*pending && !stopping.load(Ordering::SeqCst) { let _ = condition.wait_timeout(pending, Duration::from_secs(2)); } } if let Ok(mut pending) = lock.lock() { *pending = false; } }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trainer_progress_ignores_non_utf8_noise_and_keeps_json_event() {
+        let input = b"\xff\xfe native progress\r\nlog: {\"kind\":\"progress\",\"progress\":42}\r\n";
+        let (sender, receiver) = mpsc::sync_channel(4);
+        read_runner_lines(input.as_slice(), sender);
+        let line = receiver.recv().expect("读取 Trainer JSON 事件").expect("事件解析前读取成功");
+        let event: TrainerEvent = serde_json::from_str(&line).expect("解析 Trainer JSON 事件");
+        assert_eq!(event.kind, "progress");
+        assert_eq!(event.progress, Some(42));
+        assert!(receiver.try_recv().is_err());
+    }
+}

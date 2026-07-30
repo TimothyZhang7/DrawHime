@@ -46,7 +46,8 @@ pub fn inspect_environment(settings: &DesktopSettings) -> DesktopEnvironmentRepo
         gpus,
         disks: system.disks,
         runtime,
-        capabilities: CapabilityView { inference: os_supported && gpu_supported && runtime_ready && generation_assets_ready && !low_free_memory, training: os_supported && training_gpu_supported && runtime_ready && anima_training_assets_ready && trainer_ready && !low_free_memory, captioning: os_supported && runtime_installed && captioner_ready, model_management: true },
+        // Runtime 会长期持有显存，空闲显存只用于状态提示，不得让已就绪客户端在完成首图后失去继续排队能力。
+        capabilities: CapabilityView { inference: os_supported && gpu_supported && runtime_ready && generation_assets_ready, training: os_supported && training_gpu_supported && runtime_ready && anima_training_assets_ready && trainer_ready, captioning: os_supported && runtime_installed && captioner_ready, model_management: true },
         issues,
     }
 }

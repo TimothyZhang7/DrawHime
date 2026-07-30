@@ -156,7 +156,7 @@ Runtime 更新不能中断运行中任务；队列空闲后切换。
 
 “启动 / 账号”只保留“启动”和“账号”两个二级入口。启动页将环境检测、必需依赖和 Runtime 状态合并展示；首次点击“初始化”后按顺序完成检测、签名依赖安装、Runtime 启动和完整自检，并保持服务运行。初始化完成后的按钮改为“启动”，启动过程中显示“启动中”，服务可用后显示“运行中”，不再要求用户分别操作环境、依赖、启动和自检。
 
-每个资源同时声明下载字节数 `byteSize` 与安装后最大字节数 `installedSize`。安装前按后者加安全余量检查目标卷空间；ZIP/7z 归档只允许 Runtime、打标和训练组件，底模与 LoRA 必须是大小一致的原始文件。解压拒绝绝对路径、父级穿越、重解析点、Windows 保留名、重复文件和超出声明的展开体积。所有内容先写同卷临时路径，再原子切换到正式目录；旧版本重命名保留，切换或标记写入失败时恢复旧版本。
+每个资源同时声明下载字节数 `byteSize` 与安装后最大字节数 `installedSize`。安装前按后者加安全余量检查目标卷空间；ZIP/7z 归档只允许 Runtime、打标和训练组件，底模与 LoRA 必须是大小一致的原始文件。下载完成后必须在写入验证标记前检查归档目录；7z 列表读取允许有限瞬时重试，旧版遗留的持续不可读取缓存会被隔离、清除断点并自动完整重下一次。解压拒绝绝对路径、父级穿越、重解析点、Windows 保留名、重复文件和超出声明的展开体积。所有内容先写同卷临时路径，再原子切换到正式目录；旧版本重命名保留，切换或标记写入失败时恢复旧版本。
 
 正式实现前必须先在 `docs/interfaces/README.md` 登记网站签名清单、镜像地址和更新协议，并在 `packages/contracts` 落地真实响应契约；客户端不内置未经登记的下载地址。
 
@@ -183,7 +183,7 @@ Anima Base、Anime Bulldozer、MiaoMiao RealSkin 与 MiaoMiao 3D Harem 使用同
 - 每次任务固化环境、模型哈希、LoRA ID/哈希/权重、提示词、负面提示词和工作流版本。
 - OOM 不进行无限重试；返回经过计算的安全分辨率、Rank 或 offload 建议。
 
-生成页默认使用“质量”预设，并提供“快速 / 质量 / 极致”三档完整参数组合；质量档固定为生产 GPU 已验证的 37 步、极端画幅 34 步、1536 采样最长边与 1,350,000 像素预算，并按底模选择 CFG、采样器、调度器、质量前缀和默认负面词。用户修改任一专业参数后任务切换为 `custom`，核心仍会逐项校验并固化；低频的采样最长边、像素预算、极端画幅阈值/步数、输出缩放算法及提示词开关放入高级折叠区。潜空间尺寸与最终输出尺寸分离，Runtime 按画幅和像素预算采样后使用 ComfyUI 官方 `ImageScale` 恢复用户选择的精确尺寸。LoRA 同时固化独立的模型强度和 CLIP 强度，旧任务迁移时 CLIP 强度继承原强度，不改变历史结果语义。
+生成页默认使用“质量”预设，并提供“快速 / 质量 / 极致”三档完整参数组合；质量档固定为生产 GPU 已验证的 37 步、极端画幅 34 步、1536 采样最长边与 1,350,000 像素预算，并按底模选择 CFG、采样器、调度器、质量前缀和默认负面词。最终输出把最长边尺寸和画幅比例拆成独立选择，默认 1024px 与 1:1，最长边最高 1536px，并按 8 像素对齐。用户修改任一专业参数后任务切换为 `custom`，核心仍会逐项校验并固化；低频参数放入高级折叠区。LoRA 从包含主站下载能力的完整仓库弹窗选择，不设置客户端数量上限，并在弹窗内编辑每个 LoRA 的模型强度和 CLIP 强度。
 
 本地图库只展示当前设备生成并通过校验的真实产物。每张封面可进入独立作品详情页，详情展示正负提示词、底模快照、完整采样参数、文件信息以及带强度和封面的 LoRA 快照。任务记录采用单列全宽布局，每条任务打开独立详情弹窗，展示状态、进度、时间、Runtime Prompt、执行尝试、错误与相同参数快照；两处都直接读取 SQLite 任务事实源。
 
@@ -196,13 +196,13 @@ Anima Base、Anime Bulldozer、MiaoMiao RealSkin 与 MiaoMiao 3D Harem 使用同
 1. 用户创建角色、画风或概念训练集，标题、类型和触发词立即持久化；打标入口先展示训练集列表，每个训练集进入独立详情页后再编辑图片和触发词。
 2. 每次可导入多张 PNG、JPEG 或 WebP；核心读取真实格式和尺寸、流式计算 SHA-256、原子复制到 `datasets/<datasetId>`，保留用户原文件，不以浏览器临时对象作为记录。
 3. 同一训练集按内容哈希去重，图片总数限制 5–200；添加或删除图片后确认状态失效，但已经人工保存的其他图片 Caption 保持不变。
-4. Caption 允许逐图保存和逐图重新打标；后台批量自动打标只能写入尚未人工确认的图片，人工修改后的 Caption 不再被后台改写。宽屏详情页每行展示两组“图片 + Caption”，窄屏收敛为单列。
+4. Caption 允许逐图保存和逐图重新打标；英文标签以稳定颜色 Tag 展示，并通过设备会话读取平台翻译集显示中文对照。后台批量自动打标只能写入尚未人工确认的图片，人工修改后的 Caption 不再被后台改写。宽屏详情页每行展示两组“图片 + Caption”，窄屏收敛为单列；未进入训练任务快照的单图可以安全删除。
 5. 只有全部图片具有非空 Caption 且图片数满足范围时才允许确认数据集；确认后才开放训练参数步骤。
 6. 触发词可在详情页更新并去重；既有训练任务继续使用提交时快照，后续任务读取新值。应用重启、页面切换和 Runtime 退出都从 SQLite 恢复当前阶段，禁止依赖前端内存推进训练流程。
 
 真实图片导入、逐图 Caption 和确认门禁已经完成。首个签名 `captioner` 使用 Apache-2.0 的 `SmilingWolf/wd-vit-tagger-v3` v2.0 ONNX 与 MIT 的 ONNX Runtime 1.22.1，默认通用阈值 0.35、角色阈值 0.85；RGBA 合成白底、方形补边、双三次缩放及 RGB→BGR 严格对齐官方示例。批量任务跳过 `caption_source=manual` 的人工 Caption，单图“重新打标”属于用户明确覆盖操作；任务、逐图结果、进度、错误和取消状态全部写入 SQLite，应用重启后继续未完成图片。
 
-本地 LoRA 训练使用签名 `trainer.anima-sd-scripts` 组件，固定 `kohya-ss/sd-scripts` 修订 `37a1cbbc5725ed2a3575506e7bd2001c9908ac92` 和 Windows CPython 3.12 依赖；组件包含 CUDA 12.6 的 `bitsandbytes`，不使用需要用户自行安装 MSVC/Triton 的 `torch.compile` 路径。提交时固化已确认数据集、每张图 SHA-256/Caption、Anima DiT/Qwen3/VAE 哈希与完整参数；Worker 先校验快照，再停止 ComfyUI 释放显存，调用 `anima_train_network.py` 并持久化 JSON 进度。生成与训练经过应用内可中断单 GPU 协调器串行执行，取消时终止完整子进程树，应用退出时任务回到同一快照队列。训练成功后再次校验 safetensors 并原子导入 LoRA 仓库；OOM 只收敛为一次失败与确定性分辨率/Rank 建议，不进行无限重试。Trainer v2 通过任务级启动脚本显式恢复 Windows Embedded Python 忽略的组件依赖路径；已在 RTX 4060 Laptop 8GB 上以 5 张真实图片、512 分辨率和 Rank 8 完成训练，生成 23MB safetensors，并确认进度单调递增和训练进程完整退出。
+本地 LoRA 训练使用签名 `trainer.anima-sd-scripts` 组件，固定 `kohya-ss/sd-scripts` 修订 `37a1cbbc5725ed2a3575506e7bd2001c9908ac92` 和 Windows CPython 3.12 依赖；组件包含 CUDA 12.6 的 `bitsandbytes`，不使用需要用户自行安装 MSVC/Triton 的 `torch.compile` 路径。提交时固化已确认数据集、每张图 SHA-256/Caption、Anima DiT/Qwen3/VAE 哈希与完整参数；Worker 先校验快照，再停止 ComfyUI 释放显存，调用 `anima_train_network.py` 并持久化 JSON 进度。Trainer stdout 按受限字节行读取并从本地代码页噪声中只提取 JSON 事件，避免第三方依赖输出非 UTF-8 字节导致有效训练被错误终止。生成与训练经过应用内可中断单 GPU 协调器串行执行，取消时终止完整子进程树，应用退出时任务回到同一快照队列。训练成功后再次校验 safetensors 并原子导入 LoRA 仓库；OOM 只收敛为一次失败与确定性分辨率/Rank 建议，不进行无限重试。Trainer v2 通过任务级启动脚本显式恢复 Windows Embedded Python 忽略的组件依赖路径；已在 RTX 4060 Laptop 8GB 上以 5 张真实图片、512 分辨率和 Rank 8 完成训练，生成 23MB safetensors，并确认进度单调递增和训练进程完整退出。
 
 Local Scheduler 使用桌面 SQLite 作为唯一事实源。提交命令先固化模型哈希、正负提示词、尺寸、采样器、调度器、步数、CFG、种子与隐私并立即返回；后台 Worker 单卡串行领取。每次执行创建独立 attempt，ComfyUI prompt ID 在提交成功时立刻写入。正常退出时运行中任务回到队列并把本次 attempt 标为 `interrupted`，用户取消则删除对应 prompt 并调用中断接口。产物下载后先校验 PNG 和尺寸，再原子写入作品目录、提交任务终态并在同一事务中加入图库 outbox。
 
@@ -267,7 +267,7 @@ Local Scheduler 使用桌面 SQLite 作为唯一事实源。提交命令先固�
 - 软件更新复用固定 Ed25519 资源清单；`application` 条目必须声明严格三段目标版本、最低直接升级版本、NSIS EXE、大小、SHA-256、版本说明和强制标记。
 - 在线更新使用官方/镜像选择、8 MiB Range 断点和整体哈希；下载后额外保留原始签名信封，应用和回滚前都重新验签，不信任 SQLite 状态或单独的验证标记。
 - 离线更新必须同时导入安装包和原始签名信封；平台、架构、文件名、版本、大小与 SHA-256 全部匹配后才进入受控缓存。
-- NSIS 由独立隐藏辅助进程在主程序退出后静默执行，启动前再次计算安装包 SHA-256；重启后只根据实际运行版本收敛 `applying → applied`，安装器退出码或超时收敛为失败。
+- NSIS 由独立可见 CMD 更新助手在主程序退出后执行，窗口逐步显示校验、等待、安装和重启状态；启动前再次计算安装包 SHA-256，安装成功后从原程序路径自动重启。重启后只根据实际运行版本收敛 `applying → applied`，安装器退出码或超时收敛为失败。
 - 安装、升级和回滚始终复用 `%APPDATA%\ink.xanime.drawhime.desktop`，不得主动清理模型、LoRA、任务、训练集或设置。
 - 图形卸载页使用“保留已下载模型、LoRA、任务、训练集和设置”复选框，默认不勾选；勾选后只移除程序文件，静默卸载使用 `/KEEPDATA` 获得相同行为。
 - 未选择保留时，卸载器先将 Roaming 数据目录和 Local WebView 缓存原子移出应用路径，再交给隐藏后台进程递归清理，避免数万个 Runtime 小文件阻塞卸载窗口；用户图片目录不属于卸载清理范围。
@@ -330,7 +330,7 @@ Local Scheduler 使用桌面 SQLite 作为唯一事实源。提交命令先固�
 
 ## 18. 当前实现状态
 
-当前已完成：Tauri 工程、Windows/NVIDIA 基础检测、Windows 10 1809 构建号门禁、持续环境提示、SQLite 设置及升级、主题跟随/手动切换、依赖来源偏好、环境快照、默认图库隐私、图库 outbox、响应式桌面 UI、签名资源清单契约和 API、离线签名工具、8 MiB Range 断点下载、低速切源、SHA-256 隔离、资源进度事件、安全 ZIP/7z 解压、磁盘预检、同卷原子安装、旧版本保留与回滚、Runtime 安装状态回归测试和 NSIS 构建。NVIDIA Runtime、WAI Anima 模型组合、WD14、Trainer v2、固定公钥、签名清单和主站 Range 镜像已经发布；真实客户端一次点击完成 4 个缺失资源共约 5.4 GiB 的下载、哈希、安装和模型登记，随后 20 步 1024×1024 WAI 任务在 108.8 秒完成并形成 SQLite、PNG 与 SHA-256 闭环。桌面核心现已支持 ComfyUI 动态回环启动、状态轮询、GPU/节点自检、受控日志、停止回收、safetensors 原子导入、Checkpoint/Anima 工作流、SQLite 本地任务/attempt/产物、串行调度、取消恢复和自动图库 outbox。LoRA 已支持安全导入、类型与触发词管理、单任务最多四个独立强度、任务级不可变快照，以及 Checkpoint/Anima 工作流真实串联；真实 Runtime 生命周期、自带 LoRA 的 512×512 Anima 生成和 NSIS 启动冒烟均已通过。本地训练集现已支持 5–200 张 PNG/JPEG/WebP 原子导入、内容去重、逐图人工 Caption、文件完整性复核与确认门禁。WD ViT Tagger v3 签名组件、ONNX Runtime 私有依赖、持久化批量/单图打标队列、人工 Caption 保护、取消和重启恢复已经接入 UI；真实动漫图片离线推理、签名 ZIP 安装及公开 Range 首尾分片均已验证。Anima Trainer 现已具备签名 ZIP、固定上游源码与 Windows CUDA 12.6 依赖、SQLite 任务/尝试/快照、共享 GPU 协调、取消进程树、OOM 建议、结果 LoRA 自动登记以及参数与任务 UI；Trainer v2 已在 RTX 4060 Laptop 8GB 上以 5 张真实图片完成 512 分辨率、Rank 8 的完整训练并生成 23MB safetensors。浏览器设备码授权、服务端哈希存储、幂等换取可撤销会话、Windows Credential Manager、离线账号状态和自适应账号 UI 已落地。图库同步 Worker 现已完成账号原子绑定、4 MiB 分片、断点、整体哈希、隐私、失败恢复和主站免计费正式图库发布；网站 LoRA 目录支持公开/本人私有权限、单段 Range 续传、哈希校验和 UI 一键原子安装。软件更新现已完成 `application` 签名契约、SQLite 状态、在线断点下载、离线双文件导入、应用前二次验签、NSIS 辅助进程、实际版本终态收敛、可信缓存回滚和响应式更新页面；NSIS 已内嵌微软 WebView2 Evergreen 离线安装器，无 GPU、4/6/8 GiB 显存分级门禁和磁盘不足预检使用生产判断函数完成回归测试；0.1.5 已修正标称 8 GiB NVIDIA 显卡保留显存误判，完成构建、静默安装、主机验收和签名发布。
+当前已完成：Tauri 工程、Windows/NVIDIA 基础检测、Windows 10 1809 构建号门禁、持续环境提示、SQLite 设置及升级、主题跟随/手动切换、依赖来源偏好、环境快照、默认图库隐私、图库 outbox、响应式桌面 UI、签名资源清单契约和 API、离线签名工具、8 MiB Range 断点下载、低速切源、SHA-256 隔离、资源进度事件、安全 ZIP/7z 解压、磁盘预检、同卷原子安装、旧版本保留与回滚、Runtime 安装状态回归测试和 NSIS 构建。NVIDIA Runtime、WAI Anima 模型组合、WD14、Trainer v2、固定公钥、签名清单和主站 Range 镜像已经发布；真实客户端一次点击完成 4 个缺失资源共约 5.4 GiB 的下载、哈希、安装和模型登记，随后 20 步 1024×1024 WAI 任务在 108.8 秒完成并形成 SQLite、PNG 与 SHA-256 闭环。桌面核心现已支持 ComfyUI 动态回环启动、状态轮询、GPU/节点自检、受控日志、停止回收、safetensors 原子导入、Checkpoint/Anima 工作流、SQLite 本地任务/attempt/产物、串行调度、取消恢复和自动图库 outbox。LoRA 已支持安全导入、类型与触发词管理、任意数量独立强度、任务级不可变快照，以及 Checkpoint/Anima 工作流真实串联；真实 Runtime 生命周期、自带 LoRA 的 512×512 Anima 生成和 NSIS 启动冒烟均已通过。本地训练集现已支持 5–200 张 PNG/JPEG/WebP 原子导入、内容去重、逐图人工 Caption、文件完整性复核与确认门禁。WD ViT Tagger v3 签名组件、ONNX Runtime 私有依赖、持久化批量/单图打标队列、人工 Caption 保护、取消和重启恢复已经接入 UI；真实动漫图片离线推理、签名 ZIP 安装及公开 Range 首尾分片均已验证。Anima Trainer 现已具备签名 ZIP、固定上游源码与 Windows CUDA 12.6 依赖、SQLite 任务/尝试/快照、共享 GPU 协调、取消进程树、OOM 建议、结果 LoRA 自动登记以及参数与任务 UI；Trainer v2 已在 RTX 4060 Laptop 8GB 上以 5 张真实图片完成 512 分辨率、Rank 8 的完整训练并生成 23MB safetensors。浏览器设备码授权、服务端哈希存储、幂等换取可撤销会话、Windows Credential Manager、离线账号状态和自适应账号 UI 已落地。图库同步 Worker 现已完成账号原子绑定、4 MiB 分片、断点、整体哈希、隐私、失败恢复和主站免计费正式图库发布；网站 LoRA 目录支持公开/本人私有权限、单段 Range 续传、哈希校验和 UI 一键原子安装。软件更新现已完成 `application` 签名契约、SQLite 状态、在线断点下载、离线双文件导入、应用前二次验签、可见更新助手、自动重启、实际版本终态收敛、可信缓存回滚和响应式更新页面；NSIS 已内嵌微软 WebView2 Evergreen 离线安装器，无 GPU、4/6/8 GiB 显存分级门禁和磁盘不足预检使用生产判断函数完成回归测试。
 
 两个连续签名版本的真实门禁已经完成：0.1.1 通过生产稳定通道升级到 0.1.2，随后使用本地可信缓存回滚到 0.1.1，两个 NSIS 辅助进程退出码均为 0；重新安装 0.1.2 后状态再次收敛为最新。升级和回滚前后的业务表行数、模型目录与 6.5GB Runtime 文件统计完全一致。测试同时发现 Windows PowerShell 在继承 PowerShell 7 模块路径时缺少 `Get-FileHash`，现已改为不依赖模块的 .NET SHA-256。详细直接证据和未覆盖项见 [`desktop-validation-matrix.md`](desktop-validation-matrix.md)。
 

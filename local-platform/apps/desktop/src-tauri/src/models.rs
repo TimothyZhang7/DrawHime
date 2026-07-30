@@ -156,6 +156,38 @@ pub struct DesktopTrainingCaptionUpdateInput {
     pub caption: Option<String>,
 }
 
+/** 删除单张本地训练图片的输入。 */
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopTrainingAssetDeleteInput {
+    pub dataset_id: String,
+    pub asset_id: String,
+}
+
+/** 批量读取训练标签中英对照的输入。 */
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopTrainingTagTranslationInput {
+    pub tags: Vec<String>,
+}
+
+/** 单个训练标签的翻译与稳定颜色。 */
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopTrainingTagTranslationItem {
+    pub tag: String,
+    pub translated: String,
+    pub color: String,
+    pub source: String,
+}
+
+/** 桌面训练标签批量翻译结果。 */
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopTrainingTagTranslationView {
+    pub translations: Vec<DesktopTrainingTagTranslationItem>,
+}
+
 /** 仅包含训练集 ID 的幂等命令输入。 */
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]

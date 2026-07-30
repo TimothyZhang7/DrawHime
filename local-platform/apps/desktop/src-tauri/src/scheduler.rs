@@ -439,12 +439,12 @@ fn validate_job_input(input: &DesktopLocalJobCreateInput) -> Result<(), String> 
     {
         return Err("负面提示词超过 100000 字符".into());
     }
-    if !(64..=2048).contains(&input.width)
-        || !(64..=2048).contains(&input.height)
+    if !(64..=1536).contains(&input.width)
+        || !(64..=1536).contains(&input.height)
         || input.width % 8 != 0
         || input.height % 8 != 0
     {
-        return Err("生成宽高必须是 64–2048 范围内的 8 倍数".into());
+        return Err("生成宽高必须是 64–1536 范围内的 8 倍数".into());
     }
     if !matches!(input.quality_preset.as_str(), "fast" | "quality" | "extreme" | "custom") {
         return Err("生成质量预设不受支持".into());
@@ -468,8 +468,8 @@ fn validate_job_input(input: &DesktopLocalJobCreateInput) -> Result<(), String> 
     if !matches!(input.privacy.as_str(), "public" | "private") {
         return Err("图库权限不正确".into());
     }
-    if input.loras.len() > 4 || input.loras.iter().any(|lora| !(-2.0..=2.0).contains(&lora.strength) || !lora.strength.is_finite() || !(-2.0..=2.0).contains(&lora.clip_strength) || !lora.clip_strength.is_finite()) {
-        return Err("LoRA 最多选择 4 个，模型与 CLIP 强度必须在 -2–2 之间".into());
+    if input.loras.iter().any(|lora| !(-2.0..=2.0).contains(&lora.strength) || !lora.strength.is_finite() || !(-2.0..=2.0).contains(&lora.clip_strength) || !lora.clip_strength.is_finite()) {
+        return Err("LoRA 模型与 CLIP 强度必须在 -2–2 之间".into());
     }
     let unique_ids = input.loras.iter().map(|lora| lora.id.as_str()).collect::<std::collections::HashSet<_>>();
     if unique_ids.len() != input.loras.len() { return Err("同一 LoRA 不能重复选择".into()); }

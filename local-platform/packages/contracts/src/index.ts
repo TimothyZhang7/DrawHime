@@ -1059,6 +1059,12 @@ export const desktopTrainingCaptionUpdateInputSchema = z.object({
   caption: z.string().trim().max(10000).nullable(),
 });
 
+/** 桌面端删除单张训练图片的输入。 */
+export const desktopTrainingAssetDeleteInputSchema = z.object({ datasetId: z.string().uuid(), assetId: z.string().uuid() });
+
+/** 桌面端通过设备会话批量读取训练标签翻译。 */
+export const desktopTrainingTagTranslationInputSchema = z.object({ tags: z.array(z.string().trim().min(1).max(200)).min(1).max(200) });
+
 /** 桌面端训练集 ID 输入，供确认等幂等命令使用。 */
 export const desktopTrainingDatasetIdInputSchema = z.object({ datasetId: z.string().uuid() });
 
@@ -1189,8 +1195,8 @@ export const desktopLocalJobCreateInputSchema = z.object({
   modelId: z.string().uuid(),
   prompt: z.string().trim().min(1).max(100000),
   negativePrompt: z.string().max(100000).nullable(),
-  width: z.number().int().min(64).max(2048),
-  height: z.number().int().min(64).max(2048),
+  width: z.number().int().min(64).max(1536),
+  height: z.number().int().min(64).max(1536),
   qualityPreset: desktopGenerationQualityPresetSchema,
   steps: z.number().int().min(1).max(80),
   cfg: z.number().min(0.1).max(20),
@@ -1204,7 +1210,7 @@ export const desktopLocalJobCreateInputSchema = z.object({
   qualityPromptEnabled: z.boolean(),
   defaultNegativeEnabled: z.boolean(),
   seed: z.number().int().min(0).max(2147483647).nullable(),
-  loras: z.array(desktopLocalLoraSelectionSchema).max(4).refine((items) => new Set(items.map((item) => item.id)).size === items.length, "同一 LoRA 不能重复选择"),
+  loras: z.array(desktopLocalLoraSelectionSchema).refine((items) => new Set(items.map((item) => item.id)).size === items.length, "同一 LoRA 不能重复选择"),
   privacy: desktopGalleryPrivacySchema,
 });
 
@@ -1500,6 +1506,8 @@ export type DesktopTrainingDatasetCreateInput = z.infer<typeof desktopTrainingDa
 export type DesktopTrainingTriggerWordsUpdateInput = z.infer<typeof desktopTrainingTriggerWordsUpdateInputSchema>;
 export type DesktopTrainingImagesAddInput = z.infer<typeof desktopTrainingImagesAddInputSchema>;
 export type DesktopTrainingCaptionUpdateInput = z.infer<typeof desktopTrainingCaptionUpdateInputSchema>;
+export type DesktopTrainingAssetDeleteInput = z.infer<typeof desktopTrainingAssetDeleteInputSchema>;
+export type DesktopTrainingTagTranslationInput = z.infer<typeof desktopTrainingTagTranslationInputSchema>;
 export type DesktopTrainingDatasetIdInput = z.infer<typeof desktopTrainingDatasetIdInputSchema>;
 export type DesktopCaptionJobCreateInput = z.infer<typeof desktopCaptionJobCreateInputSchema>;
 export type DesktopCaptionJobItemView = z.infer<typeof desktopCaptionJobItemViewSchema>;
