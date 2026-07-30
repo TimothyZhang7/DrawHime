@@ -459,10 +459,117 @@ select:focus-visible {
   margin-top: 14px;
 }
 
-/* 合并页面使用单一滚动流，子功能块之间保持稳定间距。 */
-.merged-page {
+/* 所有分页容器显式服从 hidden，避免作者级 display 样式覆盖浏览器默认隐藏规则。 */
+.desktop-main > [hidden],
+.workspace-page > [hidden] {
+  display: none !important;
+}
+
+/* 合并后的主入口使用二级分页，不把多个完整功能页堆叠到同一滚动窗口。 */
+.workspace-page {
   display: grid;
-  gap: 16px;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 12px;
+  min-width: 0;
+}
+
+.workspace-tabs {
+  position: sticky;
+  z-index: 7;
+  top: 0;
+  min-width: 0;
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  margin-top: 12px;
+  padding: 4px;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--panel) 94%, transparent);
+  box-shadow: 0 8px 24px var(--shadow-card);
+  backdrop-filter: blur(16px);
+  scrollbar-width: thin;
+}
+
+.workspace-tabs button {
+  position: relative;
+  min-width: 118px;
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex: 1 0 auto;
+  padding: 0 10px;
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  transition: border-color .14s ease, background-color .14s ease, color .14s ease;
+}
+
+.workspace-tabs button::after {
+  position: absolute;
+  right: 10px;
+  bottom: 0;
+  left: 10px;
+  height: 2px;
+  content: "";
+  border-radius: 2px 2px 0 0;
+  background: transparent;
+}
+
+.workspace-tabs button:hover {
+  background: var(--panel-raised);
+  color: var(--text);
+}
+
+.workspace-tabs button.active {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--accent-inset);
+}
+
+.workspace-tabs button.active::after {
+  background: var(--accent);
+}
+
+.workspace-tabs span {
+  overflow: hidden;
+  font-size: 9px;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-tabs small {
+  flex: 0 0 auto;
+  padding: 3px 5px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--panel-muted);
+  color: var(--subtle);
+  font-size: 7px;
+  font-weight: 750;
+}
+
+.workspace-tabs button.active small {
+  border-color: var(--accent-border);
+  background: var(--panel);
+  color: var(--accent);
+}
+
+.workspace-page > div:not([hidden]) {
+  min-width: 0;
+  animation: workspace-pane-enter .16s ease-out;
+}
+
+@keyframes workspace-pane-enter {
+  from { opacity: .55; transform: translateY(3px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 /* AI 配置使用紧凑工业化分区，密钥状态和可执行动作保持清晰可见。 */
@@ -608,12 +715,9 @@ select:focus-visible {
 @media (max-width: 760px) {
   .ai-settings-grid { grid-template-columns: 1fr; }
   .ai-enabled { grid-column: 1; }
-}
-
-.merged-page > .desktop-page + .desktop-page {
-  margin-top: 0;
-  padding-top: 16px;
-  border-top: 1px solid var(--border);
+  .workspace-tabs { margin-top: 9px; }
+  .workspace-tabs button { min-width: 104px; min-height: 39px; padding: 0 8px; }
+  .workspace-tabs small { display: none; }
 }
 
 .overview-hero {

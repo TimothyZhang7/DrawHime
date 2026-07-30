@@ -35,6 +35,7 @@ try {
       trainingReady: result.trainingReady,
       bannerText: result.bannerText,
       navigationPages: result.navigationPages,
+      pageIsolation: result.pageIsolation,
       coreSubmissionBlocked: result.coreSubmissionError.includes("本地生成当前不可用"),
       repositoryEvidence,
     };
@@ -226,11 +227,21 @@ function buildProbeExpression() {
     const shell = document.querySelector('.desktop-shell');
     if (!shell) throw new Error('桌面工作区未完成加载');
     const navigationPages = [];
+    const pageIsolation = [];
     for (const button of document.querySelectorAll('.desktop-sidebar nav button')) {
       button.click();
       await delay(50);
       const banner = document.querySelector('.environment-banner');
       navigationPages.push({ label: button.textContent.trim(), bannerVisible: Boolean(banner && banner.getClientRects().length) });
+      const visibleMainPanels = Array.from(document.querySelectorAll('.desktop-main > div')).filter((panel) => panel.getClientRects().length && panel.querySelector(':scope > .desktop-page, :scope > .workspace-tabs')).length;
+      const activeWorkspace = document.querySelector('.desktop-main > .workspace-page:not([hidden])');
+      const secondaryCounts = [];
+      for (const secondaryButton of activeWorkspace?.querySelectorAll(':scope > .workspace-tabs button') || []) {
+        secondaryButton.click();
+        await delay(30);
+        secondaryCounts.push(Array.from(activeWorkspace.children).filter((child) => child.matches('div:not([hidden])') && child.getClientRects().length).length);
+      }
+      pageIsolation.push({ label: button.textContent.trim(), visibleMainPanels, secondaryCounts });
     }
     let coreSubmissionError = '';
     try {
@@ -248,6 +259,7 @@ function buildProbeExpression() {
       trainingReady: shell.dataset.trainingReady === 'true',
       bannerText: banner?.textContent?.trim() || '',
       navigationPages,
+      pageIsolation,
       coreSubmissionError,
     };
   })()`;
@@ -273,6 +285,7 @@ function validateProbe(result, expectNoGpu) {
   const expectedNavigation = ["概览 / 账号", "本地生成", "LoRA 训练", "模型仓库", "LoRA 仓库", "图库", "设置"];
   const actualNavigation = Array.isArray(result?.navigationPages) ? result.navigationPages.map((item) => item.label) : [];
   if (JSON.stringify(actualNavigation) !== JSON.stringify(expectedNavigation)) throw new Error(`桌面导航结构异常：${actualNavigation.join(" / ")}`);
+  if (!Array.isArray(result.pageIsolation) || result.pageIsolation.some((item) => item.visibleMainPanels !== 1 || item.secondaryCounts.some((count) => count !== 1))) throw new Error("桌面主分页或二级分页存在内容堆叠");
   if (result.environmentStatus !== "ready" && result.navigationPages.some((item) => !item.bannerVisible)) throw new Error("环境异常横幅未在全部导航页持续显示");
   if (expectNoGpu) {
     if (result.environmentStatus !== "blocked") throw new Error(`无 GPU 环境状态应为 blocked，实际为 ${result.environmentStatus}`);
