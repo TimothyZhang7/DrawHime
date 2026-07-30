@@ -131,6 +131,14 @@ pub struct DesktopTrainingDatasetCreateInput {
     pub trigger_words: Vec<String>,
 }
 
+/** 修改本地训练集触发词的输入。 */
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopTrainingTriggerWordsUpdateInput {
+    pub dataset_id: String,
+    pub trigger_words: Vec<String>,
+}
+
 /** 向本地训练集批量导入图片的输入。 */
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]

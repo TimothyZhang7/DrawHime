@@ -22,7 +22,7 @@ mod website_media;
 mod website_model;
 mod software_update;
 
-use models::{DesktopAiAnalyzeInput, DesktopAiAnalyzeView, DesktopAiSettings, DesktopAiSettingsUpdate, DesktopBootstrapView, DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopEnvironmentReport, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopOfflineUpdateImportInput, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView, DesktopSettings, DesktopSoftwareUpdateView, DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetIdInput, DesktopTrainingDatasetView, DesktopTrainingImagesAddInput, DesktopTrainingJobCreateInput, DesktopTrainingJobView, DesktopWebsiteLoraView, DesktopWebsiteModelView, GalleryPublicationInput, GallerySyncItem};
+use models::{DesktopAiAnalyzeInput, DesktopAiAnalyzeView, DesktopAiSettings, DesktopAiSettingsUpdate, DesktopBootstrapView, DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopEnvironmentReport, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopOfflineUpdateImportInput, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView, DesktopSettings, DesktopSoftwareUpdateView, DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetIdInput, DesktopTrainingDatasetView, DesktopTrainingImagesAddInput, DesktopTrainingJobCreateInput, DesktopTrainingJobView, DesktopTrainingTriggerWordsUpdateInput, DesktopWebsiteLoraView, DesktopWebsiteModelView, GalleryPublicationInput, GallerySyncItem};
 use std::{env, path::PathBuf};
 use storage::DesktopState;
 use tauri::{Manager, State};
@@ -289,6 +289,12 @@ fn desktop_list_training_datasets(state: State<'_, DesktopState>) -> Result<Vec<
     state.list_training_datasets()
 }
 
+/** 更新训练集触发词，后续训练任务读取新值，既有任务快照保持不变。 */
+#[tauri::command]
+fn desktop_update_training_trigger_words(state: State<'_, DesktopState>, input: DesktopTrainingTriggerWordsUpdateInput) -> Result<DesktopTrainingDatasetView, String> {
+    state.update_training_trigger_words(input)
+}
+
 #[tauri::command]
 async fn desktop_add_training_images(state: State<'_, DesktopState>, input: DesktopTrainingImagesAddInput) -> Result<DesktopTrainingDatasetView, String> {
     let database_path = state.database_path.clone();
@@ -412,7 +418,7 @@ pub fn run() {
                 .map_err(|error| format!("创建桌面窗口失败：{error}"))?;
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![desktop_account_status, desktop_start_authorization, desktop_poll_authorization, desktop_sign_out, desktop_bootstrap, desktop_inspect_environment, desktop_save_settings, desktop_load_ai_settings, desktop_save_ai_settings, desktop_test_ai_settings, desktop_ai_analyze_image, desktop_enqueue_gallery_publication, desktop_list_gallery_sync_queue, desktop_load_resource_catalog, desktop_download_resource, desktop_pause_resource_download, desktop_install_resource, desktop_runtime_status, desktop_start_runtime, desktop_stop_runtime, desktop_self_test_runtime, desktop_import_local_model, desktop_list_local_models, desktop_import_local_lora, desktop_list_local_loras, desktop_load_website_models, desktop_load_website_loras, desktop_install_website_lora, desktop_software_update_status, desktop_download_software_update, desktop_import_offline_update, desktop_apply_software_update, desktop_rollback_software_update, desktop_create_training_dataset, desktop_list_training_datasets, desktop_add_training_images, desktop_update_training_caption, desktop_create_caption_job, desktop_list_caption_jobs, desktop_cancel_caption_job, desktop_confirm_training_dataset, desktop_create_training_job, desktop_list_training_jobs, desktop_cancel_training_job, desktop_create_local_job, desktop_list_local_jobs, desktop_cancel_local_job])
+        .invoke_handler(tauri::generate_handler![desktop_account_status, desktop_start_authorization, desktop_poll_authorization, desktop_sign_out, desktop_bootstrap, desktop_inspect_environment, desktop_save_settings, desktop_load_ai_settings, desktop_save_ai_settings, desktop_test_ai_settings, desktop_ai_analyze_image, desktop_enqueue_gallery_publication, desktop_list_gallery_sync_queue, desktop_load_resource_catalog, desktop_download_resource, desktop_pause_resource_download, desktop_install_resource, desktop_runtime_status, desktop_start_runtime, desktop_stop_runtime, desktop_self_test_runtime, desktop_import_local_model, desktop_list_local_models, desktop_import_local_lora, desktop_list_local_loras, desktop_load_website_models, desktop_load_website_loras, desktop_install_website_lora, desktop_software_update_status, desktop_download_software_update, desktop_import_offline_update, desktop_apply_software_update, desktop_rollback_software_update, desktop_create_training_dataset, desktop_list_training_datasets, desktop_update_training_trigger_words, desktop_add_training_images, desktop_update_training_caption, desktop_create_caption_job, desktop_list_caption_jobs, desktop_cancel_caption_job, desktop_confirm_training_dataset, desktop_create_training_job, desktop_list_training_jobs, desktop_cancel_training_job, desktop_create_local_job, desktop_list_local_jobs, desktop_cancel_local_job])
         .run(tauri::generate_context!())
         .expect("DrawHime Desktop 启动失败");
 }

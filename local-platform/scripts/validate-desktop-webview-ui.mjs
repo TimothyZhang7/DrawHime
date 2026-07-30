@@ -92,15 +92,19 @@ async function captureFontSettings(client, directory) {
     save.click();
     await delay(350);
     const restored = Number(getComputedStyle(document.documentElement).getPropertyValue('--desktop-font-scale'));
-    return { original, target, applied, restored, optionValues: [...select.options].map((option) => Number(option.value)), horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth };
+    const notice = document.querySelector('.desktop-notice');
+    const noticePosition = notice ? getComputedStyle(notice).position : null;
+    await delay(4_300);
+    const noticeCleared = !document.querySelector('.desktop-notice');
+    return { original, target, applied, restored, optionValues: [...select.options].map((option) => Number(option.value)), noticePosition, noticeCleared, horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth };
   })()`);
-  if (result.applied !== result.target || result.restored !== result.original || JSON.stringify(result.optionValues) !== JSON.stringify([1, 1.1, 1.2, 1.3]) || result.horizontalOverflow) throw new Error(`字体设置验收失败：${JSON.stringify(result)}`);
+  if (result.applied !== result.target || result.restored !== result.original || JSON.stringify(result.optionValues) !== JSON.stringify([1, 1.1, 1.2, 1.3]) || result.noticePosition !== 'fixed' || !result.noticeCleared || result.horizontalOverflow) throw new Error(`字体与瞬时提示验收失败：${JSON.stringify(result)}`);
   const screenshot = "font-settings.png";
   await writeFile(path.join(targetDirectory, screenshot), Buffer.from(await client.captureScreenshot(), "base64"));
   return { ...result, screenshot };
 }
 
-/** 验证生成双栏、悬浮帮助、独立打标入口和分步骤训练入口的真实布局。 */
+/** 验证生成窄预览、三栏参数、根级悬浮帮助、训练集列表和分步骤训练入口。 */
 async function captureGenerationAndTrainingPages(client, directory) {
   const targetDirectory = path.resolve(directory);
   await mkdir(targetDirectory, { recursive: true });
@@ -114,19 +118,31 @@ async function captureGenerationAndTrainingPages(client, directory) {
     const preview = layout?.querySelector('.generation-preview');
     const fields = [...(layout?.querySelectorAll('.generation-parameter') || [])];
     const controlsFit = fields.every((field) => { const control = field.querySelector('input, select'); return !control || control.getBoundingClientRect().right <= field.getBoundingClientRect().right + 1; });
+    const firstRow = fields.slice(0, 3).map((field) => Math.round(field.getBoundingClientRect().top));
+    const help = layout?.querySelector('.parameter-help');
+    help?.focus();
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    const tooltip = document.querySelector('.parameter-tooltip');
+    const tooltipVisible = !help || Boolean(tooltip?.getClientRects().length && Number(getComputedStyle(tooltip).zIndex) >= 13000);
+    help?.blur();
     return {
       layoutVisible: Boolean(layout?.getClientRects().length),
       twoColumns: Boolean(form && preview && Math.abs(form.getBoundingClientRect().top - preview.getBoundingClientRect().top) < 2 && preview.getBoundingClientRect().left > form.getBoundingClientRect().left),
+      previewNarrower: Boolean(form && preview && preview.getBoundingClientRect().width < form.getBoundingClientRect().width),
+      threeParameterColumns: fields.length < 3 || new Set(firstRow).size === 1,
       parameterFields: fields.length,
       helpIcons: layout?.querySelectorAll('.parameter-help').length || 0,
+      tooltipVisible,
       emptyState: Boolean(layout?.querySelector('.resource-unconfigured')),
       previewVisible: Boolean(preview?.getClientRects().length),
+      sidebarThemeControls: document.querySelectorAll('.sidebar-theme-switch button').length,
+      topbarRecheckVisible: Boolean(document.querySelector('.desktop-topbar .recheck-button')),
       controlsFit,
       horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
     };
   })()`);
   const parameterHelpReady = generation.parameterFields > 0 ? generation.helpIcons >= generation.parameterFields : generation.emptyState;
-  if (!generation.layoutVisible || !generation.twoColumns || !parameterHelpReady || !generation.previewVisible || !generation.controlsFit || generation.horizontalOverflow) throw new Error(`本地生成双栏验收失败：${JSON.stringify(generation)}`);
+  if (!generation.layoutVisible || !generation.twoColumns || !generation.previewNarrower || !generation.threeParameterColumns || !parameterHelpReady || !generation.tooltipVisible || !generation.previewVisible || generation.sidebarThemeControls !== 3 || generation.topbarRecheckVisible || !generation.controlsFit || generation.horizontalOverflow) throw new Error(`本地生成布局验收失败：${JSON.stringify(generation)}`);
   const generationFile = "generation-workspace.png";
   await writeFile(path.join(targetDirectory, generationFile), Buffer.from(await client.captureScreenshot(), "base64"));
 
@@ -136,9 +152,9 @@ async function captureGenerationAndTrainingPages(client, directory) {
     navigation.click();
     await new Promise((resolve) => setTimeout(resolve, 250));
     const page = document.querySelector('.captioning-page');
-    return { visible: Boolean(page?.getClientRects().length), datasetEditor: Boolean(page?.querySelector('.training-create, .training-editor')), trainingParametersLeaked: Boolean(page?.querySelector('.desktop-training-parameters')), horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth };
+    return { visible: Boolean(page?.getClientRects().length), datasetLibrary: Boolean(page?.querySelector('.caption-dataset-library')), splitWorkspaceLeaked: Boolean(page?.querySelector('.training-workspace')), trainingParametersLeaked: Boolean(page?.querySelector('.desktop-training-parameters')), horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth };
   })()`);
-  if (!captioning.visible || !captioning.datasetEditor || captioning.trainingParametersLeaked || captioning.horizontalOverflow) throw new Error(`训练集打标独立页面验收失败：${JSON.stringify(captioning)}`);
+  if (!captioning.visible || !captioning.datasetLibrary || captioning.splitWorkspaceLeaked || captioning.trainingParametersLeaked || captioning.horizontalOverflow) throw new Error(`训练集列表页面验收失败：${JSON.stringify(captioning)}`);
   const captioningFile = "captioning-workspace.png";
   await writeFile(path.join(targetDirectory, captioningFile), Buffer.from(await client.captureScreenshot(), "base64"));
 

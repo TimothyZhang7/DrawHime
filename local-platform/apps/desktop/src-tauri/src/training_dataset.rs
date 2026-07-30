@@ -3,6 +3,7 @@
 use crate::models::{
     DesktopTrainingAssetView, DesktopTrainingCaptionUpdateInput,
     DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetView, DesktopTrainingImagesAddInput,
+    DesktopTrainingTriggerWordsUpdateInput,
 };
 use chrono::Utc;
 use image::{ImageFormat, ImageReader};
@@ -52,6 +53,18 @@ pub fn list_datasets(database: &Connection, app_data_dir: &Path) -> Result<Vec<D
     let mut datasets = rows.collect::<Result<Vec<_>, _>>().map_err(|error| format!("解析本地训练集失败：{error}"))?;
     for dataset in &mut datasets { dataset.assets = read_assets(database, app_data_dir, &dataset.id)?; }
     Ok(datasets)
+}
+
+/** 更新训练集触发词；已提交训练任务保留原快照，当前训练集确认状态不受元数据修改影响。 */
+pub fn update_trigger_words(database: &Connection, app_data_dir: &Path, input: DesktopTrainingTriggerWordsUpdateInput) -> Result<DesktopTrainingDatasetView, String> {
+    validate_uuid(&input.dataset_id, "训练集 ID")?;
+    let trigger_words = validate_trigger_words(input.trigger_words)?;
+    let trigger_words_json = serde_json::to_string(&trigger_words).map_err(|error| format!("序列化训练触发词失败：{error}"))?;
+    let now = Utc::now().to_rfc3339();
+    if database.execute("UPDATE local_training_datasets SET trigger_words_json=?2,updated_at=?3 WHERE id=?1", params![input.dataset_id,trigger_words_json,now]).map_err(|error| format!("更新训练触发词失败：{error}"))? != 1 {
+        return Err("训练集不存在".into());
+    }
+    read_dataset_with_assets(database, app_data_dir, &input.dataset_id)
 }
 
 /** 原子导入多张真实图片；任一文件失败时本批次不产生半完成数据库记录。 */
@@ -222,6 +235,8 @@ mod tests {
         let temporary = tempfile::tempdir().expect("创建训练集测试目录");
         let state = DesktopState::initialize(temporary.path()).expect("初始化桌面状态");
         let dataset = state.create_training_dataset(DesktopTrainingDatasetCreateInput { title: "测试角色".into(), r#type: "character".into(), trigger_words: vec!["dh_test".into()] }).expect("创建训练集");
+        let updated = state.update_training_trigger_words(DesktopTrainingTriggerWordsUpdateInput { dataset_id: dataset.id.clone(), trigger_words: vec!["dh_updated".into(), "DH_UPDATED".into()] }).expect("更新训练触发词");
+        assert_eq!(updated.trigger_words, vec!["dh_updated"]);
         let mut source_paths = Vec::new();
         for (index, extension) in ["png", "jpg", "webp", "png", "jpg"].iter().enumerate() {
             let path = temporary.path().join(format!("source-{index}.{extension}"));

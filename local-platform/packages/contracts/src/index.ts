@@ -1040,6 +1040,12 @@ export const desktopTrainingDatasetCreateInputSchema = z.object({
   triggerWords: z.array(z.string().trim().min(1).max(100)).max(50),
 });
 
+/** 桌面端修改训练集触发词的输入。 */
+export const desktopTrainingTriggerWordsUpdateInputSchema = z.object({
+  datasetId: z.string().uuid(),
+  triggerWords: z.array(z.string().trim().min(1).max(100)).max(50),
+});
+
 /** 桌面端向训练集批量导入图片的输入。 */
 export const desktopTrainingImagesAddInputSchema = z.object({
   datasetId: z.string().uuid(),
@@ -1491,6 +1497,7 @@ export type DesktopLocalLoraImportInput = z.infer<typeof desktopLocalLoraImportI
 export type DesktopLocalLoraSelection = z.infer<typeof desktopLocalLoraSelectionSchema>;
 export type DesktopTrainingDatasetView = z.infer<typeof desktopTrainingDatasetViewSchema>;
 export type DesktopTrainingDatasetCreateInput = z.infer<typeof desktopTrainingDatasetCreateInputSchema>;
+export type DesktopTrainingTriggerWordsUpdateInput = z.infer<typeof desktopTrainingTriggerWordsUpdateInputSchema>;
 export type DesktopTrainingImagesAddInput = z.infer<typeof desktopTrainingImagesAddInputSchema>;
 export type DesktopTrainingCaptionUpdateInput = z.infer<typeof desktopTrainingCaptionUpdateInputSchema>;
 export type DesktopTrainingDatasetIdInput = z.infer<typeof desktopTrainingDatasetIdInputSchema>;

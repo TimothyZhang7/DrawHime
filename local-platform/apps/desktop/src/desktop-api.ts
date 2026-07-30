@@ -1,5 +1,5 @@
 /** 本文件封装 WebView 到 Tauri 本地核心的受类型约束命令。 */
-import type { DesktopAccountView, DesktopAuthorizationRequestView, DesktopAuthorizationStartRequest, DesktopBootstrapView, DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopEnvironmentReport, DesktopGalleryPrivacy, DesktopGallerySyncItem, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopOfflineUpdateImportInput, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView, DesktopSettings, DesktopSettingsUpdate, DesktopSoftwareUpdateView, DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetIdInput, DesktopTrainingDatasetView, DesktopTrainingImagesAddInput, DesktopTrainingJobCreateInput, DesktopTrainingJobView, DesktopWebsiteLoraInstallProgress, DesktopWebsiteLoraView, DesktopWebsiteModelView } from "@drawhime/contracts";
+import type { DesktopAccountView, DesktopAuthorizationRequestView, DesktopAuthorizationStartRequest, DesktopBootstrapView, DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopEnvironmentReport, DesktopGalleryPrivacy, DesktopGallerySyncItem, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopOfflineUpdateImportInput, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView, DesktopSettings, DesktopSettingsUpdate, DesktopSoftwareUpdateView, DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetIdInput, DesktopTrainingDatasetView, DesktopTrainingImagesAddInput, DesktopTrainingJobCreateInput, DesktopTrainingJobView, DesktopTrainingTriggerWordsUpdateInput, DesktopWebsiteLoraInstallProgress, DesktopWebsiteLoraView, DesktopWebsiteModelView } from "@drawhime/contracts";
 import type { DesktopAiAnalyzeInput, DesktopAiAnalyzeView, DesktopAiSettings, DesktopAiSettingsUpdate } from "@drawhime/contracts";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -87,6 +87,8 @@ export function rollbackDesktopSoftwareUpdate(): Promise<DesktopSoftwareUpdateVi
 export function createDesktopTrainingDataset(input: DesktopTrainingDatasetCreateInput): Promise<DesktopTrainingDatasetView> { return invoke("desktop_create_training_dataset", { input }); }
 /** 读取全部本地训练集与图片 Caption。 */
 export function listDesktopTrainingDatasets(): Promise<DesktopTrainingDatasetView[]> { return invoke("desktop_list_training_datasets"); }
+/** 更新训练集触发词并返回最新持久化视图。 */
+export function updateDesktopTrainingTriggerWords(input: DesktopTrainingTriggerWordsUpdateInput): Promise<DesktopTrainingDatasetView> { return invoke("desktop_update_training_trigger_words", { input }); }
 /** 使用原生选择结果批量导入训练图片。 */
 export function addDesktopTrainingImages(input: DesktopTrainingImagesAddInput): Promise<DesktopTrainingDatasetView> { return invoke("desktop_add_training_images", { input }); }
 /** 保存单张训练图片 Caption。 */

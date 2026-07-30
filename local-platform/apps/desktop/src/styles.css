@@ -286,6 +286,17 @@ select:focus-visible {
   transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
 }
 
+.sidebar-theme-switch {
+  width: 100%;
+  flex: 0 0 auto;
+  justify-content: space-between;
+  margin: 0 0 8px;
+}
+
+.sidebar-theme-switch button {
+  flex: 1;
+}
+
 .core-status-icon {
   position: absolute;
   top: 9px;
@@ -484,17 +495,25 @@ select:focus-visible {
 }
 
 .desktop-notice {
+  position: fixed;
+  top: 16px;
+  right: 18px;
+  z-index: 12000;
+  width: min(360px, calc(100vw - 36px));
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-top: 10px;
+  gap: 12px;
   padding: 8px 10px;
   border: 1px solid var(--accent-border);
   border-radius: 5px;
   background: var(--accent-soft);
   color: var(--accent);
   font-size: 9px;
+  box-shadow: 0 12px 34px var(--shadow);
 }
+
+.desktop-notice span { min-width: 0; line-height: 1.5; }
 
 .desktop-notice button {
   border: 0;
@@ -2626,13 +2645,14 @@ select:focus-visible {
 
 .training-asset-list {
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
 .training-asset-list > article {
   min-width: 0;
   display: grid;
-  grid-template-columns: 170px minmax(0, 1fr);
+  grid-template-columns: 118px minmax(0, 1fr);
   gap: 10px;
   padding: 8px;
   border: 1px solid var(--border);
@@ -2642,7 +2662,7 @@ select:focus-visible {
 
 .training-asset-image {
   position: relative;
-  height: 128px;
+  height: 148px;
   overflow: hidden;
   border-radius: 4px;
   background: var(--panel-muted);
@@ -3899,6 +3919,8 @@ select:focus-visible {
     position: static;
   }
 
+  .sidebar-theme-switch { display: none; }
+
   .desktop-main {
     grid-column: 1;
     grid-row: 2;
@@ -4130,7 +4152,7 @@ select:focus-visible {
 .generate-layout {
   height: calc(100vh / var(--desktop-font-scale) - 98px);
   min-height: 560px;
-  grid-template-columns: minmax(430px, .9fr) minmax(330px, 1.1fr);
+  grid-template-columns: minmax(610px, 1.45fr) minmax(300px, .75fr);
   align-items: stretch;
   overflow: hidden;
 }
@@ -4156,7 +4178,7 @@ select:focus-visible {
 }
 
 .generation-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -4209,7 +4231,6 @@ select:focus-visible {
 /* 参数说明只在帮助图标悬浮或键盘聚焦时显示，避免长文本改变控件位置。 */
 .parameter-help {
   position: relative;
-  z-index: 5;
   width: 15px;
   height: 15px;
   display: inline-grid;
@@ -4224,15 +4245,12 @@ select:focus-visible {
   height: 13px;
 }
 
-.parameter-help::after {
-  position: absolute;
-  top: calc(100% + 7px);
-  left: 50%;
-  z-index: 30;
+.parameter-tooltip {
+  position: fixed;
+  z-index: 13000;
   width: max-content;
-  max-width: 250px;
+  max-width: min(280px, calc(100vw - 24px));
   padding: 7px 8px;
-  content: attr(data-tooltip);
   border: 1px solid var(--border-strong);
   border-radius: 3px;
   background: var(--panel-raised);
@@ -4241,23 +4259,17 @@ select:focus-visible {
   font-size: 8px;
   font-weight: 500;
   line-height: 1.55;
-  opacity: 0;
   pointer-events: none;
-  transform: translate(-50%, -3px);
-  transition: opacity .12s ease, transform .12s ease;
+  transform: translateX(-50%);
   white-space: normal;
 }
+
+.parameter-tooltip.is-above { transform: translate(-50%, -100%); }
 
 .parameter-help:hover,
 .parameter-help:focus-visible {
   color: var(--accent);
   outline: 0;
-}
-
-.parameter-help:hover::after,
-.parameter-help:focus-visible::after {
-  opacity: 1;
-  transform: translate(-50%, 0);
 }
 
 .generation-presets {
@@ -4487,6 +4499,92 @@ select:focus-visible {
   max-width: 1440px;
 }
 
+.captioning-page { max-width: none; }
+
+.caption-dataset-library {
+  display: grid;
+  gap: 10px;
+}
+
+.caption-dataset-library > header,
+.training-trigger-editor,
+.training-trigger-editor label {
+  display: flex;
+  align-items: center;
+}
+
+.caption-dataset-library > header { justify-content: space-between; }
+
+.caption-dataset-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.caption-dataset-grid > button {
+  min-width: 0;
+  min-height: 82px;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto 14px;
+  align-items: center;
+  gap: 9px;
+  padding: 11px;
+  border: 1px solid var(--border);
+  background: var(--panel-raised);
+  color: var(--text);
+  text-align: left;
+}
+
+.caption-dataset-grid > button:hover { border-color: var(--accent-border); background: var(--accent-soft); }
+.caption-dataset-grid > button > i { width: 34px; height: 34px; display: grid; place-items: center; background: var(--panel-muted); color: var(--accent); font-style: normal; }
+.caption-dataset-grid > button > i svg,
+.caption-dataset-grid > button > svg { width: 15px; }
+.caption-dataset-grid > button > span,
+.caption-dataset-grid > button strong,
+.caption-dataset-grid > button small,
+.caption-dataset-grid > button em { min-width: 0; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.caption-dataset-grid > button strong { font-size: 9px; }
+.caption-dataset-grid > button small { margin-top: 4px; color: var(--muted); font-size: 7px; }
+.caption-dataset-grid > button em { margin-top: 4px; color: var(--subtle); font-size: 7px; font-style: normal; }
+.caption-dataset-grid > button b { padding: 4px 6px; border: 1px solid var(--warning-border); background: var(--warning-soft); color: var(--warning); font-size: 7px; }
+.caption-dataset-grid > button b.is-review_ready { border-color: var(--accent-border); background: var(--accent-soft); color: var(--accent); }
+.caption-dataset-grid > button b.is-confirmed { border-color: var(--success-border); background: var(--success-soft); color: var(--success); }
+
+.training-dataset-detail { min-width: 0; }
+.training-dataset-detail > header > div:first-child { min-width: 0; }
+
+.training-back {
+  min-height: 26px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 7px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  background: var(--panel-muted);
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.training-back:hover { border-color: var(--accent-border); color: var(--accent); }
+.training-back svg { width: 13px; }
+
+.training-trigger-editor {
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 9px;
+  padding: 9px;
+  border: 1px solid var(--border);
+  background: var(--panel-muted);
+}
+
+.training-trigger-editor label { min-width: 0; flex: 1; gap: 8px; }
+.training-trigger-editor label span { flex: 0 0 auto; color: var(--muted); font-size: 8px; font-weight: 750; }
+.training-trigger-editor input { width: 100%; min-width: 0; height: 32px; padding: 0 8px; border: 1px solid var(--border); background: var(--control); color: var(--text); font-size: 8px; }
+.training-trigger-editor button { height: 32px; display: inline-flex; align-items: center; gap: 5px; padding: 0 10px; border: 1px solid var(--accent-border); background: var(--accent); color: #fff; font-size: 8px; font-weight: 800; }
+.training-trigger-editor button:disabled { cursor: not-allowed; opacity: .48; }
+.training-trigger-editor button svg { width: 13px; }
+
 .training-create > div {
   grid-template-columns: minmax(190px, 1fr) 140px minmax(190px, 1fr) auto;
   align-items: end;
@@ -4661,6 +4759,8 @@ select:focus-visible {
   .generation-form { max-height: none; overflow: visible; }
   .generation-form-scroll { overflow: visible; padding-right: 0; }
   .generation-preview { min-height: 560px; }
+  .training-asset-list { grid-template-columns: 1fr; }
+  .caption-dataset-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .training-create > div { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .training-dataset-list.is-expanded,
   .desktop-training-parameters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -4675,6 +4775,8 @@ select:focus-visible {
   .training-review-grid { grid-template-columns: 1fr; }
 
   .generation-preview { min-height: 430px; }
+  .caption-dataset-grid { grid-template-columns: 1fr; }
+  .training-trigger-editor { align-items: stretch; flex-direction: column; }
   .generation-preview > footer { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .training-stepper button span { display: none; }
 }

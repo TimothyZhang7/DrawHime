@@ -53,6 +53,7 @@
 | `desktop_list_local_loras` | desktop webview | desktop core | 返回当前设备已登记 LoRA 及实时文件可用性；本地任务最多选择 4 个不同内容的 LoRA，每个独立设置 0–1.5 强度 |
 | `desktop_create_training_dataset` | desktop webview | desktop core | 创建角色、画风或概念训练集并持久化标题和触发词，返回 `DesktopTrainingDatasetView` |
 | `desktop_list_training_datasets` | desktop webview | desktop core | 返回当前设备训练集、真实图片文件摘要、逐图 Caption 和确认状态；应用重启后仍以 SQLite 为准 |
+| `desktop_update_training_trigger_words` | desktop webview | desktop core | 校验、去重并更新当前训练集触发词；既有训练任务继续使用自己的不可变快照，新任务读取更新后的触发词 |
 | `desktop_add_training_images` | desktop webview | desktop core | 校验并原子复制用户选择的 PNG/JPEG/WebP，读取真实尺寸和 SHA-256；同训练集内容去重且总量不超过 200，添加后重新执行确认门禁 |
 | `desktop_update_training_caption` | desktop webview | desktop core | 逐图保存人工 Caption；修改后只使当前训练集回到待确认，不改写其他图片内容 |
 | `desktop_create_caption_job` | desktop webview | desktop core/caption scheduler | 按训练集或单张图片创建持久化离线打标任务；批量任务跳过人工 Caption，单图重新打标属于用户明确覆盖操作；对应 `DesktopCaptionJobCreateInput` 和 `DesktopCaptionJobView` |

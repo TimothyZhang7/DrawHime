@@ -5,7 +5,8 @@ import type { DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraV
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { CheckCircle2, ChevronDown, CircleHelp, Database, Gauge, Image, Layers3, LoaderCircle, Play, SlidersHorizontal, Sparkles, Zap } from "lucide-react";
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { createDesktopLocalJob } from "./desktop-api";
 
 type PresetName = Exclude<DesktopLocalJobCreateInput["qualityPreset"], "custom">;
@@ -112,8 +113,25 @@ export function GenerationPage({ models, loras, jobs, inferenceReady, defaultPri
 /** 参数字段保持稳定标题列，并把长说明收纳到可访问悬浮提示中。 */
 function ParameterField({ label, help, children }: { label: string; help: string; children: ReactNode }) { return <label className="generation-parameter"><span>{label}<HelpTip text={help} /></span>{children}</label>; }
 
-/** 帮助图标既支持鼠标悬浮，也可通过键盘聚焦查看说明。 */
-function HelpTip({ text }: { text: string }) { return <span className="parameter-help" tabIndex={0} aria-label={text} data-tooltip={text}><CircleHelp /></span>; }
+/** 帮助内容通过根级浮层渲染，避免被滚动容器、图片或相邻帮助图标裁切遮挡。 */
+function HelpTip({ text }: { text: string }) {
+  const anchor = useRef<HTMLSpanElement>(null);
+  const [position, setPosition] = useState<{ left: number; top: number; above: boolean } | null>(null);
+  const show = () => {
+    const bounds = anchor.current?.getBoundingClientRect();
+    if (!bounds) return;
+    const above = window.innerHeight - bounds.bottom < 110 && bounds.top > 110;
+    setPosition({ left: Math.min(Math.max(bounds.left + bounds.width / 2, 145), window.innerWidth - 145), top: above ? bounds.top - 8 : bounds.bottom + 8, above });
+  };
+  useEffect(() => {
+    if (!position) return undefined;
+    const hide = () => setPosition(null);
+    window.addEventListener("scroll", hide, true);
+    window.addEventListener("resize", hide);
+    return () => { window.removeEventListener("scroll", hide, true); window.removeEventListener("resize", hide); };
+  }, [position]);
+  return <><span ref={anchor} className="parameter-help" tabIndex={0} aria-label={text} onMouseEnter={show} onMouseLeave={() => setPosition(null)} onFocus={show} onBlur={() => setPosition(null)}><CircleHelp /></span>{position && createPortal(<span className={`parameter-tooltip ${position.above ? "is-above" : ""}`} role="tooltip" style={{ left: position.left, top: position.top }}>{text}</span>, document.body)}</>;
+}
 
 /** 高级布尔参数使用可点击整行的稳定开关。 */
 function SwitchField({ label, help, checked, onChange }: { label: string; help: string; checked: boolean; onChange: (checked: boolean) => void }) { return <label className="generation-switch"><span><strong>{label}</strong><HelpTip text={help} /></span><input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} /><i /></label>; }

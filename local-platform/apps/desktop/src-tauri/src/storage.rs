@@ -2,7 +2,7 @@
 
 use crate::captioner::CaptionScheduler;
 use crate::gallery_sync::GallerySyncScheduler;
-use crate::models::{DesktopAiSettings, DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraView, DesktopLocalModelView, DesktopSettings, DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetView, DesktopTrainingJobCreateInput, DesktopTrainingJobView, GalleryPublicationInput, GallerySyncItem};
+use crate::models::{DesktopAiSettings, DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraView, DesktopLocalModelView, DesktopSettings, DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetView, DesktopTrainingJobCreateInput, DesktopTrainingJobView, DesktopTrainingTriggerWordsUpdateInput, GalleryPublicationInput, GallerySyncItem};
 use crate::runtime::RuntimeController;
 use crate::scheduler::LocalScheduler;
 use crate::trainer::TrainingScheduler;
@@ -254,6 +254,12 @@ impl DesktopState {
     pub fn list_training_datasets(&self) -> Result<Vec<DesktopTrainingDatasetView>, String> {
         let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
         crate::training_dataset::list_datasets(&database, &self.app_data_dir)
+    }
+
+    /** 更新训练集触发词并返回最新完整视图。 */
+    pub fn update_training_trigger_words(&self, input: DesktopTrainingTriggerWordsUpdateInput) -> Result<DesktopTrainingDatasetView, String> {
+        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        crate::training_dataset::update_trigger_words(&database, &self.app_data_dir, input)
     }
 
     /** 保存单张训练图片 Caption 并重新计算确认门禁。 */
