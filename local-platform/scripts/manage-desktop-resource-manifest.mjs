@@ -94,7 +94,7 @@ async function normalizeManifest(options) {
   process.stdout.write(`已规范化资源清单：${outputPath}\n`);
 }
 
-/** 在现有签名载荷基础上幂等补齐四个 Anima 底模及其共享文本编码器和 VAE。 */
+/** 在现有签名载荷基础上幂等补齐可选 Anima 底模及其共享文本编码器和 VAE。 */
 async function addAnimaModels(options) {
   const payloadPath = requiredPath(options, "payload");
   const outputPath = requiredPath(options, "output");
@@ -120,6 +120,7 @@ function animaModelDefinitions() {
     { groupId: "model.anime-bulldozer-anima", id: "anime-bulldozer-anima", displayName: "Anime Bulldozer Anima", version: "civitai-3047288", fileName: "animeBulldozer_anima.safetensors", byteSize: 4_182_218_504, sha256: "8e279f111ed7e7ea214ea61850e002f700cce55a8cd027675796773089b3c739", officialUrl: "https://civitai.com/api/download/models/3047288" },
     { groupId: "model.miaomiao-realskin-anima11", id: "miaomiao-realskin-anima11", displayName: "MiaoMiao RealSkin Anima 1.1", version: "civitai-3071702", fileName: "miaomiaoRealskin_anima11.safetensors", byteSize: 4_182_218_328, sha256: "d33247d48a9c15a872aef963940fc87362f925e3e087365810ad747042fcc454", officialUrl: "https://civitai.com/api/download/models/3071702" },
     { groupId: "model.miaomiao-3d-harem-anima-lh3d10", id: "miaomiao-3d-harem-anima-lh3d10", displayName: "MiaoMiao 3D Harem Anima LH3D 1.0", version: "civitai-3074791", fileName: "miaomiao3DHarem_animaLH3D10.safetensors", byteSize: 4_182_218_328, sha256: "0707cbe8deed6c858a6ba8dfbcfe2006e3a4fd44c099aafd048400fdec1866dd", officialUrl: "https://civitai.com/api/download/models/3074791" },
+    { groupId: "model.miaomiao-harem-anima8step10", id: "miaomiao-harem-anima8step10", displayName: "MiaoMiao Harem Anima 8-Step 1.0", version: "civitai-3125933", fileName: "miaomiaoHarem_anima8Step10.safetensors", byteSize: 4_182_218_328, sha256: "10760718321f82577f648893416655fb979a8026cdd8977fd74a9ac998e1314a", officialUrl: "https://civitai.com/api/download/models/3125933" },
   ];
 }
 

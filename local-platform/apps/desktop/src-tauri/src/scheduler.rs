@@ -479,10 +479,14 @@ fn validate_job_input(input: &DesktopLocalJobCreateInput) -> Result<(), String> 
 /** 质量档完整复刻当前生产 GPU 的平衡质量参数，快速和极致只调整采样预算与步数。 */
 fn resolve_generation_parameters(input: &DesktopLocalJobCreateInput, workflow_kind: &str, model_file_name: &str) -> ResolvedGenerationParameters {
     let (model_cfg, sampler, scheduler, prefix, negative) = model_quality_profile(workflow_kind, model_file_name);
-    let (steps, adjusted_steps, max_edge, pixel_budget) = match input.quality_preset.as_str() {
-        "fast" => (20, 18, 1280, 786_432),
-        "quality" => (37, 34, 1536, 1_350_000),
-        "extreme" => (45, 42, 1792, 2_073_600),
+    let distilled_anima = workflow_kind == "anima" && model_file_name.to_ascii_lowercase().contains("anima8step");
+    let (steps, adjusted_steps, max_edge, pixel_budget) = match (distilled_anima, input.quality_preset.as_str()) {
+        (true, "fast") => (8, 8, 1280, 786_432),
+        (true, "quality") => (12, 12, 1536, 1_350_000),
+        (true, "extreme") => (30, 30, 1536, 1_350_000),
+        (false, "fast") => (20, 18, 1280, 786_432),
+        (false, "quality") => (37, 34, 1536, 1_350_000),
+        (false, "extreme") => (45, 42, 1792, 2_073_600),
         _ => (input.steps, input.aspect_adjusted_steps, input.sampling_max_edge, input.sampling_pixel_budget),
     };
     let custom = input.quality_preset == "custom";
@@ -513,6 +517,9 @@ fn model_quality_profile(workflow_kind: &str, model_file_name: &str) -> (f64, &'
     let file_name = model_file_name.to_ascii_lowercase();
     if workflow_kind != "anima" {
         return (5.0, "euler", "normal", "masterpiece, best quality", NEGATIVE);
+    }
+    if file_name.contains("anima8step") {
+        return (1.0, "euler_ancestral", "normal", "masterpiece, best quality, score_7, safe, very aesthetic, ultra detailed, pale skin, fair skin, high contrast", NEGATIVE);
     }
     if file_name.contains("realskin") {
         return (4.0, "euler_ancestral", "normal", "best quality, score_7, score_9, very aesthetic, ultra detailed, fair skin, high contrast, photorealistic, raw photo, photo background", NEGATIVE);
@@ -889,6 +896,9 @@ mod tests {
         input.quality_preset = "extreme".into();
         let real_skin = resolve_generation_parameters(&input, "anima", "miaomiaoRealskin_anima11.safetensors");
         assert_eq!((real_skin.steps, real_skin.cfg, real_skin.sampler_name.as_str()), (45, 4.0, "euler_ancestral"));
+        input.quality_preset = "quality".into();
+        let distilled = resolve_generation_parameters(&input, "anima", "miaomiaoHarem_anima8Step10.safetensors");
+        assert_eq!((distilled.steps, distilled.aspect_adjusted_steps, distilled.cfg, distilled.sampler_name.as_str(), distilled.scheduler_name.as_str()), (12, 12, 1.0, "euler_ancestral", "normal"));
     }
 
     #[test]

@@ -61,7 +61,7 @@ pnpm --filter @drawhime/desktop run tauri:dev
 
 ## 模型
 
-仓库登记 Anima Base、Anime Bulldozer、MiaoMiao RealSkin、MiaoMiao 3D Harem 与 WAI Anima 的工作流预设，但不分发模型权重。使用者需要遵守各模型来源页面的许可条款，自行下载文件并校验目录中登记的 SHA-256。
+仓库登记 Anima Base、Anime Bulldozer、MiaoMiao RealSkin、MiaoMiao 3D Harem、MiaoMiao Harem 8-Step 与 WAI Anima 的工作流预设，但不分发模型权重。使用者需要遵守各模型来源页面的许可条款，自行下载文件并校验目录中登记的 SHA-256。
 
 生产底模同步脚本从私有 `CIVITAI_API_TOKEN` 或 `CIVITAI_API_TOKEN_FILE` 读取登录令牌，并执行断点续传、原子替换和哈希校验；个别已登记模型也可使用与 Civitai 官方 SHA-256 完全一致的公开镜像：
 

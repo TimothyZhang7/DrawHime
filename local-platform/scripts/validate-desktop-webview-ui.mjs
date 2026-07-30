@@ -243,7 +243,7 @@ async function captureResourceCenter(client, directory) {
       dependencyCards: dependencyCards.length,
       summaryCount,
       primaryLabel: document.querySelector('.startup-primary > span')?.textContent || '',
-      optionalModelVisible: ['Anime Bulldozer', 'MiaoMiao RealSkin', 'MiaoMiao 3D Harem'].some((name) => dependencyText.includes(name)),
+      optionalModelVisible: ['Anime Bulldozer', 'MiaoMiao RealSkin', 'MiaoMiao 3D Harem', 'MiaoMiao Harem'].some((name) => dependencyText.includes(name)),
       horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
     };
   })()`);

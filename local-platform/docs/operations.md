@@ -83,7 +83,7 @@ pnpm desktop:deploy-manifest --envelope NEXT_ENVELOPE.json --state-payload CURRE
 pnpm desktop:deploy-manifest --envelope NEXT_ENVELOPE.json --state-payload CURRENT_PAYLOAD.json --state-envelope CURRENT_ENVELOPE.json
 ```
 
-`add-anima-models` 幂等补齐 Anima Base、Anime Bulldozer、MiaoMiao RealSkin 和 MiaoMiao 3D Harem。四个模型均为用户主动安装的可选资源；相同 SHA-256 的 Qwen 文本编码器和 VAE 在多个模型组合间复用本机文件，不重复下载或占用磁盘。发布前必须确认主文件已进入 `DESKTOP_RESOURCE_STORAGE_ROOT`，或存在可由 API 严格代理的签名官方来源。
+`add-anima-models` 幂等补齐 Anima Base、Anime Bulldozer、MiaoMiao RealSkin、MiaoMiao 3D Harem 和 MiaoMiao Harem 8-Step。五个模型均为用户主动安装的可选资源；相同 SHA-256 的 Qwen 文本编码器和 VAE 在多个模型组合间复用本机文件，不重复下载或占用磁盘。MiaoMiao Harem 8-Step 是仅推理蒸馏版本，桌面与网页训练入口均排除该模型。发布前必须确认主文件已进入 `DESKTOP_RESOURCE_STORAGE_ROOT`，或存在可由 API 严格代理的签名官方来源。
 
 可选目标：`web`、`admin`、`api`、`scheduler`、`gpu-agent`、`inference-worker`、`training-worker`、`artifact-service`、`source`、`all`。单服务目标只上传共享包与对应 app，只构建和重启该 PM2 进程；`api` 额外执行 Prisma 生成、生产迁移和标签种子，其他服务不触碰数据库。前端目标直接上传本机构建产物，不在生产机安装依赖。
 

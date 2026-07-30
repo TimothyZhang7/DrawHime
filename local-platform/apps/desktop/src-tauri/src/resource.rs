@@ -1,7 +1,6 @@
 //! 本模块负责拉取签名资源清单，并以断点、切源、哈希校验和原子落盘下载桌面依赖。
 
 use crate::models::{DesktopResourceCatalogItemView, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopResourceManifestEnvelope, DesktopResourceManifestItem, DesktopResourceManifestPayload, DesktopResourceSource, DesktopSettings};
-use crate::process::hide_window;
 use crate::storage::LocalModelRegistration;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
@@ -10,7 +9,7 @@ use fs2::available_space;
 use reqwest::{blocking::{Client, Response}, header::{CONTENT_LENGTH, CONTENT_RANGE, RANGE}, StatusCode, Url};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
-use std::{collections::{HashMap, HashSet}, fs::{self, File, OpenOptions}, io::{BufReader, Read, Seek, SeekFrom, Write}, path::{Component, Path, PathBuf}, process::{Command, Stdio}, sync::{Mutex, OnceLock}, thread, time::{Duration, Instant, UNIX_EPOCH}};
+use std::{collections::{HashMap, HashSet}, fs::{self, File, OpenOptions}, io::{BufReader, Read, Seek, SeekFrom, Write}, path::{Component, Path, PathBuf}, sync::{Mutex, OnceLock}, time::{Duration, Instant, UNIX_EPOCH}};
 use tauri::Emitter;
 use uuid::Uuid;
 use zip::ZipArchive;
@@ -23,7 +22,6 @@ const DOWNLOAD_BUFFER_BYTES: usize = 256 * 1024;
 const DOWNLOAD_RANGE_BYTES: u64 = 8 * 1024 * 1024;
 const SOURCE_CIRCUIT_DURATION: Duration = Duration::from_secs(2 * 60);
 const DOWNLOAD_PAUSED_ERROR: &str = "download_paused";
-const ARCHIVE_LISTING_ATTEMPTS: usize = 3;
 
 #[derive(Clone, Copy)]
 struct DownloadPolicy {
@@ -113,7 +111,12 @@ fn install_resource_inner(settings: &DesktopSettings, app_data_dir: &Path, resou
 
 fn install_cached_resource<F: Fn(DesktopResourceInstallView)>(settings: &DesktopSettings, item: &DesktopResourceManifestItem, cache: &Path, notify: &F) -> Result<DesktopResourceInstallView, String> {
     notify(install_view(&item.id, "verifying", 2, None, None, None));
-    if !cache.is_file() || !file_matches(&cache, &item)? { return Err("资源缓存缺失或 SHA-256 校验未通过，请重新下载".into()); }
+    if !cache.is_file() { return Err("资源缓存缺失，请重新下载".into()); }
+    if !file_matches(&cache, &item)? {
+        // 正式安装前的二次哈希失败必须同步清理验证标记，避免目录继续把损坏缓存显示成 100%。
+        invalidate_cached_resource(cache, "checksum-invalid")?;
+        return Err("资源缓存 SHA-256 校验未通过，损坏文件已隔离，请重新下载".into());
+    }
     let destination = install_destination(&item, settings);
     if installed_resource_matches(&item, settings) { return Ok(install_view(&item.id, "installed", 100, Some(&destination), None, None)); }
     let parent = destination.parent().ok_or_else(|| "资源安装目录缺少父路径".to_string())?;
@@ -232,13 +235,14 @@ pub fn download_resource(settings: &DesktopSettings, app_data_dir: &Path, resour
     if actual_sha256 != item.sha256 {
         quarantine_file(&partial, "checksum-invalid")?;
         let message = "资源整体 SHA-256 校验失败，文件已隔离".to_string();
-        emit_progress(app, progress_view(&item, "failed", active_source_kind.clone(), downloaded_bytes, 0, switch_reason.clone(), None, Some(message.clone())));
+        // 隔离后本机已没有可续传字节，失败进度必须回到零，避免界面误报 100%。
+        emit_progress(app, progress_view(&item, "failed", active_source_kind.clone(), 0, 0, switch_reason.clone(), None, Some(message.clone())));
         return Err(message);
     }
     if let Err(error) = validate_downloaded_archive(&item, &partial) {
         quarantine_file(&partial, "archive-invalid")?;
         let message = format!("资源归档完整性检查失败，异常文件已隔离：{error}");
-        emit_progress(app, progress_view(&item, "failed", active_source_kind.clone(), downloaded_bytes, 0, switch_reason.clone(), None, Some(message.clone())));
+        emit_progress(app, progress_view(&item, "failed", active_source_kind.clone(), 0, 0, switch_reason.clone(), None, Some(message.clone())));
         return Err(message);
     }
     fs::rename(&partial, &target).map_err(|error| format!("原子写入资源缓存失败：{error}"))?;
@@ -683,36 +687,54 @@ fn extract_zip_safely(archive_path: &Path, staging: &Path, maximum_installed_byt
 }
 
 fn extract_7z_safely(archive_path: &Path, staging: &Path, maximum_installed_bytes: u64) -> Result<(), String> {
-    let tar = Path::new(r"C:\Windows\System32\tar.exe");
-    if !tar.is_file() { return Err("当前 Windows 缺少系统归档工具 tar.exe".into()); }
-    let archive_text = archive_path.to_string_lossy().into_owned();
-    let staging_text = staging.to_string_lossy().into_owned();
-    let names_output = read_7z_listing(tar, &archive_text, false, 64 * 1024 * 1024)?;
-    let names = String::from_utf8(names_output.stdout).map_err(|_| "资源 7z 文件名不是 UTF-8".to_string())?;
+    validate_7z_archive(archive_path, maximum_installed_bytes)?;
+    let mut extracted_bytes = 0_u64;
     let mut entry_count = 0_usize;
-    for name in names.lines().filter(|name| !name.trim().is_empty()) {
+    // 纯 Rust 解码器原生支持该 Runtime 使用的 LZMA，避免依赖不同 Windows 版本能力不一致的 tar.exe。
+    sevenz_rust::decompress_file_with_extract_fn(archive_path, staging, |entry, reader, _| {
         entry_count += 1;
-        if entry_count > 200_000 { return Err("资源 7z 文件数量超过限制".into()); }
-        let normalized = name.trim_end_matches('/').replace('\\', "/");
-        validate_windows_relative_path(Path::new(&normalized))?;
-    }
-    let verbose = read_7z_listing(tar, &archive_text, true, 128 * 1024 * 1024)?;
-    if String::from_utf8_lossy(&verbose.stdout).lines().any(|line| matches!(line.chars().next(), Some('l' | 'h'))) { return Err("资源 7z 包含链接条目".into()); }
-    let mut child = hide_window(&mut Command::new(tar)).args(["-xf", archive_text.as_str(), "-C", staging_text.as_str()]).stdout(Stdio::null()).stderr(Stdio::null()).spawn().map_err(|error| format!("启动 7z 解压失败：{error}"))?;
-    let mut last_size_check = Instant::now();
-    loop {
-        if let Some(status) = child.try_wait().map_err(|error| format!("读取 7z 解压状态失败：{error}"))? {
-            if !status.success() { return Err(format!("系统 tar 解压 7z 失败，退出码 {}", status.code().unwrap_or(-1))); }
-            break;
+        if entry_count > 200_000 { return Err(sevenz_rust::Error::other("资源 7z 文件数量超过限制")); }
+        let relative = validate_7z_entry(entry).map_err(sevenz_rust::Error::other)?;
+        extracted_bytes = extracted_bytes.checked_add(entry.size()).ok_or_else(|| sevenz_rust::Error::other("资源 7z 解压大小溢出"))?;
+        if extracted_bytes > maximum_installed_bytes { return Err(sevenz_rust::Error::other("资源 7z 解压大小超过签名清单声明")); }
+        let output = staging.join(relative);
+        if entry.is_directory() {
+            fs::create_dir_all(&output)?;
+            return Ok(true);
         }
-        if last_size_check.elapsed() >= Duration::from_secs(5) {
-            if directory_size_limited(staging, maximum_installed_bytes)? > maximum_installed_bytes { let _ = child.kill(); let _ = child.wait(); return Err("资源 7z 解压大小超过签名清单声明".into()); }
-            last_size_check = Instant::now();
-        }
-        thread::sleep(Duration::from_millis(250));
+        if let Some(parent) = output.parent() { fs::create_dir_all(parent)?; }
+        let mut target = OpenOptions::new().create_new(true).write(true).open(&output)?;
+        let written = std::io::copy(reader, &mut target)?;
+        if written != entry.size() { return Err(sevenz_rust::Error::other("资源 7z 解压文件长度不正确")); }
+        target.flush()?;
+        Ok(true)
+    }).map_err(|error| format!("解压资源 7z 失败：{error}"))
+}
+
+/** 只解析 7z 目录并执行路径、链接、文件数和展开体积门禁，不依赖系统归档工具。 */
+fn validate_7z_archive(path: &Path, maximum_installed_bytes: u64) -> Result<(), String> {
+    let archive = sevenz_rust::Archive::open(path).map_err(|error| format!("读取资源 7z 失败：{error}"))?;
+    if archive.files.len() > 200_000 { return Err("资源 7z 文件数量超过限制".into()); }
+    let mut total = 0_u64;
+    for entry in &archive.files {
+        validate_7z_entry(entry)?;
+        total = total.checked_add(entry.size()).ok_or_else(|| "资源 7z 解压大小溢出".to_string())?;
+        if total > maximum_installed_bytes { return Err("资源 7z 解压大小超过签名清单声明".into()); }
     }
-    if directory_size_limited(staging, maximum_installed_bytes)? > maximum_installed_bytes { return Err("资源 7z 解压大小超过签名清单声明".into()); }
     Ok(())
+}
+
+/** 把 7z 条目约束为安全的 Windows 相对路径，并拒绝删除项和链接。 */
+fn validate_7z_entry(entry: &sevenz_rust::SevenZArchiveEntry) -> Result<PathBuf, String> {
+    if entry.is_anti_item() { return Err("资源 7z 包含删除条目".into()); }
+    let attributes = entry.windows_attributes();
+    let unix_mode = attributes >> 16;
+    if attributes & 0x400 != 0 || unix_mode & 0o170000 == 0o120000 { return Err("资源 7z 包含链接条目".into()); }
+    let normalized = entry.name().trim_end_matches(['/', '\\']).replace('\\', "/");
+    if normalized.is_empty() { return Err("资源 7z 包含空路径条目".into()); }
+    let relative = PathBuf::from(normalized);
+    validate_windows_relative_path(&relative)?;
+    Ok(relative)
 }
 
 /** 下载完成后在写入 verified 标记前验证归档格式，避免不可读取文件进入“已下载”状态。 */
@@ -723,62 +745,28 @@ fn validate_downloaded_archive(item: &DesktopResourceManifestItem, path: &Path) 
             let file = File::open(path).map_err(|error| format!("打开资源 ZIP 失败：{error}"))?;
             ZipArchive::new(file).map(|_| ()).map_err(|error| format!("读取资源 ZIP 失败：{error}"))
         }
-        "7z" => {
-            let tar = Path::new(r"C:\Windows\System32\tar.exe");
-            if !tar.is_file() { return Err("当前 Windows 缺少系统归档工具 tar.exe".into()); }
-            let archive_text = path.to_string_lossy().into_owned();
-            read_7z_listing(tar, &archive_text, false, 64 * 1024 * 1024).map(|_| ())
-        }
+        "7z" => validate_7z_archive(path, item.installed_size),
         _ => Err("资源归档格式不受支持".into()),
     }
 }
 
-/** 对系统 tar 的瞬时占用或启动失败进行有界重试，并保留有限的真实错误信息。 */
-fn read_7z_listing(tar: &Path, archive_text: &str, verbose: bool, maximum_output_bytes: usize) -> Result<std::process::Output, String> {
-    let arguments = if verbose { ["-tvf", archive_text] } else { ["-tf", archive_text] };
-    let label = if verbose { "类型列表" } else { "文件列表" };
-    let mut last_error = String::new();
-    for attempt in 1..=ARCHIVE_LISTING_ATTEMPTS {
-        let output = hide_window(&mut Command::new(tar)).args(arguments).output().map_err(|error| format!("读取 7z {label}失败：{error}"))?;
-        if output.stdout.len() > maximum_output_bytes { return Err(format!("资源 7z {label}超过限制")); }
-        if output.status.success() { return Ok(output); }
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let detail: String = stderr.trim().chars().take(500).collect();
-        last_error = if detail.is_empty() { format!("系统 tar 退出码 {}", output.status.code().unwrap_or(-1)) } else { detail };
-        if attempt < ARCHIVE_LISTING_ATTEMPTS { thread::sleep(Duration::from_millis(500 * attempt as u64)); }
-    }
-    Err(format!("资源 7z {label}读取失败：{last_error}"))
-}
-
-/** 仅对归档解析失败执行缓存恢复，不把路径穿越、链接或展开体积门禁误判为网络损坏。 */
+/** 仅对归档解码失败执行缓存恢复，不把路径穿越、链接或展开体积门禁误判为网络损坏。 */
 fn archive_cache_should_recover(item: &DesktopResourceManifestItem, error: &str) -> bool {
-    item.archive == "7z" && (error.starts_with("资源 7z 文件列表读取失败") || error.starts_with("资源 7z 类型列表读取失败") || error.starts_with("读取 7z 文件列表失败") || error.starts_with("读取 7z 类型列表失败"))
+    item.archive == "7z" && (error.starts_with("解压资源 7z 失败") || error.starts_with("资源 7z 文件列表读取失败") || error.starts_with("资源 7z 类型列表读取失败") || error.starts_with("读取 7z 文件列表失败") || error.starts_with("读取 7z 类型列表失败"))
 }
 
 /** 隔离不可读取的正式缓存并清除验证标记和旧断点，保证下一次下载从零开始。 */
 fn invalidate_cached_archive(cache: &Path) -> Result<(), String> {
-    quarantine_file(cache, "archive-invalid")?;
+    invalidate_cached_resource(cache, "archive-invalid")
+}
+
+/** 隔离任意损坏缓存并清除验证标记和旧断点，下一次下载只能从可信状态重新开始。 */
+fn invalidate_cached_resource(cache: &Path, reason: &str) -> Result<(), String> {
+    quarantine_file(cache, reason)?;
     for auxiliary in [marker_path(cache), partial_path(cache)] {
         if auxiliary.exists() { fs::remove_file(&auxiliary).map_err(|error| format!("清理损坏资源缓存状态失败：{error}"))?; }
     }
     Ok(())
-}
-
-fn directory_size_limited(root: &Path, limit: u64) -> Result<u64, String> {
-    let mut total = 0_u64;
-    let mut pending = vec![root.to_path_buf()];
-    while let Some(directory) = pending.pop() {
-        for entry in fs::read_dir(&directory).map_err(|error| format!("读取解压目录失败：{error}"))? {
-            let entry = entry.map_err(|error| format!("读取解压项失败：{error}"))?;
-            let metadata = fs::symlink_metadata(entry.path()).map_err(|error| format!("读取解压项元数据失败：{error}"))?;
-            if metadata.file_type().is_symlink() { return Err("资源归档解压后包含链接".into()); }
-            #[cfg(windows)]
-            { use std::os::windows::fs::MetadataExt; if metadata.file_attributes() & 0x400 != 0 { return Err("资源归档解压后包含重解析点".into()); } }
-            if metadata.is_dir() { pending.push(entry.path()); }
-            else if metadata.is_file() { total = total.checked_add(metadata.len()).ok_or_else(|| "资源解压大小溢出".to_string())?; if total > limit { return Ok(total); } }
-        }
-    }
-    Ok(total)
 }
 
 fn validate_windows_relative_path(path: &Path) -> Result<(), String> {
@@ -1175,6 +1163,20 @@ mod tests {
     }
 
     #[test]
+    fn lzma_7z_uses_embedded_decoder_without_system_tar() {
+        let temporary = tempfile::tempdir().expect("创建 LZMA 7z 测试目录");
+        let archive = temporary.path().join("runtime.7z");
+        let staging = temporary.path().join("staging");
+        fs::create_dir(&staging).expect("创建 7z 解压目录");
+        // 160 字节公开 LZMA 7z 夹具内含 file.txt，用于锁定 Windows tar.exe 不支持时的纯 Rust 解码链路。
+        let bytes = BASE64.decode("N3q8ryccAAMXzw4BGAAAAAAAAABoAAAAAAAAANKJiSIAOhoJZ36uctx8hMHK44qwafRc//50IAABBAYAAQkYAAcLAQABIwMBAQVdAACAAAwPAAgKARWvUGYAAAUBERMAZgBpAGwAZQAuAHQAeAB0AAAAFAoBAEgXLZlPp9cBEgoBAEgXLZlPp9cBEwoBAEgXLZlPp9cBFQYBACCAtIEAAA==").expect("解码 LZMA 7z 夹具");
+        fs::write(&archive, bytes).expect("写入 LZMA 7z 夹具");
+        validate_7z_archive(&archive, 1024).expect("解析 LZMA 7z 目录");
+        extract_7z_safely(&archive, &staging, 1024).expect("解压 LZMA 7z");
+        assert_eq!(fs::read_to_string(staging.join("file.txt")).expect("读取解压结果"), "this is a file\n");
+    }
+
+    #[test]
     fn invalid_archive_cache_clears_marker_and_partial() {
         let temporary = tempfile::tempdir().expect("创建缓存恢复测试目录");
         let cache = temporary.path().join("runtime.7z");
@@ -1186,6 +1188,17 @@ mod tests {
         assert!(!marker_path(&cache).exists());
         assert!(!partial_path(&cache).exists());
         assert!(temporary.path().read_dir().expect("读取隔离目录").any(|entry| entry.expect("读取隔离项").file_name().to_string_lossy().contains("archive-invalid")));
+    }
+
+    #[test]
+    fn checksum_invalid_cache_clears_verified_state() {
+        let temporary = tempfile::tempdir().expect("创建哈希损坏缓存目录");
+        let cache = temporary.path().join("runtime.7z");
+        fs::write(&cache, b"invalid").expect("写入哈希损坏缓存");
+        fs::write(marker_path(&cache), b"verified").expect("写入错误验证标记");
+        invalidate_cached_resource(&cache, "checksum-invalid").expect("隔离哈希损坏缓存");
+        assert!(!cache.exists());
+        assert!(!marker_path(&cache).exists());
     }
 
     #[test]

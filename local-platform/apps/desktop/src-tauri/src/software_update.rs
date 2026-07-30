@@ -31,7 +31,7 @@ echo.
 echo [DrawHime] 正在准备软件更新，请保留此窗口。
 echo [1/4] 重新校验安装包...
 set "DH_INSTALLER=%INSTALLER%"
-for /f "usebackq delims=" %%H in (`powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "(Get-FileHash -LiteralPath $env:DH_INSTALLER -Algorithm SHA256).Hash.ToLowerInvariant()"`) do set "ACTUAL_HASH=%%H"
+for /f "usebackq delims=" %%H in (`powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$stream=[System.IO.File]::OpenRead($env:DH_INSTALLER); try {$sha=[System.Security.Cryptography.SHA256]::Create(); try {[BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-','').ToLowerInvariant()} finally {$sha.Dispose()}} finally {$stream.Dispose()}"`) do set "ACTUAL_HASH=%%H"
 if /I not "%ACTUAL_HASH%"=="%EXPECTED_HASH%" (
   > "%RESULT_PATH%" echo 97
   echo [失败] 安装包校验未通过，更新已经停止。
@@ -39,7 +39,7 @@ if /I not "%ACTUAL_HASH%"=="%EXPECTED_HASH%" (
   exit /b 97
 )
 echo [2/4] 等待 DrawHime 主程序退出...
-timeout /t 3 /nobreak >nul
+ping 127.0.0.1 -n 4 >nul
 echo [3/4] 正在安装新版本，请勿关闭窗口...
 start "" /wait "%INSTALLER%" /S
 set "INSTALL_EXIT=%ERRORLEVEL%"
@@ -57,9 +57,14 @@ if exist "%RELAUNCH_PATH%" (
   pause
   exit /b 0
 )
-timeout /t 2 /nobreak >nul
+ping 127.0.0.1 -n 3 >nul
 exit /b 0
 "#;
+
+/** CMD 脚本必须写成 CRLF；UTF-8 与单独 LF 组合会导致 cmd.exe 吞掉每行开头并跳过安装。 */
+fn windows_update_helper_script() -> String {
+    UPDATE_HELPER_SCRIPT.replace('\n', "\r\n")
+}
 
 #[derive(Clone)]
 struct UpdateRecord {
@@ -278,7 +283,7 @@ fn launch_record(
     }
     let helper = app_data_dir.join(format!("apply-update-{}.cmd", record.version));
     let result_path = apply_result_path(app_data_dir, &record.version);
-    fs::write(&helper, UPDATE_HELPER_SCRIPT)
+    fs::write(&helper, windows_update_helper_script())
         .map_err(|error| format!("写入更新辅助脚本失败：{error}"))?;
     if result_path.exists() {
         fs::remove_file(&result_path)
@@ -619,6 +624,12 @@ mod tests {
     fn visible_update_helper_reports_progress_and_relaunches() {
         assert!(UPDATE_HELPER_SCRIPT.contains("title DrawHime 更新助手"));
         assert!(UPDATE_HELPER_SCRIPT.contains("[1/4]"));
+        assert!(UPDATE_HELPER_SCRIPT.contains("System.Security.Cryptography.SHA256"));
+        assert!(!UPDATE_HELPER_SCRIPT.contains("Get-FileHash"));
+        let windows_script = windows_update_helper_script();
+        assert!(windows_script.contains("\r\n"));
+        assert!(!windows_script.replace("\r\n", "").contains('\n'));
+        assert!(!windows_script.contains("timeout /t"));
         assert!(UPDATE_HELPER_SCRIPT.contains("start \"\" /wait \"%INSTALLER%\" /S"));
         assert!(UPDATE_HELPER_SCRIPT.contains("start \"\" \"%RELAUNCH_PATH%\""));
     }

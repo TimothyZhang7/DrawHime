@@ -87,7 +87,8 @@ body,
 }
 
 #root {
-  width: 100%;
+  /* CSS zoom 会同步放大布局盒；反向收敛根宽度后，放大字体也不会把内容推出原生窗口。 */
+  width: calc(100% / var(--desktop-font-scale));
   min-height: calc(100vh / var(--desktop-font-scale));
   zoom: var(--desktop-font-scale);
 }
@@ -345,6 +346,8 @@ select:focus-visible {
 .desktop-main {
   grid-column: 2;
   min-width: 0;
+  max-width: 100%;
+  overflow-x: clip;
   padding: 0 22px 30px;
 }
 
@@ -522,6 +525,8 @@ select:focus-visible {
 }
 
 .desktop-page {
+  width: 100%;
+  min-width: 0;
   display: grid;
   gap: 12px;
   margin-top: 14px;
@@ -535,6 +540,7 @@ select:focus-visible {
 
 /* 合并后的主入口使用二级分页，不把多个完整功能页堆叠到同一滚动窗口。 */
 .workspace-page {
+  width: 100%;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   gap: 12px;
@@ -4162,7 +4168,8 @@ select:focus-visible {
 .generate-layout {
   height: calc(100vh / var(--desktop-font-scale) - 98px);
   min-height: 560px;
-  grid-template-columns: minmax(610px, 1.45fr) minmax(300px, .75fr);
+  /* 不使用会在 120%–130% 字体下挤出窗口的刚性左栏最小宽度。 */
+  grid-template-columns: minmax(0, 1.45fr) minmax(260px, .75fr);
   align-items: stretch;
   overflow: hidden;
 }
@@ -4487,6 +4494,80 @@ select:focus-visible {
 .generation-lora-dialog > footer span { color: var(--muted); font-size: 7px; }
 .generation-lora-dialog > footer button { min-height: 32px; padding: 0 13px; border: 1px solid var(--accent-border); background: var(--accent); color: #fff; font-size: 8px; font-weight: 800; }
 
+/* 固定浮层按反向缩放后的逻辑视口计算，所有边缘始终保留可点击安全区。 */
+.job-detail-backdrop,
+.resource-dialog-backdrop,
+.generation-lora-backdrop {
+  inset: 0 auto auto 0;
+  width: calc(100vw / var(--desktop-font-scale));
+  height: calc(100vh / var(--desktop-font-scale));
+  padding: calc(18px / var(--desktop-font-scale));
+  overflow: hidden;
+}
+
+.job-detail-dialog,
+.resource-dialog,
+.generation-lora-dialog {
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.job-detail-dialog { width: min(920px, 100%); }
+.resource-dialog { width: min(720px, 100%); }
+.generation-lora-dialog { width: min(1120px, 100%); }
+
+/* 逐图打标卡片按可用宽度自动在一列和两列间切换，操作区不再越过卡片边界。 */
+.training-asset-list {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 520px), 1fr));
+}
+
+.training-asset-list > article {
+  grid-template-columns: clamp(112px, 24%, 148px) minmax(0, 1fr);
+  align-items: stretch;
+}
+
+.training-asset-caption {
+  min-width: 0;
+}
+
+.training-asset-caption header {
+  min-width: 0;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.training-asset-caption footer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
+  gap: 6px;
+}
+
+.training-asset-caption footer > div {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.training-asset-caption footer button {
+  min-width: 0;
+  justify-content: center;
+  white-space: nowrap;
+}
+
+.desktop-caption-tag-list {
+  max-height: 176px;
+  scrollbar-gutter: stable;
+}
+
+@media (max-width: 1180px) {
+  .generate-layout {
+    grid-template-columns: minmax(0, 1fr) minmax(240px, .62fr);
+  }
+}
+
 .generation-lora-strengths {
   grid-template-columns: repeat(2, 112px);
 }
@@ -4623,10 +4704,9 @@ select:focus-visible {
 /* 打标与训练使用独立页面；训练步骤必须逐项通过校验后才能继续。 */
 .captioning-page,
 .lora-training-page {
-  max-width: 1440px;
+  width: 100%;
+  max-width: none;
 }
-
-.captioning-page { max-width: none; }
 
 .caption-dataset-library {
   display: grid;
@@ -4905,7 +4985,7 @@ select:focus-visible {
   .caption-dataset-grid { grid-template-columns: 1fr; }
   .training-trigger-editor { align-items: stretch; flex-direction: column; }
   .generation-lora-backdrop { padding: 7px; }
-  .generation-lora-dialog { width: calc(100vw - 14px); max-height: calc(100vh - 14px); }
+  .generation-lora-dialog { width: 100%; max-height: 100%; }
   .generation-lora-toolbar { align-items: stretch; flex-direction: column; }
   .generation-lora-toolbar select { width: 100%; }
   .generation-lora-library article { align-items: flex-start; flex-wrap: wrap; }

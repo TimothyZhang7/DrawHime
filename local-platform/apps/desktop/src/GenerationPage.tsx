@@ -25,10 +25,10 @@ interface GenerationPageProps {
   onError: (message: string) => void;
 }
 
-const PRESETS: Array<{ id: PresetName; title: string; summary: string; detail: string; Icon: typeof Zap }> = [
-  { id: "fast", title: "快速", summary: "20 步 · 约 0.8 MP", detail: "适合构图测试、提示词迭代与 LoRA 强度试验。", Icon: Zap },
-  { id: "quality", title: "质量", summary: "37 步 · 约 1.35 MP", detail: "默认档，与当前 GPU 服务器平衡质量参数一致。", Icon: Sparkles },
-  { id: "extreme", title: "极致", summary: "45 步 · 约 2.07 MP", detail: "优先细节和材质，显存占用与生成时间最高。", Icon: Gauge },
+const PRESETS: Array<{ id: PresetName; title: string; detail: string; Icon: typeof Zap }> = [
+  { id: "fast", title: "快速", detail: "适合构图测试、提示词迭代与 LoRA 强度试验。", Icon: Zap },
+  { id: "quality", title: "质量", detail: "默认档，与当前 GPU 服务器平衡质量参数一致。", Icon: Sparkles },
+  { id: "extreme", title: "极致", detail: "优先细节和材质，显存占用与生成时间最高。", Icon: Gauge },
 ];
 const OUTPUT_SIZES = [512, 768, 1024, 1280, 1536] as const;
 const ASPECT_RATIOS = [
@@ -93,7 +93,7 @@ export function GenerationPage({ models, loras, websiteLoras, websiteLoraProgres
     <section className="section-card generation-form">
       <header><div><span>LOCAL GENERATION</span><h2>本地生成</h2></div><small>{inferenceReady ? "参数随任务固化 · 后台串行执行" : "GPU、Runtime 或底模未就绪"}</small></header>
       <div className="generation-form-scroll">{availableModels.length === 0 ? <div className="resource-unconfigured"><Database /><div><strong>尚无可用底模</strong><span>请先前往模型仓库安装底模，或导入已有 safetensors。</span></div></div> : <>
-        <section className="generation-presets" aria-label="生成质量预设">{PRESETS.map(({ id, title, summary, detail, Icon }) => <button key={id} type="button" className={form.qualityPreset === id ? "active" : ""} onClick={() => choosePreset(id)}><Icon /><span><strong>{title}</strong><small>{summary}</small></span><HelpTip text={detail} />{form.qualityPreset === id && <CheckCircle2 className="preset-selected" />}</button>)}</section>
+        <section className="generation-presets" aria-label="生成质量预设">{PRESETS.map(({ id, title, detail, Icon }) => <button key={id} type="button" className={form.qualityPreset === id ? "active" : ""} onClick={() => choosePreset(id)}><Icon /><span><strong>{title}</strong><small>{presetSummary(id, selectedModel)}</small></span><HelpTip text={detail} />{form.qualityPreset === id && <CheckCircle2 className="preset-selected" />}</button>)}</section>
         {form.qualityPreset === "custom" && <div className="generation-custom-notice"><SlidersHorizontal /><span><strong>自定义参数</strong><small>点击任一预设可恢复经过验证的整套参数。</small></span></div>}
         <div className="generation-grid">
           <ParameterField label="底模" help="决定基础画风、材质和推荐采样组合。切换模型会同步当前预设的模型级参数。"><select value={form.modelId} onChange={(event) => chooseModel(event.target.value)}>{availableModels.map((model) => <option key={model.id} value={model.id}>{model.displayName} · {model.family}</option>)}</select></ParameterField>
@@ -179,7 +179,10 @@ function aspectRatioFromDimensions(width: number, height: number): AspectRatioId
 /** 把预设转换成可见参数；模型级 CFG 与采样器和生产目录保持一致。 */
 function applyPreset(form: DesktopLocalJobCreateInput, preset: PresetName, model: DesktopLocalModelView | null): DesktopLocalJobCreateInput {
   const profile = modelProfile(model);
-  const values = preset === "fast" ? { steps: 20, aspectAdjustedSteps: 18, samplingMaxEdge: 1280, samplingPixelBudget: 786_432 } : preset === "extreme" ? { steps: 45, aspectAdjustedSteps: 42, samplingMaxEdge: 1792, samplingPixelBudget: 2_073_600 } : { steps: 37, aspectAdjustedSteps: 34, samplingMaxEdge: 1536, samplingPixelBudget: 1_350_000 };
+  const distilled = isDistilledAnimaModel(model);
+  const values = distilled
+    ? preset === "fast" ? { steps: 8, aspectAdjustedSteps: 8, samplingMaxEdge: 1280, samplingPixelBudget: 786_432 } : preset === "extreme" ? { steps: 30, aspectAdjustedSteps: 30, samplingMaxEdge: 1536, samplingPixelBudget: 1_350_000 } : { steps: 12, aspectAdjustedSteps: 12, samplingMaxEdge: 1536, samplingPixelBudget: 1_350_000 }
+    : preset === "fast" ? { steps: 20, aspectAdjustedSteps: 18, samplingMaxEdge: 1280, samplingPixelBudget: 786_432 } : preset === "extreme" ? { steps: 45, aspectAdjustedSteps: 42, samplingMaxEdge: 1792, samplingPixelBudget: 2_073_600 } : { steps: 37, aspectAdjustedSteps: 34, samplingMaxEdge: 1536, samplingPixelBudget: 1_350_000 };
   return { ...form, qualityPreset: preset, ...values, cfg: profile.cfg, samplerName: profile.samplerName, schedulerName: profile.schedulerName, aspectStepThreshold: 1.5, upscaleMethod: "lanczos", qualityPromptEnabled: true, defaultNegativeEnabled: true };
 }
 
@@ -187,9 +190,19 @@ function applyPreset(form: DesktopLocalJobCreateInput, preset: PresetName, model
 function modelProfile(model: DesktopLocalModelView | null): Pick<DesktopLocalJobCreateInput, "cfg" | "samplerName" | "schedulerName"> {
   const fileName = model?.modelFileName.toLowerCase() || "";
   if (model?.workflowKind !== "anima") return { cfg: 5, samplerName: "euler", schedulerName: "normal" };
+  if (fileName.includes("anima8step")) return { cfg: 1, samplerName: "euler_ancestral", schedulerName: "normal" };
   if (fileName.includes("realskin") || fileName.includes("3dharem")) return { cfg: 4, samplerName: "euler_ancestral", schedulerName: "normal" };
   if (fileName.includes("waianima")) return { cfg: 4.5, samplerName: "euler_ancestral", schedulerName: "normal" };
   return { cfg: 4, samplerName: "er_sde", schedulerName: "simple" };
+}
+
+/** 蒸馏 Anima 底模使用作者验证的低步数预设，避免套用完整底模参数后烧图。 */
+function isDistilledAnimaModel(model: DesktopLocalModelView | null): boolean { return model?.workflowKind === "anima" && model.modelFileName.toLowerCase().includes("anima8step"); }
+
+/** 质量卡片随当前底模展示真实步数和像素预算。 */
+function presetSummary(preset: PresetName, model: DesktopLocalModelView | null): string {
+  const values = applyPreset(createInitialForm("public"), preset, model);
+  return `${values.steps} 步 · 约 ${(values.samplingPixelBudget / 1_000_000).toFixed(2)} MP`;
 }
 
 /** 质量档外显名称用于提交区确认当前行为。 */

@@ -159,7 +159,8 @@ function deployServiceOnly(serviceTarget, definition) {
   run("pnpm", ["--filter", definition.workspace, "run", "type-check"]);
   run("pnpm", ["--filter", definition.workspace, "run", "build"]);
   if (serviceTarget === "api") run("pnpm", ["--filter", definition.workspace, "run", "test"]);
-  const packageItems = ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "tsconfig.base.json", ".npmrc", "packages", `apps/${definition.app}`, ...(definition.prisma ? ["prisma"] : [])];
+  // API 的模型目录 bootstrap 属于数据库发布步骤，增量包必须携带真实脚本而不是依赖服务器旧副本。
+  const packageItems = ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "tsconfig.base.json", ".npmrc", "packages", `apps/${definition.app}`, ...(definition.prisma ? ["prisma", "scripts/bootstrap-anima-catalog.mjs"] : [])];
   try {
     run("tar", ["-czf", archive, "--exclude=node_modules", "--exclude=dist", "--exclude=*.tsbuildinfo", "--exclude=.env", "-C", root, ...packageItems]);
     run("ssh", [...sshArguments, "-p", port, host, `cat > '${remoteArchive}'`], { input: readFileSync(archive) });
@@ -174,7 +175,7 @@ function serviceOnlyProductionScript(serviceTarget, definition) {
   const prismaCommands = definition.prisma
     ? "pnpm run db:generate\npnpm run db:migrate:deploy"
     : "";
-  const postBuildCommands = definition.prisma ? "pnpm run bootstrap:tag-translations" : "";
+  const postBuildCommands = definition.prisma ? "pnpm run bootstrap:tag-translations\npnpm run bootstrap:anima" : "";
   return `set -euo pipefail
 ROOT=/local-platform
 TMP=/tmp/drawhime-local-${serviceTarget}-${stamp}
@@ -187,6 +188,7 @@ cp -a "$TMP/packages" "$ROOT/packages"
 mkdir -p "$ROOT/apps"
 cp -a "$TMP/apps/${definition.app}" "$ROOT/apps/"
 ${definition.prisma ? 'rm -rf "$ROOT/prisma"\ncp -a "$TMP/prisma" "$ROOT/prisma"' : ""}
+${definition.prisma ? 'mkdir -p "$ROOT/scripts"\ncp -a "$TMP/scripts/bootstrap-anima-catalog.mjs" "$ROOT/scripts/bootstrap-anima-catalog.mjs"' : ""}
 for item in package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json .npmrc; do cp -a "$TMP/$item" "$ROOT/$item"; done
 cd "$ROOT"
 export PUPPETEER_SKIP_DOWNLOAD=true

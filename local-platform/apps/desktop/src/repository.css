@@ -567,17 +567,21 @@
 .repository-dialog-backdrop {
   position: fixed;
   z-index: 120;
-  inset: 0;
+  inset: 0 auto auto 0;
+  width: calc(100vw / var(--desktop-font-scale));
+  height: calc(100vh / var(--desktop-font-scale));
   display: grid;
   place-items: center;
-  padding: 24px;
+  /* 弹窗跟随字体缩放后的逻辑视口，并在四边保留同等可点击距离。 */
+  padding: calc(18px / var(--desktop-font-scale));
+  overflow: hidden;
   background: rgba(5, 8, 12, .7);
   backdrop-filter: blur(10px);
 }
 
 .repository-dialog {
   width: min(720px, 100%);
-  max-height: min(720px, calc(100vh - 48px));
+  max-height: min(720px, 100%);
   overflow: auto;
   padding: 16px;
   border: 1px solid var(--border);

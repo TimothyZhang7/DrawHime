@@ -41,6 +41,9 @@ export function CaptioningPage({ datasets, captionJobs, captioningReady, onUpdat
   const [translations, setTranslations] = useState<TranslationMap>({});
   const [translationError, setTranslationError] = useState("");
   const requestedTranslations = useRef(new Set<string>());
+  const translationsSnapshot = useRef<TranslationMap>({});
+  const completedTranslationRefresh = useRef(0);
+  const [translationRefresh, setTranslationRefresh] = useState(0);
   const [busy, setBusy] = useState(false);
   const [captionOptions, setCaptionOptions] = useState<Pick<DesktopCaptionJobCreateInput, "generalThreshold" | "characterThreshold" | "includeCharacterTags">>({ generalThreshold: 0.35, characterThreshold: 0.85, includeCharacterTags: false });
   const selected = datasets.find((dataset) => dataset.id === selectedId) || null;
@@ -49,22 +52,40 @@ export function CaptioningPage({ datasets, captionJobs, captioningReady, onUpdat
   const allTags = useMemo(() => [...new Set((selected?.assets || []).flatMap((asset) => splitTags(asset.caption || "")))], [selected?.assets]);
   useEffect(() => { if (selectedId && !datasets.some((dataset) => dataset.id === selectedId)) setSelectedId(""); }, [datasets, selectedId]);
   useEffect(() => { setDetailTriggerText(selected?.triggerWords.join(", ") || ""); }, [selected?.id, selected?.triggerWords]);
-  useEffect(() => { setTranslations({}); setTranslationError(""); requestedTranslations.current.clear(); }, [selected?.id]);
+  useEffect(() => { translationsSnapshot.current = translations; }, [translations]);
+  useEffect(() => { translationsSnapshot.current = {}; setTranslations({}); setTranslationError(""); requestedTranslations.current.clear(); completedTranslationRefresh.current = 0; setTranslationRefresh(0); }, [selected?.id]);
+  // 已登录时定期刷新当前训练集的翻译映射；窗口重新获得焦点也立即与网页词库对齐。
   useEffect(() => {
-    const missing = allTags.filter((tag) => !translations[tag] && !requestedTranslations.current.has(tag));
-    if (!missing.length) return;
-    missing.forEach((tag) => requestedTranslations.current.add(tag));
+    if (!selected) return undefined;
+    const refresh = () => setTranslationRefresh((current) => current + 1);
+    const timer = window.setInterval(refresh, 5 * 60_000);
+    const onVisibility = () => { if (document.visibilityState === "visible") refresh(); };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => { window.clearInterval(timer); document.removeEventListener("visibilitychange", onVisibility); };
+  }, [selected?.id]);
+  useEffect(() => {
+    const forceRefresh = translationRefresh !== completedTranslationRefresh.current;
+    const pending = forceRefresh ? allTags : allTags.filter((tag) => !translationsSnapshot.current[tag] && !requestedTranslations.current.has(tag));
+    if (!pending.length) { if (forceRefresh) completedTranslationRefresh.current = translationRefresh; return; }
+    pending.forEach((tag) => requestedTranslations.current.add(tag));
     let cancelled = false;
     void (async () => {
-      for (let index = 0; index < missing.length; index += 200) {
-        const result = await translateDesktopTrainingTags({ tags: missing.slice(index, index + 200) });
+      const received: TranslationMap = {};
+      for (let index = 0; index < pending.length; index += 200) {
+        const result = await translateDesktopTrainingTags({ tags: pending.slice(index, index + 200) });
         if (cancelled) return;
-        setTranslations((current) => ({ ...current, ...Object.fromEntries(result.translations.map((item) => [item.tag, item])) }));
+        Object.assign(received, Object.fromEntries(result.translations.map((item) => [item.tag, item])));
       }
-      if (!cancelled) setTranslationError("");
-    })().catch((error) => { if (!cancelled) setTranslationError(errorMessage(error)); });
-    return () => { cancelled = true; };
-  }, [allTags, translations]);
+      if (!cancelled) {
+        const next = { ...translationsSnapshot.current, ...received };
+        translationsSnapshot.current = next;
+        completedTranslationRefresh.current = translationRefresh;
+        setTranslations(next);
+        setTranslationError("");
+      }
+    })().catch((error) => { pending.forEach((tag) => requestedTranslations.current.delete(tag)); if (!cancelled) setTranslationError(errorMessage(error)); });
+    return () => { cancelled = true; pending.forEach((tag) => requestedTranslations.current.delete(tag)); };
+  }, [allTags, translationRefresh]);
 
   /** 新训练集只登记元数据，图片仍由用户明确选择后原子导入。 */
   const create = async () => {
@@ -156,7 +177,8 @@ export function LoraTrainingPage({ datasets, trainingJobs, models, trainingReady
   const [busy, setBusy] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, DesktopTrainingJobCreateInput>>({});
   const selected = datasets.find((dataset) => dataset.id === selectedId) || null;
-  const animaModels = useMemo(() => models.filter((model) => model.workflowKind === "anima" && model.available), [models]);
+  // 8-Step 蒸馏底模只用于推理，桌面训练页不允许创建不受支持的训练快照。
+  const animaModels = useMemo(() => models.filter((model) => model.workflowKind === "anima" && model.available && !model.modelFileName.toLowerCase().includes("anima8step")), [models]);
   const draft = selected ? drafts[selected.id] || defaultDesktopTrainingDraft(selected, animaModels[0]?.id || "") : null;
   const datasetReady = Boolean(selected && selected.status === "confirmed" && selected.assets.length >= 5 && selected.assets.every((asset) => asset.available && asset.caption?.trim()));
   const parametersReady = Boolean(draft?.title.trim() && (draft.modelId || animaModels[0]?.id));

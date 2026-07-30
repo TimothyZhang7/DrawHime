@@ -218,7 +218,8 @@ function CaptionStage({ token, dataset, onChanged, onError }: { token: string; d
 
 /** 创建使用真实 Runtime 参数和服务端动态计价的训练任务。 */
 function TrainingCreator({ token, dataset, models, onCreated }: { token: string; dataset: TrainingDatasetView; models: InferenceModelView[]; onCreated: () => Promise<void> }) {
-  const animaModels = useMemo(() => models.filter((model) => model.family === "anima"), [models]);
+  // 蒸馏推理底模不具备稳定训练语义，只展示目录明确允许训练的 Anima 模型。
+  const animaModels = useMemo(() => models.filter((model) => model.family === "anima" && model.defaultParameters.trainingSupported !== false), [models]);
   const [modelId, setModelId] = useState("");
   const [title, setTitle] = useState("");
   const [triggers, setTriggers] = useState(() => dataset.triggerWords.join(", "));

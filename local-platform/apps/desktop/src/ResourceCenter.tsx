@@ -108,9 +108,11 @@ function DependencyRow({ resource, current, installing, bulkBusy, onDownload, on
 /** 队列卡把百分比与传输元数据分行展示，避免小字号文本压在进度条内。 */
 function QueueRow({ resource, current, installing, bulkBusy, onDownload, onPause, onInstall }: { resource: ResourceItem; current?: DesktopResourceDownloadView; installing?: DesktopResourceInstallView; bulkBusy: boolean } & ResourceActions) {
   const installBusy = Boolean(installing && ACTIVE_INSTALL_STATES.has(installing.status));
-  const downloadComplete = resource.downloaded || current?.status === "downloaded";
-  const percent = installBusy ? Math.round(installing!.progress) : resource.installed || downloadComplete ? 100 : current ? Math.min(100, Math.round(current.downloadedBytes / current.totalBytes * 100)) : 0;
-  const status = installBusy ? installStatusLabel(installing!.status) : resource.installed ? "已加载" : downloadComplete ? "下载完成" : current ? downloadStatusLabel(current.status) : "等待下载";
+  const currentFailed = current?.status === "failed";
+  // 当前失败事件优先于上一次目录快照，防止损坏缓存仍被旧 downloaded 状态显示为 100%。
+  const downloadComplete = !currentFailed && (resource.downloaded || current?.status === "downloaded");
+  const percent = installBusy ? Math.round(installing!.progress) : currentFailed ? safeDownloadPercent(current) : resource.installed || downloadComplete ? 100 : current ? safeDownloadPercent(current) : 0;
+  const status = installBusy ? installStatusLabel(installing!.status) : currentFailed ? "下载失败" : resource.installed ? "已加载" : downloadComplete ? "下载完成" : current ? downloadStatusLabel(current.status) : "等待下载";
   const meta = progressMeta(resource, current, installing);
   return <article className="queue-resource"><header><div><strong>{resourceDisplayName(resource)}</strong><span>{resource.fileName}</span></div><b>{percent}%</b></header><div className="resource-progress-head"><strong>{status}</strong><span>{current ? `${formatResourceBytes(current.downloadedBytes)} / ${formatResourceBytes(current.totalBytes)}` : resource.installed ? "文件已加载" : formatResourceBytes(resource.byteSize)}</span></div><div className={`resource-progress-track is-${current?.status || (installBusy ? "installing" : resource.installed ? "downloaded" : "queued")}`}><i style={{ width: `${percent}%` }} /></div><div className="resource-progress-meta">{meta.map((item) => <span key={item}>{item}</span>)}</div>{current?.switchReason && <small className="resource-switch-reason">{current.switchReason}</small>}<footer><ResourceAction resource={resource} current={current} installing={installing} bulkBusy={bulkBusy} onDownload={onDownload} onPause={onPause} onInstall={onInstall} /></footer></article>;
 }
@@ -124,13 +126,15 @@ function ResourceAction({ resource, current, installing, bulkBusy, onDownload, o
   if (resource.installed) return <button disabled><CheckCircle2 />已加载</button>;
   if (installBusy) return <button disabled><LoaderCircle className="spin" />安装中</button>;
   if (downloadBusy) return <button disabled><LoaderCircle className="spin" />{current?.status === "verifying" ? "校验中" : "排队中"}</button>;
+  if (current?.status === "failed") return <button disabled={bulkBusy || !sourceAvailable} onClick={() => onDownload(resource.id)}><Download />重试</button>;
   if (resource.downloaded || current?.status === "downloaded") return <button disabled={bulkBusy} onClick={() => onInstall(resource.id)}><PackageCheck />安装</button>;
-  return <button disabled={bulkBusy || !sourceAvailable} onClick={() => onDownload(resource.id)}><Download />{current?.status === "paused" ? "继续" : current?.status === "failed" ? "重试" : sourceAvailable ? "下载" : "无来源"}</button>;
+  return <button disabled={bulkBusy || !sourceAvailable} onClick={() => onDownload(resource.id)}><Download />{current?.status === "paused" ? "继续" : sourceAvailable ? "下载" : "无来源"}</button>;
 }
 
 /** 进度辅助信息按阶段隐藏失效速度和 ETA。 */
 function progressMeta(resource: ResourceItem, current?: DesktopResourceDownloadView, installing?: DesktopResourceInstallView): string[] {
   if (installing && ACTIVE_INSTALL_STATES.has(installing.status)) return ["正在写入并校验安装目录"];
+  if (current?.status === "failed") return [current.error || "下载失败，请重试", current.sourceKind ? `来源 ${sourceKindLabel(current.sourceKind)}` : null].filter(Boolean) as string[];
   if (resource.downloaded && !resource.installed) return ["下载与哈希校验已完成，可以直接安装"];
   if (!current) return [resource.installed ? "依赖已加载" : "尚未进入下载队列"];
   const source = current.sourceKind ? `来源 ${sourceKindLabel(current.sourceKind)}` : null;
@@ -138,7 +142,6 @@ function progressMeta(resource: ResourceItem, current?: DesktopResourceDownloadV
   if (current.status === "paused") return ["断点已保留，继续后重新测速", source].filter(Boolean) as string[];
   if (current.status === "verifying") return ["正在校验文件大小与 SHA-256", source].filter(Boolean) as string[];
   if (current.status === "downloaded") return [resource.installed ? "下载和安装均已完成" : "下载完成，等待安装", source].filter(Boolean) as string[];
-  if (current.status === "failed") return [current.error || "下载失败，断点已保留", source].filter(Boolean) as string[];
   return ["等待前序资源完成", source].filter(Boolean) as string[];
 }
 
@@ -161,6 +164,9 @@ function resourceKindLabel(kind: string): string { return { runtime: "运行环�
 function sourceKindLabel(kind: string): string { return { official: "官方", mirror: "主站镜像" }[kind] || kind; }
 function downloadStatusLabel(status: DesktopResourceDownloadView["status"]): string { return { queued: "排队中", downloading: "下载中", paused: "已暂停", verifying: "校验中", downloaded: "下载完成", failed: "下载失败" }[status]; }
 function installStatusLabel(status: DesktopResourceInstallView["status"]): string { return { verifying: "校验缓存", installing: "安装中", switching: "切换版本", installed: "已安装", rolled_back: "已回滚", failed: "安装失败" }[status]; }
-function formatResourceBytes(value: number): string { if (value < 1024 ** 2) return `${Math.max(1, Math.round(value / 1024))} KiB`; if (value < 1024 ** 3) return `${(value / 1024 ** 2).toFixed(1)} MiB`; return `${(value / 1024 ** 3).toFixed(2)} GiB`; }
+/** 字节格式化保留真实零值，小文件不再被误报成已经下载 1 KiB。 */
+function formatResourceBytes(value: number): string { if (value < 1024) return `${Math.max(0, Math.round(value))} B`; if (value < 1024 ** 2) return `${Math.round(value / 1024)} KiB`; if (value < 1024 ** 3) return `${(value / 1024 ** 2).toFixed(1)} MiB`; return `${(value / 1024 ** 3).toFixed(2)} GiB`; }
+/** 防御异常总大小和过期事件，进度永远保持在真实的 0–100 范围。 */
+function safeDownloadPercent(current: DesktopResourceDownloadView): number { return current.totalBytes > 0 ? Math.min(100, Math.max(0, Math.round(current.downloadedBytes / current.totalBytes * 100))) : 0; }
 function formatTransferRate(value: number): string { return value < 1024 ** 2 ? `${Math.max(1, Math.round(value / 1024))} KiB/s` : `${(value / 1024 ** 2).toFixed(value >= 100 * 1024 ** 2 ? 0 : 1)} MiB/s`; }
 function formatEta(seconds: number): string { if (seconds < 60) return `约 ${Math.max(1, seconds)} 秒`; if (seconds < 3600) return `约 ${Math.ceil(seconds / 60)} 分钟`; const minutes = Math.ceil((seconds % 3600) / 60); return `约 ${Math.floor(seconds / 3600)} 小时${minutes ? ` ${minutes} 分钟` : ""}`; }

@@ -11,10 +11,31 @@ export async function translateTrainingTags(tags: string[]): Promise<TrainingTag
   const storedTags = new Set(stored.map((item) => item.tag));
   const missing = normalized.filter((tag) => !storedTags.has(tag));
   if (missing.length > 0) {
-    const translated = await requestTranslations(missing);
-    await Promise.all(translated.map((item) => saveAiTagTranslation(item.tag, item.translated)));
+    // 大批标签拆成有限并发的小批次，降低单次响应截断风险并缩短桌面等待时间。
+    const translated = (await mapWithConcurrency(chunk(missing, 50), 2, requestTranslations)).flat();
+    for (const batch of chunk(translated, 25)) await Promise.all(batch.map((item) => saveAiTagTranslation(item.tag, item.translated)));
   }
   return { translations: await readTagTranslations(normalized) };
+}
+
+/** 把数组切成固定上限的小批次，避免一个模型响应承载过多标签。 */
+function chunk<Value>(values: Value[], size: number): Value[][] {
+  const result: Value[][] = [];
+  for (let index = 0; index < values.length; index += size) result.push(values.slice(index, index + size));
+  return result;
+}
+
+/** 使用固定数量 Worker 处理批次，兼顾翻译速度与上游限流稳定性。 */
+async function mapWithConcurrency<Input, Output>(values: Input[], concurrency: number, mapper: (value: Input) => Promise<Output>): Promise<Output[]> {
+  const result = new Array<Output>(values.length);
+  let nextIndex = 0;
+  await Promise.all(Array.from({ length: Math.min(concurrency, values.length) }, async () => {
+    while (nextIndex < values.length) {
+      const index = nextIndex++;
+      result[index] = await mapper(values[index]!);
+    }
+  }));
+  return result;
 }
 
 /** 调用真实 OpenAI 兼容文本模型并要求稳定 JSON 数组。 */

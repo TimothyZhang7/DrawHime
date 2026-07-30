@@ -83,6 +83,20 @@ const modelCatalog = [
     byteSize: 4182233976,
     parameters: { profileRevision: 7, ...balancedFullCheckpointSampling, cfg: 4.5, sampler: "euler_ancestral", scheduler: "normal", qualityPrefix: "masterpiece, best quality, score_7", defaultNegativePrompt: `${defaultNegativePrompt}, blurry, jpeg artifacts, lowres, censor` },
   },
+  {
+    workflowVersion: 33,
+    fileName: "miaomiaoHarem_anima8Step10.safetensors",
+    displayName: "MiaoMiao Harem Anima 8-Step 1.0",
+    description: "MiaoMiao Harem Anima 8-Step 1.0 蒸馏底模，使用 12 步质量档与 CFG 1；该实验版本仅用于推理。",
+    runtimeSlug: "comfyui-miaomiao-harem-anima8step10",
+    productCode: "local.miaomiao-harem-anima8step10.image",
+    sourceUrls: ["https://civitai.com/models/934764/miaomiao-harem?modelVersionId=3125933"],
+    sourceVersionId: 3125933,
+    sha256: "10760718321F82577F648893416655FB979A8026CDD8977FD74A9AC998E1314A",
+    byteSize: 4182218328,
+    // 蒸馏模型按作者建议使用 Euler A + Normal，独立配置避免被完整底模的 37 步质量档覆盖。
+    parameters: { profileRevision: 1, qualityProfile: "miaomiao-harem-anima8step-v1", targetSeconds: 90, steps: 12, aspectStepThreshold: 1.5, aspectAdjustedSteps: 12, samplingMaxEdge: 1536, samplingPixelBudget: 1350000, samplingPixelBudgetAspectSlope: 0, cfg: 1, sampler: "euler_ancestral", scheduler: "normal", qualityPrefix: "masterpiece, best quality, score_7, safe, very aesthetic, ultra detailed, pale skin, fair skin, high contrast", defaultNegativePrompt, systemTurboLoraEnabled: false, systemHighresLoraEnabled: false, trainingSupported: false },
+  },
 ];
 
 try {
