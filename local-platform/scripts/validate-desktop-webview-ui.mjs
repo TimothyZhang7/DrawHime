@@ -402,8 +402,11 @@ function buildProbeExpression() {
     try {
       await window.__TAURI_INTERNALS__.invoke('desktop_create_local_job', { input: {
         modelId: 'ui-no-gpu-probe', prompt: 'ui gate probe', negativePrompt: null,
-        width: 1024, height: 1024, steps: 1, cfg: 1, samplerName: 'euler',
-        schedulerName: 'normal', seed: 1, loras: [], privacy: 'private'
+        width: 1024, height: 1024, qualityPreset: 'custom', steps: 1, cfg: 1,
+        samplerName: 'euler', schedulerName: 'normal', samplingMaxEdge: 1024,
+        samplingPixelBudget: 1048576, aspectStepThreshold: 1.5, aspectAdjustedSteps: 1,
+        upscaleMethod: 'lanczos', qualityPromptEnabled: false, defaultNegativeEnabled: false,
+        seed: 1, loras: [], privacy: 'private'
       }});
     } catch (error) { coreSubmissionError = String(error); }
     const banner = document.querySelector('.environment-banner');
