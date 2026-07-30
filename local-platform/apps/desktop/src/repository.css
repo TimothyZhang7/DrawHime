@@ -643,3 +643,144 @@
   .repository-detail-summary { padding: 20px; }
   .repository-dialog-backdrop { padding: 10px; }
 }
+
+/* 仓库卡片和弹窗统一收敛为小圆角，突出图片、标题和状态而非容器装饰。 */
+.repository-toolbar,
+.repository-card,
+.repository-detail-hero,
+.repository-detail-grid > article,
+.repository-detail-copy,
+.repository-dialog,
+.repository-empty,
+.repository-hint {
+  border-radius: 4px;
+}
+
+.repository-search,
+.repository-controls select,
+.repository-controls > button,
+.repository-local-filter,
+.repository-card > button,
+.repository-back,
+.repository-detail-actions button,
+.repository-source-list button,
+.repository-trigger-list button,
+.repository-dialog button,
+.repository-form-grid input,
+.repository-form-grid select {
+  border-radius: 3px;
+}
+
+/* 仓库子页面把示例图和真实本机引用任务分成独立内容区，信息层级与网页仓库保持一致。 */
+.repository-detail-media,
+.repository-related-jobs {
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel);
+}
+
+.repository-detail-media > header,
+.repository-related-jobs > header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 11px;
+}
+
+.repository-detail-media > header > svg,
+.repository-related-jobs > header > svg {
+  width: 16px;
+  color: var(--accent);
+}
+
+.repository-detail-media > header div,
+.repository-related-jobs > header div { min-width: 0; }
+.repository-detail-media > header span,
+.repository-related-jobs > header span { display: block; color: var(--accent); font-size: 7px; font-weight: 850; letter-spacing: .12em; }
+.repository-detail-media > header h3,
+.repository-related-jobs > header h3 { margin: 2px 0 0; font-size: 11px; }
+.repository-detail-media > header small,
+.repository-related-jobs > header small { margin-left: auto; color: var(--muted); font-size: 8px; }
+
+.repository-example-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.repository-example-grid article {
+  position: relative;
+  aspect-ratio: 1;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--panel-muted);
+}
+
+.repository-example-grid img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+}
+
+.repository-example-grid article > span {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  padding: 3px 5px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  color: var(--text);
+  font-size: 7px;
+  backdrop-filter: blur(8px);
+}
+
+.repository-related-jobs > div:not(.repository-detail-empty) {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.repository-related-jobs article {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 7px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--panel-raised);
+}
+
+.repository-related-jobs article > img,
+.repository-job-fallback {
+  width: 54px;
+  height: 54px;
+  display: grid;
+  place-items: center;
+  object-fit: cover;
+  border-radius: 2px;
+  background: var(--panel-muted);
+}
+
+.repository-job-fallback svg { width: 18px; color: var(--muted); }
+.repository-related-jobs article > span { min-width: 0; }
+.repository-related-jobs article strong,
+.repository-related-jobs article small { display: block; overflow: hidden; text-overflow: ellipsis; }
+.repository-related-jobs article strong { font-size: 8px; white-space: nowrap; }
+.repository-related-jobs article small { margin-top: 4px; color: var(--muted); font-size: 7px; white-space: nowrap; }
+.repository-related-jobs article > b { padding: 3px 5px; border-radius: 3px; background: var(--accent-soft); color: var(--accent); font-size: 7px; white-space: nowrap; }
+.repository-detail-empty { min-height: 96px; display: grid; place-items: center; border: 1px dashed var(--border); border-radius: 3px; color: var(--muted); font-size: 8px; }
+
+@media (max-width: 1100px) {
+  .repository-example-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .repository-related-jobs > div:not(.repository-detail-empty) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 760px) {
+  .repository-example-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .repository-related-jobs > div:not(.repository-detail-empty) { grid-template-columns: 1fr; }
+}

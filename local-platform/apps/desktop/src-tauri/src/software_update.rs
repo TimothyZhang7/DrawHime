@@ -5,6 +5,7 @@ use crate::{
         DesktopOfflineUpdateImportInput, DesktopResourceManifestItem,
         DesktopSoftwareUpdateView, DesktopSettings,
     },
+    process::hide_window,
     resource,
 };
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
@@ -14,8 +15,6 @@ use std::{
     path::Path,
     process::{Command, Stdio},
 };
-#[cfg(windows)]
-use std::os::windows::process::CommandExt;
 
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 const APPLY_STALE_MINUTES: i64 = 30;
@@ -269,6 +268,7 @@ exit $process.ExitCode
         )
         .map_err(|error| format!("保存更新应用状态失败：{error}"))?;
     let mut command = Command::new("powershell.exe");
+    hide_window(&mut command);
     command
         .args([
             "-NoProfile",
@@ -288,8 +288,6 @@ exit $process.ExitCode
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    #[cfg(windows)]
-    command.creation_flags(0x08000000);
     command.spawn().map_err(|error| {
         let message = format!("启动更新程序失败：{error}");
         let _ = database.execute(
@@ -562,5 +560,39 @@ mod tests {
             )
             .expect("读取更新状态");
         assert_eq!(status, "applying");
+    }
+
+    #[test]
+    fn applying_state_records_real_installer_exit_code() {
+        let temporary = tempfile::tempdir().expect("创建更新退出码测试目录");
+        let database = Connection::open_in_memory().expect("创建更新退出码测试数据库");
+        create_update_table(&database);
+        let now = Utc::now();
+        database.execute(
+            "INSERT INTO software_updates(version,resource_id,file_name,sha256,byte_size,source,status,created_at,updated_at) VALUES('1.2.5','application.desktop','update.exe',?1,10,'online','applying',?2,?2)",
+            params!["a".repeat(64), now.to_rfc3339()],
+        ).expect("写入待确认更新");
+        fs::write(apply_result_path(temporary.path(), "1.2.5"), "1603").expect("写入安装器退出码");
+        reconcile_applying_records(&database, temporary.path(), "1.2.4", now).expect("收敛安装器失败状态");
+        let (status, error): (String, Option<String>) = database.query_row("SELECT status,error FROM software_updates WHERE version='1.2.5'", [], |row| Ok((row.get(0)?, row.get(1)?))).expect("读取安装器失败状态");
+        assert_eq!(status, "failed");
+        assert_eq!(error.as_deref(), Some("安装器退出码 1603"));
+    }
+
+    #[test]
+    fn applying_state_marks_missing_result_failed_only_after_deadline() {
+        let temporary = tempfile::tempdir().expect("创建更新超时测试目录");
+        let database = Connection::open_in_memory().expect("创建更新超时测试数据库");
+        create_update_table(&database);
+        let now = Utc::now();
+        let stale_at = (now - ChronoDuration::minutes(APPLY_STALE_MINUTES + 1)).to_rfc3339();
+        database.execute(
+            "INSERT INTO software_updates(version,resource_id,file_name,sha256,byte_size,source,status,created_at,updated_at) VALUES('1.2.6','application.desktop','update.exe',?1,10,'online','applying',?2,?2)",
+            params!["a".repeat(64), stale_at],
+        ).expect("写入超时更新");
+        reconcile_applying_records(&database, temporary.path(), "1.2.5", now).expect("收敛更新超时状态");
+        let (status, error): (String, Option<String>) = database.query_row("SELECT status,error FROM software_updates WHERE version='1.2.6'", [], |row| Ok((row.get(0)?, row.get(1)?))).expect("读取更新超时状态");
+        assert_eq!(status, "failed");
+        assert_eq!(error.as_deref(), Some("软件更新在规定时间内未完成"));
     }
 }

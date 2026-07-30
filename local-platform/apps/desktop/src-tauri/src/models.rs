@@ -80,12 +80,13 @@ pub struct DesktopLocalLoraImportInput {
     pub trigger_words: Vec<String>,
 }
 
-/** 本地任务选择的单个 LoRA 强度。 */
+/** 本地任务选择的单个 LoRA 模型与文本编码器独立强度。 */
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DesktopLocalLoraSelectionInput {
     pub id: String,
     pub strength: f64,
+    pub clip_strength: f64,
 }
 
 /** 本地训练集中的单张真实图片与 Caption 视图。 */
@@ -288,10 +289,18 @@ pub struct DesktopLocalJobCreateInput {
     pub negative_prompt: Option<String>,
     pub width: u32,
     pub height: u32,
+    pub quality_preset: String,
     pub steps: u32,
     pub cfg: f64,
     pub sampler_name: String,
     pub scheduler_name: String,
+    pub sampling_max_edge: u32,
+    pub sampling_pixel_budget: u32,
+    pub aspect_step_threshold: f64,
+    pub aspect_adjusted_steps: u32,
+    pub upscale_method: String,
+    pub quality_prompt_enabled: bool,
+    pub default_negative_enabled: bool,
     pub seed: Option<u32>,
     pub loras: Vec<DesktopLocalLoraSelectionInput>,
     pub privacy: String,
@@ -303,10 +312,20 @@ pub struct DesktopLocalJobCreateInput {
 pub struct DesktopLocalJobParametersView {
     pub width: u32,
     pub height: u32,
+    pub quality_preset: String,
     pub steps: u32,
     pub cfg: f64,
     pub sampler_name: String,
     pub scheduler_name: String,
+    pub sampling_max_edge: u32,
+    pub sampling_pixel_budget: u32,
+    pub aspect_step_threshold: f64,
+    pub aspect_adjusted_steps: u32,
+    pub upscale_method: String,
+    pub quality_prompt_enabled: bool,
+    pub quality_prefix: Option<String>,
+    pub default_negative_enabled: bool,
+    pub default_negative_prompt: Option<String>,
     pub seed: u32,
 }
 
@@ -332,6 +351,7 @@ pub struct DesktopLocalJobLoraView {
     pub file_name: String,
     pub sha256: String,
     pub strength: f64,
+    pub clip_strength: f64,
     pub trigger_words: Vec<String>,
 }
 
@@ -439,6 +459,8 @@ pub struct DesktopSettings {
     pub theme_mode: String,
     pub dependency_source: String,
     pub default_privacy: String,
+    /** 登录账号后是否自动把新完成的本机图片加入网页图库同步队列。 */
+    pub auto_upload: bool,
     pub model_root: String,
     pub output_root: String,
     pub runtime_root: String,

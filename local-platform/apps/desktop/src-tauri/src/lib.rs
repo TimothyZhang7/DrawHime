@@ -8,6 +8,7 @@ mod generation;
 mod gallery_sync;
 mod local_model;
 mod models;
+mod process;
 mod resource;
 mod runtime;
 mod scheduler;
@@ -68,7 +69,7 @@ fn desktop_inspect_environment(state: State<'_, DesktopState>) -> Result<Desktop
 #[tauri::command]
 fn desktop_save_settings(app: tauri::AppHandle, state: State<'_, DesktopState>, settings: DesktopSettings) -> Result<DesktopSettings, String> {
     let settings = state.save_settings(settings)?;
-    app.asset_protocol_scope().allow_directory(&settings.output_root, true).map_err(|error| format!("授权作品预览目录失败：{error}"))?;
+    allow_preview_directories(&app, &state.app_data_dir, &settings)?;
     Ok(settings)
 }
 
@@ -194,17 +195,17 @@ fn desktop_list_local_loras(state: State<'_, DesktopState>) -> Result<Vec<Deskto
 
 /** 使用设备会话读取网站 LoRA 目录，原始会话密钥不会进入 WebView。 */
 #[tauri::command]
-async fn desktop_load_website_loras(state: State<'_, DesktopState>) -> Result<Vec<DesktopWebsiteLoraView>, String> {
+async fn desktop_load_website_loras(state: State<'_, DesktopState>, force_refresh: bool) -> Result<Vec<DesktopWebsiteLoraView>, String> {
     let app_data_dir = state.app_data_dir.clone();
     let installed = state.list_local_loras()?.into_iter().map(|item| item.sha256).collect();
-    tauri::async_runtime::spawn_blocking(move || website_lora::load_catalog(&app_data_dir, &installed)).await.map_err(|error| format!("网站 LoRA 目录任务异常：{error}"))?
+    tauri::async_runtime::spawn_blocking(move || website_lora::load_catalog(&app_data_dir, &installed, force_refresh)).await.map_err(|error| format!("网站 LoRA 目录任务异常：{error}"))?
 }
 
 /** 使用设备会话读取网站底模目录并缓存封面，不向 WebView 暴露会话密钥。 */
 #[tauri::command]
-async fn desktop_load_website_models(state: State<'_, DesktopState>) -> Result<Vec<DesktopWebsiteModelView>, String> {
+async fn desktop_load_website_models(state: State<'_, DesktopState>, force_refresh: bool) -> Result<Vec<DesktopWebsiteModelView>, String> {
     let app_data_dir = state.app_data_dir.clone();
-    tauri::async_runtime::spawn_blocking(move || website_model::load_catalog(&app_data_dir)).await.map_err(|error| format!("网站底模目录任务异常：{error}"))?
+    tauri::async_runtime::spawn_blocking(move || website_model::load_catalog(&app_data_dir, force_refresh)).await.map_err(|error| format!("网站底模目录任务异常：{error}"))?
 }
 
 /** 断点下载并校验网站 LoRA 后原子导入本机仓库。 */
@@ -381,6 +382,15 @@ fn installed_data_root() -> Option<PathBuf> {
     install_root.join("uninstall.exe").is_file().then(|| install_root.join("data"))
 }
 
+/** 仅向 WebView 开放作品、训练图片和仓库媒体目录，不暴露 SQLite、模型权重或资源缓存。 */
+fn allow_preview_directories(app: &tauri::AppHandle, app_data_dir: &std::path::Path, settings: &DesktopSettings) -> Result<(), String> {
+    for directory in [PathBuf::from(&settings.output_root), app_data_dir.join("datasets"), app_data_dir.join("catalog-covers")] {
+        std::fs::create_dir_all(&directory).map_err(|error| format!("创建本机预览目录失败：{error}"))?;
+        app.asset_protocol_scope().allow_directory(directory, true).map_err(|error| format!("授权本机预览目录失败：{error}"))?;
+    }
+    Ok(())
+}
+
 /** 启动桌面窗口并在 setup 阶段建立真实本地数据库。 */
 pub fn run() {
     tauri::Builder::default()
@@ -390,7 +400,7 @@ pub fn run() {
             let app_data = installed_data_root().map(Ok).unwrap_or_else(|| app.path().app_data_dir().map_err(|error| format!("读取应用数据目录失败：{error}")))?;
             let mut state = DesktopState::initialize(&app_data)?;
             let settings = state.load_settings()?;
-            app.asset_protocol_scope().allow_directory(&settings.output_root, true).map_err(|error| format!("授权作品预览目录失败：{error}"))?;
+            allow_preview_directories(app.handle(), &app_data, &settings)?;
             state.start_scheduler(app.handle().clone())?;
             app.manage(state);
             // WebView 必须手动指定绝对数据目录，否则 WebView2 会在 LocalAppData 生成第二份缓存。

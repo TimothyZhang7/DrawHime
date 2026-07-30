@@ -26,6 +26,7 @@
     "desktop:deploy-manifest": "node scripts/deploy-desktop-resource-manifest.mjs",
     "desktop:publish-application": "node scripts/publish-desktop-application-update.mjs",
     "desktop:validate-windows-host": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/validate-desktop-windows-host.ps1",
+    "desktop:validate-update-e2e": "node scripts/validate-desktop-update-e2e.mjs",
     "desktop:set-version": "node scripts/set-desktop-version.mjs",
     "desktop:build-runtime": "node scripts/build-desktop-runtime.mjs",
     "desktop:build-captioner": "node scripts/build-desktop-captioner.mjs",

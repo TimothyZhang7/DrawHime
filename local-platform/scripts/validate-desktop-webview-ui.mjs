@@ -27,6 +27,8 @@ try {
     const result = await evaluateAfterInitialReload(client, buildProbeExpression());
     validateProbe(result, expectNoGpu);
     const repositoryEvidence = screenshotDirectory ? await captureRepositoryPages(client, screenshotDirectory) : null;
+    const galleryEvidence = screenshotDirectory ? await captureGalleryPage(client, screenshotDirectory) : null;
+    const resourceEvidence = screenshotDirectory ? await captureResourceCenter(client, screenshotDirectory) : null;
     const evidence = {
       checkedAt: new Date().toISOString(),
       targetTitle: result.documentTitle,
@@ -34,10 +36,13 @@ try {
       inferenceReady: result.inferenceReady,
       trainingReady: result.trainingReady,
       bannerText: result.bannerText,
+      coreStatusText: result.coreStatusText,
       navigationPages: result.navigationPages,
       pageIsolation: result.pageIsolation,
       coreSubmissionBlocked: result.coreSubmissionError.includes("本地生成当前不可用"),
       repositoryEvidence,
+      galleryEvidence,
+      resourceEvidence,
     };
     if (evidencePath) {
       await mkdir(path.dirname(path.resolve(evidencePath)), { recursive: true });
@@ -50,6 +55,97 @@ try {
 } finally {
   terminateProcessTree(child.pid);
   await removeUserDataDirectory(userDataDirectory);
+}
+
+/** 验证图库作品子页面和全宽记录列表；存在真实数据时继续验证任务详情弹窗。 */
+async function captureGalleryPage(client, directory) {
+  const targetDirectory = path.resolve(directory);
+  await mkdir(targetDirectory, { recursive: true });
+  const result = await client.evaluate(String.raw`(async () => {
+    const navigation = [...document.querySelectorAll('.desktop-sidebar nav button')].find((button) => button.textContent.trim() === '图库 / 记录');
+    if (!navigation) throw new Error('未找到图库 / 记录导航');
+    navigation.click();
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const tabs = [...document.querySelectorAll('.desktop-main > .workspace-page:not([hidden]) > .workspace-tabs button')];
+    const galleryTab = tabs.find((button) => button.textContent.includes('图库'));
+    const recordTab = tabs.find((button) => button.textContent.includes('记录'));
+    if (!galleryTab || !recordTab) throw new Error('图库二级入口状态不正确');
+    galleryTab.click();
+    await new Promise((resolve) => setTimeout(resolve, 180));
+    if (galleryTab.getAttribute('aria-selected') !== 'true') throw new Error('图库二级入口未切换为选中状态');
+    const selectedStyle = getComputedStyle(galleryTab);
+    const idleStyle = getComputedStyle(recordTab);
+    return { tabCount: tabs.length, selectedBackground: selectedStyle.backgroundColor, idleBackground: idleStyle.backgroundColor, sourceCards: document.querySelectorAll('.gallery-card').length, horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth };
+  })()`);
+  if (result.tabCount !== 2 || result.horizontalOverflow || result.selectedBackground === result.idleBackground) throw new Error(`图库分页样式验收失败：${JSON.stringify(result)}`);
+  const galleryFile = 'gallery-list.png';
+  await writeFile(path.join(targetDirectory, galleryFile), Buffer.from(await client.captureScreenshot(), 'base64'));
+  let galleryDetail = null;
+  let galleryDetailFile = null;
+  if (result.sourceCards > 0) {
+    galleryDetail = await client.evaluate(String.raw`(async () => { document.querySelector('.gallery-card')?.click(); await new Promise((resolve) => setTimeout(resolve, 180)); return { visible: Boolean(document.querySelector('.gallery-detail')), loraSection: Boolean(document.querySelector('.job-lora-gallery, .gallery-detail-section .empty-block')), parameterSection: Boolean(document.querySelector('.job-parameter-panel')) }; })()`);
+    if (!galleryDetail.visible || !galleryDetail.loraSection || !galleryDetail.parameterSection) throw new Error(`图库作品详情验收失败：${JSON.stringify(galleryDetail)}`);
+    galleryDetailFile = 'gallery-detail.png';
+    await writeFile(path.join(targetDirectory, galleryDetailFile), Buffer.from(await client.captureScreenshot(), 'base64'));
+    await client.evaluate("document.querySelector('.gallery-detail-back')?.click()");
+  }
+  await client.evaluate(String.raw`(async () => { const tab = [...document.querySelectorAll('.desktop-main > .workspace-page:not([hidden]) > .workspace-tabs button')].find((button) => button.textContent.includes('记录')); tab?.click(); await new Promise((resolve) => setTimeout(resolve, 180)); })()`);
+  const recordLayout = await client.evaluate(String.raw`(() => { const rows = [...document.querySelectorAll('.local-record-list > article')]; return { rowCount: rows.length, singleColumn: rows.length < 2 || Math.abs(rows[0].getBoundingClientRect().left - rows[1].getBoundingClientRect().left) < 2, horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth }; })()`);
+  if (!recordLayout.singleColumn || recordLayout.horizontalOverflow) throw new Error(`任务记录布局验收失败：${JSON.stringify(recordLayout)}`);
+  const recordsFile = 'gallery-records.png';
+  await writeFile(path.join(targetDirectory, recordsFile), Buffer.from(await client.captureScreenshot(), 'base64'));
+  let recordDialog = null;
+  let recordDialogFile = null;
+  if (recordLayout.rowCount > 0) {
+    recordDialog = await client.evaluate(String.raw`(async () => { document.querySelector('.local-record-list > article')?.click(); await new Promise((resolve) => setTimeout(resolve, 180)); return { visible: Boolean(document.querySelector('.job-detail-dialog')), parameters: Boolean(document.querySelector('.job-parameter-panel')), attempts: Boolean(document.querySelector('.job-attempt-list')) }; })()`);
+    if (!recordDialog.visible || !recordDialog.parameters || !recordDialog.attempts) throw new Error(`任务详情弹窗验收失败：${JSON.stringify(recordDialog)}`);
+    recordDialogFile = 'gallery-record-detail.png';
+    await writeFile(path.join(targetDirectory, recordDialogFile), Buffer.from(await client.captureScreenshot(), 'base64'));
+    await client.evaluate("document.querySelector('.job-detail-dialog > header > button')?.click()");
+  }
+  return { ...result, galleryDetail, recordLayout, recordDialog, screenshots: [galleryFile, galleryDetailFile, recordsFile, recordDialogFile].filter(Boolean) };
+}
+
+/** 验证概览仅展示必需依赖，并确认左下角按钮可独立打开下载队列弹窗。 */
+async function captureResourceCenter(client, directory) {
+  const targetDirectory = path.resolve(directory);
+  await mkdir(targetDirectory, { recursive: true });
+  const result = await client.evaluate(String.raw`(async () => {
+    const navigation = [...document.querySelectorAll('.desktop-sidebar nav button')].find((button) => button.textContent.trim() === '启动 / 账号');
+    if (!navigation) throw new Error('未找到启动 / 账号导航');
+    navigation.click();
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    const startupTab = [...document.querySelectorAll('.desktop-main > .workspace-page:not([hidden]) > .workspace-tabs button')].find((button) => button.textContent.includes('启动'));
+    if (!startupTab) throw new Error('未找到启动入口');
+    startupTab.click();
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    const dependencyCards = [...document.querySelectorAll('.startup-dependency-list > article')];
+    const dependencyText = dependencyCards.map((card) => card.textContent.trim()).join('\n');
+    const summaryCount = document.querySelectorAll('.startup-stages > article').length;
+    return {
+      dependencyCards: dependencyCards.length,
+      summaryCount,
+      primaryLabel: document.querySelector('.startup-primary > span')?.textContent || '',
+      optionalModelVisible: ['Anime Bulldozer', 'MiaoMiao RealSkin', 'MiaoMiao 3D Harem'].some((name) => dependencyText.includes(name)),
+      horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    };
+  })()`);
+  if (result.dependencyCards < 4 || result.summaryCount !== 3 || !['初始化', '启动', '启动中', '运行中', '正在检测', '正在初始化', '正在自检'].includes(result.primaryLabel) || result.optionalModelVisible || result.horizontalOverflow) throw new Error(`启动页验收失败：${JSON.stringify(result)}`);
+  const listFile = 'dependencies-list.png';
+  await writeFile(path.join(targetDirectory, listFile), Buffer.from(await client.captureScreenshot(), 'base64'));
+  const dialog = await client.evaluate(String.raw`(async () => {
+    const trigger = document.querySelector('.desktop-sidebar > .core-status');
+    if (!trigger) throw new Error('未找到本地核心下载队列按钮');
+    trigger.click();
+    await new Promise((resolve) => setTimeout(resolve, 180));
+    const modal = document.querySelector('.resource-dialog');
+    return { visible: Boolean(modal), title: modal?.querySelector('h2')?.textContent || '', emptyOrQueueVisible: Boolean(modal?.querySelector('.empty-block, .queue-resource')) };
+  })()`);
+  if (!dialog.visible || dialog.title !== '下载队列与进度' || !dialog.emptyOrQueueVisible) throw new Error(`下载队列弹窗验收失败：${JSON.stringify(dialog)}`);
+  const dialogFile = 'download-queue.png';
+  await writeFile(path.join(targetDirectory, dialogFile), Buffer.from(await client.captureScreenshot(), 'base64'));
+  await client.evaluate(`document.querySelector('.resource-dialog-close')?.click()`);
+  return { ...result, dialog, screenshots: [listFile, dialogFile] };
 }
 
 /** 解析严格的 --key value 与布尔参数，未知位置参数直接拒绝。 */
@@ -155,7 +251,7 @@ async function captureRepositoryPages(client, directory) {
   const targetDirectory = path.resolve(directory);
   await mkdir(targetDirectory, { recursive: true });
   const results = [];
-  for (const pageLabel of ["本地模型", "LoRA 仓库"]) {
+  for (const pageLabel of ["模型仓库", "LoRA 仓库"]) {
     const page = await client.evaluate(String.raw`(async () => {
       const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
       const navigation = [...document.querySelectorAll('.desktop-sidebar nav button')].find((button) => button.textContent.trim() === ${JSON.stringify(pageLabel)});
@@ -167,22 +263,23 @@ async function captureRepositoryPages(client, directory) {
       const cards = [...(pageRoot?.querySelectorAll('.repository-card') || [])];
       const empty = pageRoot?.querySelector('.repository-empty');
       if (!toolbar || (!cards.length && !empty)) throw new Error('仓库页面缺少筛选栏、卡片或空状态');
-      return { cardCount: cards.length, emptyVisible: Boolean(empty), horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth };
+      return { cardCount: cards.length, emptyVisible: Boolean(empty), localCoverTags: cards.filter((card) => [...card.querySelectorAll('.repository-card-tags b, .repository-card-tags i')].some((tag) => tag.textContent.trim() === '本地')).length, horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth };
     })()`);
-    if (page.horizontalOverflow) throw new Error(`${pageLabel} 页面发生横向溢出`);
-    const baseName = pageLabel === "本地模型" ? "models" : "loras";
+    if (page.horizontalOverflow || page.localCoverTags > 0) throw new Error(`${pageLabel} 列表布局或本地标签状态异常：${JSON.stringify(page)}`);
+    const baseName = pageLabel === "模型仓库" ? "models" : "loras";
     const listFile = `${baseName}-list.png`;
     await writeFile(path.join(targetDirectory, listFile), Buffer.from(await client.captureScreenshot(), "base64"));
     let detailVisible = false;
     let detailFile = null;
     if (page.cardCount > 0) {
-      detailVisible = await client.evaluate(String.raw`(async () => {
+      const detailState = await client.evaluate(String.raw`(async () => {
         const pageRoot = [...document.querySelectorAll('.desktop-main > div')].find((element) => !element.hidden && element.querySelector('.repository-page'));
         pageRoot?.querySelector('.repository-card')?.click();
         await new Promise((resolve) => setTimeout(resolve, 250));
-        return Boolean(pageRoot?.querySelector('.repository-detail-hero'));
+        return { visible: Boolean(pageRoot?.querySelector('.repository-detail-hero')), examples: Boolean(pageRoot?.querySelector('.repository-detail-media')), relatedJobs: Boolean(pageRoot?.querySelector('.repository-related-jobs')) };
       })()`);
-      if (!detailVisible) throw new Error(`${pageLabel} 卡片未打开详情页`);
+      detailVisible = detailState.visible;
+      if (!detailState.visible || !detailState.examples || !detailState.relatedJobs) throw new Error(`${pageLabel} 详情结构不完整：${JSON.stringify(detailState)}`);
       detailFile = `${baseName}-detail.png`;
       await writeFile(path.join(targetDirectory, detailFile), Buffer.from(await client.captureScreenshot(), "base64"));
       await client.evaluate("[...document.querySelectorAll('.desktop-main > div')].find((element) => !element.hidden && element.querySelector('.repository-page'))?.querySelector('.repository-back')?.click()");
@@ -207,7 +304,7 @@ async function captureRepositoryPages(client, directory) {
         const card = pageRoot?.querySelector('.repository-card');
         return { backFound: Boolean(back), horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth, toolbarVisible: Boolean(toolbar?.getClientRects().length), cardOrEmptyVisible: Boolean(card?.getClientRects().length || pageRoot?.querySelector('.repository-empty')?.getClientRects().length) };
       })()`);
-      const compactFile = result.page === "本地模型" ? "models-compact.png" : "loras-compact.png";
+      const compactFile = result.page === "模型仓库" ? "models-compact.png" : "loras-compact.png";
       await writeFile(path.join(targetDirectory, compactFile), Buffer.from(await client.captureScreenshot(), "base64"));
       if (compact.horizontalOverflow || !compact.toolbarVisible || !compact.cardOrEmptyVisible) throw new Error(`${result.page} 在 720×560 下布局不可用：${JSON.stringify(compact)}`);
       result.compact = { ...compact, screenshot: compactFile };
@@ -241,7 +338,7 @@ function buildProbeExpression() {
         await delay(30);
         secondaryCounts.push(Array.from(activeWorkspace.children).filter((child) => child.matches('div:not([hidden])') && child.getClientRects().length).length);
       }
-      pageIsolation.push({ label: button.textContent.trim(), visibleMainPanels, secondaryCounts });
+      pageIsolation.push({ label: button.textContent.trim(), visibleMainPanels, secondaryCounts, mainWidth: Math.round(document.querySelector('.desktop-main').getBoundingClientRect().width) });
     }
     let coreSubmissionError = '';
     try {
@@ -258,6 +355,7 @@ function buildProbeExpression() {
       inferenceReady: shell.dataset.inferenceReady === 'true',
       trainingReady: shell.dataset.trainingReady === 'true',
       bannerText: banner?.textContent?.trim() || '',
+      coreStatusText: document.querySelector('.desktop-sidebar .core-status')?.textContent?.trim() || '',
       navigationPages,
       pageIsolation,
       coreSubmissionError,
@@ -282,11 +380,14 @@ async function evaluateAfterInitialReload(client, expression) {
 
 /** 对无 GPU Runner 执行强门禁；其他硬件仍至少要求导航横幅状态一致。 */
 function validateProbe(result, expectNoGpu) {
-  const expectedNavigation = ["概览 / 账号", "本地生成", "LoRA 训练", "模型仓库", "LoRA 仓库", "图库", "设置"];
+  const expectedNavigation = ["启动 / 账号", "本地生成", "LoRA 训练", "模型仓库", "LoRA 仓库", "图库 / 记录", "设置"];
   const actualNavigation = Array.isArray(result?.navigationPages) ? result.navigationPages.map((item) => item.label) : [];
   if (JSON.stringify(actualNavigation) !== JSON.stringify(expectedNavigation)) throw new Error(`桌面导航结构异常：${actualNavigation.join(" / ")}`);
   if (!Array.isArray(result.pageIsolation) || result.pageIsolation.some((item) => item.visibleMainPanels !== 1 || item.secondaryCounts.some((count) => count !== 1))) throw new Error("桌面主分页或二级分页存在内容堆叠");
-  if (result.environmentStatus !== "ready" && result.navigationPages.some((item) => !item.bannerVisible)) throw new Error("环境异常横幅未在全部导航页持续显示");
+  if (new Set(result.pageIsolation.map((item) => item.mainWidth)).size !== 1) throw new Error("桌面分页切换时滚动条导致主布局宽度抖动");
+  // Runtime、自检与必需依赖统一由左下角本地核心承载；其他阻断问题仍使用全局横幅。
+  const centralizedCoreIssue = ["本地核心未就绪", "本地核心等待自检", "本地核心不可用", "本地核心错误", "依赖通道未配置", "依赖清单不完整"].some((label) => result.coreStatusText.includes(label));
+  if (result.environmentStatus !== "ready" && result.navigationPages.some((item) => !item.bannerVisible) && !centralizedCoreIssue) throw new Error("环境异常既未显示全局横幅，也未集中显示在本地核心");
   if (expectNoGpu) {
     if (result.environmentStatus !== "blocked") throw new Error(`无 GPU 环境状态应为 blocked，实际为 ${result.environmentStatus}`);
     if (result.inferenceReady || result.trainingReady) throw new Error("无 GPU 环境错误开放了生成或训练能力");

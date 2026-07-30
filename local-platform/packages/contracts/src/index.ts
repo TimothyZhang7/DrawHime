@@ -701,6 +701,8 @@ export const desktopSettingsSchema = z.object({
   themeMode: z.enum(["system", "dark", "light"]),
   dependencySource: z.enum(["auto", "official", "mirror"]),
   defaultPrivacy: desktopGalleryPrivacySchema,
+  /** 登录账号后是否把新完成的本机图片自动同步到网页图库。 */
+  autoUpload: z.boolean(),
   modelRoot: z.string().min(1),
   outputRoot: z.string().min(1),
   runtimeRoot: z.string().min(1),
@@ -1161,8 +1163,18 @@ export const desktopTrainingJobViewSchema = z.object({
   updatedAt: z.string().datetime(),
 });
 
-/** 单个本地任务的 LoRA 选择和强度。 */
-export const desktopLocalLoraSelectionSchema = z.object({ id: z.string().uuid(), strength: z.number().min(0).max(1.5) });
+/** 本地生成质量预设；custom 表示用户已手动调整专业参数。 */
+export const desktopGenerationQualityPresetSchema = z.enum(["fast", "quality", "extreme", "custom"]);
+
+/** ComfyUI 官方 ImageScale 节点支持的输出缩放算法。 */
+export const desktopGenerationUpscaleMethodSchema = z.enum(["nearest-exact", "bilinear", "area", "bicubic", "lanczos"]);
+
+/** 单个本地任务的 LoRA 选择以及模型、文本编码器独立强度。 */
+export const desktopLocalLoraSelectionSchema = z.object({
+  id: z.string().uuid(),
+  strength: z.number().min(-2).max(2),
+  clipStrength: z.number().min(-2).max(2),
+});
 
 /** 桌面端本地生成任务创建参数。 */
 export const desktopLocalJobCreateInputSchema = z.object({
@@ -1171,10 +1183,18 @@ export const desktopLocalJobCreateInputSchema = z.object({
   negativePrompt: z.string().max(100000).nullable(),
   width: z.number().int().min(64).max(2048),
   height: z.number().int().min(64).max(2048),
-  steps: z.number().int().min(1).max(50),
+  qualityPreset: desktopGenerationQualityPresetSchema,
+  steps: z.number().int().min(1).max(80),
   cfg: z.number().min(0.1).max(20),
-  samplerName: z.enum(["euler", "euler_ancestral"]),
+  samplerName: z.enum(["er_sde", "euler", "euler_ancestral"]),
   schedulerName: z.enum(["normal", "simple"]),
+  samplingMaxEdge: z.number().int().min(512).max(2048),
+  samplingPixelBudget: z.number().int().min(262144).max(4194304),
+  aspectStepThreshold: z.number().min(1).max(4),
+  aspectAdjustedSteps: z.number().int().min(1).max(80),
+  upscaleMethod: desktopGenerationUpscaleMethodSchema,
+  qualityPromptEnabled: z.boolean(),
+  defaultNegativeEnabled: z.boolean(),
   seed: z.number().int().min(0).max(2147483647).nullable(),
   loras: z.array(desktopLocalLoraSelectionSchema).max(4).refine((items) => new Set(items.map((item) => item.id)).size === items.length, "同一 LoRA 不能重复选择"),
   privacy: desktopGalleryPrivacySchema,
@@ -1190,11 +1210,29 @@ export const desktopLocalJobViewSchema = z.object({
   modelId: z.string().uuid(),
   modelDisplayName: z.string(),
   modelSha256: z.string().regex(/^[a-f0-9]{64}$/),
-  parameters: z.object({ width: z.number().int(), height: z.number().int(), steps: z.number().int(), cfg: z.number(), samplerName: z.string(), schedulerName: z.string(), seed: z.number().int() }),
+  parameters: z.object({
+    width: z.number().int(),
+    height: z.number().int(),
+    qualityPreset: desktopGenerationQualityPresetSchema,
+    steps: z.number().int(),
+    cfg: z.number(),
+    samplerName: z.string(),
+    schedulerName: z.string(),
+    samplingMaxEdge: z.number().int(),
+    samplingPixelBudget: z.number().int(),
+    aspectStepThreshold: z.number(),
+    aspectAdjustedSteps: z.number().int(),
+    upscaleMethod: desktopGenerationUpscaleMethodSchema,
+    qualityPromptEnabled: z.boolean(),
+    qualityPrefix: z.string().nullable(),
+    defaultNegativeEnabled: z.boolean(),
+    defaultNegativePrompt: z.string().nullable(),
+    seed: z.number().int(),
+  }),
   privacy: desktopGalleryPrivacySchema,
   runtimePromptId: z.string().nullable(),
   error: z.string().nullable(),
-  loras: z.array(z.object({ id: z.string().uuid(), title: z.string(), type: desktopLocalLoraViewSchema.shape.type, fileName: z.string(), sha256: z.string().regex(/^[a-f0-9]{64}$/), strength: z.number().min(0).max(1.5), triggerWords: z.array(z.string()) })),
+  loras: z.array(z.object({ id: z.string().uuid(), title: z.string(), type: desktopLocalLoraViewSchema.shape.type, fileName: z.string(), sha256: z.string().regex(/^[a-f0-9]{64}$/), strength: z.number().min(-2).max(2), clipStrength: z.number().min(-2).max(2), triggerWords: z.array(z.string()) })),
   attempts: z.array(z.object({ id: z.string().uuid(), attemptNumber: z.number().int().positive(), status: z.enum(["running", "succeeded", "failed", "cancelled", "interrupted"]), runtimePromptId: z.string().nullable(), error: z.string().nullable(), startedAt: z.string().datetime(), completedAt: z.string().datetime().nullable() })),
   artifact: z.object({ path: z.string(), sha256: z.string().regex(/^[a-f0-9]{64}$/), byteSize: z.number().int().positive(), mimeType: z.string(), width: z.number().int().positive(), height: z.number().int().positive() }).nullable(),
   createdAt: z.string().datetime(),

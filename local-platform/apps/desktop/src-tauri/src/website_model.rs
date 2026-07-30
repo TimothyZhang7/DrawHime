@@ -16,7 +16,7 @@ struct WebsiteModelList { entries: Vec<WebsiteModelEntry> }
 struct ApiEnvelope<T> { ok: bool, data: Option<T>, code: Option<String>, message: Option<String> }
 
 /** 读取当前账号可见的底模仓库，并逐张容错缓存全部示例图。 */
-pub fn load_catalog(app_data_dir: &Path) -> Result<Vec<DesktopWebsiteModelView>, String> {
+pub fn load_catalog(app_data_dir: &Path, force_refresh: bool) -> Result<Vec<DesktopWebsiteModelView>, String> {
     let session = match auth::authenticated_session() {
         Ok(Some(session)) => session,
         Ok(None) => return Err("请先连接绘图姬账号".into()),
@@ -26,7 +26,7 @@ pub fn load_catalog(app_data_dir: &Path) -> Result<Vec<DesktopWebsiteModelView>,
     let client = network_client()?;
     let payload: WebsiteModelList = parse_json(client.get(auth::api_url("/v1/model-library")).bearer_auth(&session.token).send())?;
     Ok(payload.entries.into_iter().map(|entry| {
-        let example_paths = website_media::cache_images(&client, &session.token, app_data_dir, "models", &entry.examples);
+        let example_paths = website_media::cache_images(&client, &session.token, app_data_dir, "models", &entry.examples, force_refresh);
         let cover_path = example_paths.first().cloned();
         DesktopWebsiteModelView { id: entry.id, display_name: entry.display_name, description: entry.description, family: entry.family, family_name: entry.family_name, model_file_name: entry.model_file_name, runtime_format: entry.runtime_format, usage_guide: entry.usage_guide, source_links: entry.source_links, parameters: entry.parameters, cover_path, example_paths }
     }).collect())

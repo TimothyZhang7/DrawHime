@@ -1,6 +1,6 @@
 //! 本模块执行 Windows、内存、磁盘和 NVIDIA GPU 的真实检测，并输出持续提示所需的能力结论。
 
-use crate::models::{CapabilityView, CpuView, DesktopEnvironmentReport, DesktopSettings, EnvironmentIssue, GpuView, MemoryView, OsView, RuntimeView, WindowsSystemProbe};
+use crate::{models::{CapabilityView, CpuView, DesktopEnvironmentReport, DesktopSettings, EnvironmentIssue, GpuView, MemoryView, OsView, RuntimeView, WindowsSystemProbe}, process::hide_window};
 use chrono::Utc;
 use serde_json::Value;
 use std::{fs, path::Path, process::Command};
@@ -102,12 +102,12 @@ fn evaluate_gpu_state(gpus: &[GpuView], nvidia_hardware_detected: bool, issues: 
 fn windows_system_probe() -> WindowsSystemProbe {
     if cfg!(not(target_os = "windows")) { return WindowsSystemProbe { os_name: None, os_version: None, os_build: None, cpu_name: None, total_memory_bytes: None, available_memory_bytes: None, virtual_total_bytes: None, nvidia_adapter_names: Vec::new(), disks: Vec::new() }; }
     let script = r#"[Console]::OutputEncoding=[Text.UTF8Encoding]::new();$os=Get-CimInstance Win32_OperatingSystem;$cpu=Get-CimInstance Win32_Processor|Select-Object -First 1;$nvidiaAdapters=@(Get-CimInstance Win32_VideoController|Where-Object{$_.Name -match 'NVIDIA'}|ForEach-Object{[string]$_.Name});$disks=@(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3'|ForEach-Object{[ordered]@{name=$_.DeviceID;fileSystem=[string]$_.FileSystem;totalBytes=[uint64]$_.Size;availableBytes=[uint64]$_.FreeSpace}});[ordered]@{osName=[string]$os.Caption;osVersion=[string]$os.Version;osBuild=[uint64]$os.BuildNumber;cpuName=[string]$cpu.Name;totalMemoryBytes=[uint64]$os.TotalVisibleMemorySize*1024;availableMemoryBytes=[uint64]$os.FreePhysicalMemory*1024;virtualTotalBytes=[uint64]$os.TotalVirtualMemorySize*1024;nvidiaAdapterNames=$nvidiaAdapters;disks=$disks}|ConvertTo-Json -Compress -Depth 4"#;
-    let output = Command::new("powershell.exe").args(["-NoProfile", "-NonInteractive", "-Command", script]).output();
+    let output = hide_window(&mut Command::new("powershell.exe")).args(["-NoProfile", "-NonInteractive", "-Command", script]).output();
     output.ok().filter(|result| result.status.success()).and_then(|result| serde_json::from_slice(&result.stdout).ok()).unwrap_or(WindowsSystemProbe { os_name: None, os_version: None, os_build: None, cpu_name: None, total_memory_bytes: None, available_memory_bytes: None, virtual_total_bytes: None, nvidia_adapter_names: Vec::new(), disks: Vec::new() })
 }
 
 fn nvidia_gpus() -> Vec<GpuView> {
-    let output = Command::new("nvidia-smi").args(["--query-gpu=index,uuid,name,memory.total,memory.free,driver_version,compute_cap,temperature.gpu,utilization.gpu", "--format=csv,noheader,nounits"]).output();
+    let output = hide_window(&mut Command::new("nvidia-smi")).args(["--query-gpu=index,uuid,name,memory.total,memory.free,driver_version,compute_cap,temperature.gpu,utilization.gpu", "--format=csv,noheader,nounits"]).output();
     let Some(output) = output.ok().filter(|result| result.status.success()) else { return Vec::new(); };
     String::from_utf8_lossy(&output.stdout).lines().filter_map(|line| {
         let columns: Vec<_> = line.split(',').map(str::trim).collect();
@@ -177,7 +177,7 @@ mod tests {
 
     #[test]
     fn environment_report_always_explains_unavailable_capabilities() {
-        let settings = DesktopSettings { theme_mode: "system".into(), dependency_source: "auto".into(), default_privacy: "private".into(), model_root: "models".into(), output_root: "outputs".into(), runtime_root: "runtime-not-installed".into(), upload_concurrency: 2, wifi_only: false, bandwidth_limit_kib: None };
+        let settings = DesktopSettings { theme_mode: "system".into(), dependency_source: "auto".into(), default_privacy: "private".into(), auto_upload: true, model_root: "models".into(), output_root: "outputs".into(), runtime_root: "runtime-not-installed".into(), upload_concurrency: 2, wifi_only: false, bandwidth_limit_kib: None };
         let report = inspect_environment(&settings);
         assert!(!report.checked_at.is_empty());
         assert!(report.capabilities.model_management);

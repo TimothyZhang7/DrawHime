@@ -65,10 +65,10 @@ export function importDesktopLocalLora(input: DesktopLocalLoraImportInput): Prom
 /** 读取当前设备已登记 LoRA。 */
 export function listDesktopLocalLoras(): Promise<DesktopLocalLoraView[]> { return invoke("desktop_list_local_loras"); }
 /** 读取当前账号可访问的网站 LoRA 目录。 */
-export function loadDesktopWebsiteLoras(): Promise<DesktopWebsiteLoraView[]> { return invoke("desktop_load_website_loras"); }
+export function loadDesktopWebsiteLoras(forceRefresh = false): Promise<DesktopWebsiteLoraView[]> { return invoke("desktop_load_website_loras", { forceRefresh }); }
 
 /** 读取主站底模仓库和已缓存封面，不把设备会话暴露给页面。 */
-export function loadDesktopWebsiteModels(): Promise<DesktopWebsiteModelView[]> { return invoke("desktop_load_website_models"); }
+export function loadDesktopWebsiteModels(forceRefresh = false): Promise<DesktopWebsiteModelView[]> { return invoke("desktop_load_website_models", { forceRefresh }); }
 /** 断点下载、校验并安装一个网站 LoRA。 */
 export function installDesktopWebsiteLora(loraId: string): Promise<DesktopLocalLoraView> { return invoke("desktop_install_website_lora", { loraId }); }
 /** 监听网站 LoRA 下载、校验和安装进度。 */

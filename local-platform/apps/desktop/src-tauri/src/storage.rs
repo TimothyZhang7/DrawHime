@@ -32,7 +32,7 @@ impl DesktopState {
         let database_path = app_data_dir.join("desktop.sqlite3");
         let connection = Connection::open(&database_path).map_err(|error| format!("打开桌面数据库失败：{error}"))?;
         connection.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
-            CREATE TABLE IF NOT EXISTS desktop_settings (id INTEGER PRIMARY KEY CHECK(id=1), theme_mode TEXT NOT NULL DEFAULT 'system', dependency_source TEXT NOT NULL DEFAULT 'auto', default_privacy TEXT NOT NULL DEFAULT 'public', model_root TEXT NOT NULL, output_root TEXT NOT NULL, runtime_root TEXT NOT NULL, upload_concurrency INTEGER NOT NULL, wifi_only INTEGER NOT NULL, bandwidth_limit_kib INTEGER, updated_at TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS desktop_settings (id INTEGER PRIMARY KEY CHECK(id=1), theme_mode TEXT NOT NULL DEFAULT 'system', dependency_source TEXT NOT NULL DEFAULT 'auto', default_privacy TEXT NOT NULL DEFAULT 'public', auto_upload INTEGER NOT NULL DEFAULT 1, model_root TEXT NOT NULL, output_root TEXT NOT NULL, runtime_root TEXT NOT NULL, upload_concurrency INTEGER NOT NULL, wifi_only INTEGER NOT NULL, bandwidth_limit_kib INTEGER, updated_at TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS desktop_ai_settings (id INTEGER PRIMARY KEY CHECK(id=1), enabled INTEGER NOT NULL DEFAULT 0, endpoint_type TEXT NOT NULL DEFAULT 'openai_chat', base_url TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS environment_snapshots (id INTEGER PRIMARY KEY AUTOINCREMENT, report_json TEXT NOT NULL, checked_at TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS software_updates (version TEXT PRIMARY KEY, resource_id TEXT NOT NULL, file_name TEXT NOT NULL, sha256 TEXT NOT NULL, byte_size INTEGER NOT NULL, source TEXT NOT NULL, status TEXT NOT NULL, error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, applied_at TEXT);
@@ -46,9 +46,9 @@ impl DesktopState {
             CREATE TABLE IF NOT EXISTS local_training_jobs (id TEXT PRIMARY KEY, dataset_id TEXT NOT NULL, dataset_title TEXT NOT NULL, title TEXT NOT NULL, type TEXT NOT NULL, status TEXT NOT NULL, progress INTEGER NOT NULL DEFAULT 0, current_epoch INTEGER NOT NULL DEFAULT 0, total_epochs INTEGER NOT NULL, model_id TEXT NOT NULL, model_display_name TEXT NOT NULL, workflow_kind TEXT NOT NULL, model_file_name TEXT NOT NULL, model_relative_path TEXT NOT NULL, model_sha256 TEXT NOT NULL, model_byte_size INTEGER NOT NULL, model_modified_ms INTEGER NOT NULL, text_encoder_file_name TEXT NOT NULL, text_encoder_relative_path TEXT NOT NULL, text_encoder_sha256 TEXT NOT NULL, vae_file_name TEXT NOT NULL, vae_relative_path TEXT NOT NULL, vae_sha256 TEXT NOT NULL, parameters_json TEXT NOT NULL, trigger_words_json TEXT NOT NULL, asset_count INTEGER NOT NULL, cancel_requested INTEGER NOT NULL DEFAULT 0, output_lora_id TEXT, error TEXT, suggestion_json TEXT, created_at TEXT NOT NULL, started_at TEXT, completed_at TEXT, updated_at TEXT NOT NULL, FOREIGN KEY(dataset_id) REFERENCES local_training_datasets(id), FOREIGN KEY(model_id) REFERENCES local_models(id));
             CREATE TABLE IF NOT EXISTS local_training_job_assets (job_id TEXT NOT NULL, sequence INTEGER NOT NULL, asset_id TEXT NOT NULL, relative_path TEXT NOT NULL, sha256 TEXT NOT NULL, byte_size INTEGER NOT NULL, caption TEXT NOT NULL, PRIMARY KEY(job_id,sequence), UNIQUE(job_id,asset_id), FOREIGN KEY(job_id) REFERENCES local_training_jobs(id), FOREIGN KEY(asset_id) REFERENCES local_training_assets(id));
             CREATE TABLE IF NOT EXISTS local_training_job_attempts (id TEXT PRIMARY KEY, job_id TEXT NOT NULL, attempt_number INTEGER NOT NULL, status TEXT NOT NULL, error TEXT, started_at TEXT NOT NULL, completed_at TEXT, UNIQUE(job_id,attempt_number), FOREIGN KEY(job_id) REFERENCES local_training_jobs(id));
-            CREATE TABLE IF NOT EXISTS local_jobs (id TEXT PRIMARY KEY, status TEXT NOT NULL, progress INTEGER NOT NULL, prompt TEXT NOT NULL, negative_prompt TEXT, model_id TEXT NOT NULL, model_display_name TEXT NOT NULL, workflow_kind TEXT NOT NULL, model_file_name TEXT NOT NULL, model_relative_path TEXT NOT NULL, model_sha256 TEXT NOT NULL, text_encoder_file_name TEXT, vae_file_name TEXT, width INTEGER NOT NULL, height INTEGER NOT NULL, steps INTEGER NOT NULL, cfg REAL NOT NULL, sampler_name TEXT NOT NULL, scheduler_name TEXT NOT NULL, seed INTEGER NOT NULL, privacy TEXT NOT NULL, runtime_prompt_id TEXT, error TEXT, cancel_requested INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, started_at TEXT, completed_at TEXT, updated_at TEXT NOT NULL, FOREIGN KEY(model_id) REFERENCES local_models(id));
+            CREATE TABLE IF NOT EXISTS local_jobs (id TEXT PRIMARY KEY, status TEXT NOT NULL, progress INTEGER NOT NULL, prompt TEXT NOT NULL, negative_prompt TEXT, model_id TEXT NOT NULL, model_display_name TEXT NOT NULL, workflow_kind TEXT NOT NULL, model_file_name TEXT NOT NULL, model_relative_path TEXT NOT NULL, model_sha256 TEXT NOT NULL, text_encoder_file_name TEXT, vae_file_name TEXT, width INTEGER NOT NULL, height INTEGER NOT NULL, quality_preset TEXT NOT NULL DEFAULT 'custom', steps INTEGER NOT NULL, cfg REAL NOT NULL, sampler_name TEXT NOT NULL, scheduler_name TEXT NOT NULL, sampling_max_edge INTEGER NOT NULL DEFAULT 1536, sampling_pixel_budget INTEGER NOT NULL DEFAULT 1350000, aspect_step_threshold REAL NOT NULL DEFAULT 1.5, aspect_adjusted_steps INTEGER NOT NULL DEFAULT 34, upscale_method TEXT NOT NULL DEFAULT 'lanczos', quality_prompt_enabled INTEGER NOT NULL DEFAULT 0, quality_prefix TEXT, default_negative_enabled INTEGER NOT NULL DEFAULT 0, default_negative_prompt TEXT, seed INTEGER NOT NULL, privacy TEXT NOT NULL, runtime_prompt_id TEXT, error TEXT, cancel_requested INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, started_at TEXT, completed_at TEXT, updated_at TEXT NOT NULL, FOREIGN KEY(model_id) REFERENCES local_models(id));
             CREATE TABLE IF NOT EXISTS local_job_attempts (id TEXT PRIMARY KEY, job_id TEXT NOT NULL, attempt_number INTEGER NOT NULL, status TEXT NOT NULL, runtime_prompt_id TEXT, error TEXT, started_at TEXT NOT NULL, completed_at TEXT, UNIQUE(job_id,attempt_number), FOREIGN KEY(job_id) REFERENCES local_jobs(id));
-            CREATE TABLE IF NOT EXISTS local_job_loras (job_id TEXT NOT NULL, sequence INTEGER NOT NULL, lora_id TEXT NOT NULL, title TEXT NOT NULL, type TEXT NOT NULL, file_name TEXT NOT NULL, relative_path TEXT NOT NULL, sha256 TEXT NOT NULL, byte_size INTEGER NOT NULL, modified_ms INTEGER NOT NULL, strength REAL NOT NULL, trigger_words_json TEXT NOT NULL, PRIMARY KEY(job_id,sequence), UNIQUE(job_id,lora_id), FOREIGN KEY(job_id) REFERENCES local_jobs(id), FOREIGN KEY(lora_id) REFERENCES local_loras(id));
+            CREATE TABLE IF NOT EXISTS local_job_loras (job_id TEXT NOT NULL, sequence INTEGER NOT NULL, lora_id TEXT NOT NULL, title TEXT NOT NULL, type TEXT NOT NULL, file_name TEXT NOT NULL, relative_path TEXT NOT NULL, sha256 TEXT NOT NULL, byte_size INTEGER NOT NULL, modified_ms INTEGER NOT NULL, strength REAL NOT NULL, clip_strength REAL NOT NULL, trigger_words_json TEXT NOT NULL, PRIMARY KEY(job_id,sequence), UNIQUE(job_id,lora_id), FOREIGN KEY(job_id) REFERENCES local_jobs(id), FOREIGN KEY(lora_id) REFERENCES local_loras(id));
             CREATE TABLE IF NOT EXISTS local_artifacts (id TEXT PRIMARY KEY, job_id TEXT NOT NULL UNIQUE, path TEXT NOT NULL, sha256 TEXT NOT NULL, byte_size INTEGER NOT NULL, mime_type TEXT NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY(job_id) REFERENCES local_jobs(id));
             CREATE INDEX IF NOT EXISTS gallery_sync_status_idx ON gallery_sync_queue(status, created_at);
             CREATE INDEX IF NOT EXISTS local_jobs_status_idx ON local_jobs(status, created_at);
@@ -68,9 +68,22 @@ impl DesktopState {
         connection.execute("UPDATE local_training_jobs SET status='queued',progress=0,current_epoch=0,started_at=NULL,error=NULL,suggestion_json=NULL,updated_at=?1 WHERE status='running' AND cancel_requested=0", [&recovery_time]).map_err(|error| format!("恢复中断的训练任务失败：{error}"))?;
         ensure_column(&connection, "desktop_settings", "theme_mode", "TEXT NOT NULL DEFAULT 'system'")?;
         ensure_column(&connection, "desktop_settings", "dependency_source", "TEXT NOT NULL DEFAULT 'auto'")?;
+        ensure_column(&connection, "desktop_settings", "auto_upload", "INTEGER NOT NULL DEFAULT 1")?;
         ensure_column(&connection, "local_job_loras", "relative_path", "TEXT NOT NULL DEFAULT ''")?;
         ensure_column(&connection, "local_job_loras", "byte_size", "INTEGER NOT NULL DEFAULT 0")?;
         ensure_column(&connection, "local_job_loras", "modified_ms", "INTEGER NOT NULL DEFAULT 0")?;
+        ensure_column(&connection, "local_job_loras", "clip_strength", "REAL")?;
+        // 生成参数迁移只补列并保留旧任务原始行为，历史任务不会被静默套用质量前缀。
+        ensure_column(&connection, "local_jobs", "quality_preset", "TEXT NOT NULL DEFAULT 'custom'")?;
+        ensure_column(&connection, "local_jobs", "sampling_max_edge", "INTEGER NOT NULL DEFAULT 1536")?;
+        ensure_column(&connection, "local_jobs", "sampling_pixel_budget", "INTEGER NOT NULL DEFAULT 1350000")?;
+        ensure_column(&connection, "local_jobs", "aspect_step_threshold", "REAL NOT NULL DEFAULT 1.5")?;
+        ensure_column(&connection, "local_jobs", "aspect_adjusted_steps", "INTEGER NOT NULL DEFAULT 34")?;
+        ensure_column(&connection, "local_jobs", "upscale_method", "TEXT NOT NULL DEFAULT 'lanczos'")?;
+        ensure_column(&connection, "local_jobs", "quality_prompt_enabled", "INTEGER NOT NULL DEFAULT 0")?;
+        ensure_column(&connection, "local_jobs", "quality_prefix", "TEXT")?;
+        ensure_column(&connection, "local_jobs", "default_negative_enabled", "INTEGER NOT NULL DEFAULT 0")?;
+        ensure_column(&connection, "local_jobs", "default_negative_prompt", "TEXT")?;
         ensure_column(&connection, "local_training_assets", "caption_source", "TEXT")?;
         ensure_column(&connection, "gallery_sync_queue", "owner_issuer", "TEXT")?;
         ensure_column(&connection, "gallery_sync_queue", "owner_subject", "TEXT")?;
@@ -80,11 +93,12 @@ impl DesktopState {
         connection.execute("CREATE INDEX IF NOT EXISTS local_caption_jobs_created_idx ON local_caption_jobs(created_at DESC)", []).map_err(|error| format!("创建打标任务时间索引失败：{error}"))?;
         // 旧开发版本已经生成的 LoRA 快照补齐文件元数据，避免升级后任务失去可执行性。
         connection.execute("UPDATE local_job_loras SET relative_path=COALESCE(NULLIF(relative_path,''),(SELECT relative_path FROM local_loras WHERE id=local_job_loras.lora_id)),byte_size=CASE WHEN byte_size=0 THEN COALESCE((SELECT byte_size FROM local_loras WHERE id=local_job_loras.lora_id),0) ELSE byte_size END,modified_ms=CASE WHEN modified_ms=0 THEN COALESCE((SELECT modified_ms FROM local_loras WHERE id=local_job_loras.lora_id),0) ELSE modified_ms END", []).map_err(|error| format!("补齐任务 LoRA 快照失败：{error}"))?;
+        connection.execute("UPDATE local_job_loras SET clip_strength=strength WHERE clip_strength IS NULL", []).map_err(|error| format!("补齐任务 LoRA 文本编码器强度失败：{error}"))?;
         let model_root = app_data_dir.join("models");
         let runtime_root = app_data_dir.join("runtime");
         let output_root = app_data_dir.join("outputs");
         for directory in [&model_root, &runtime_root, &output_root] { fs::create_dir_all(directory).map_err(|error| format!("创建本地目录失败：{error}"))?; }
-        connection.execute("INSERT OR IGNORE INTO desktop_settings (id, theme_mode, dependency_source, default_privacy, model_root, output_root, runtime_root, upload_concurrency, wifi_only, bandwidth_limit_kib, updated_at) VALUES (1, 'system', 'auto', 'public', ?1, ?2, ?3, 2, 0, NULL, ?4)", params![path_text(&model_root), path_text(&output_root), path_text(&runtime_root), Utc::now().to_rfc3339()]).map_err(|error| format!("写入默认设置失败：{error}"))?;
+        connection.execute("INSERT OR IGNORE INTO desktop_settings (id, theme_mode, dependency_source, default_privacy, auto_upload, model_root, output_root, runtime_root, upload_concurrency, wifi_only, bandwidth_limit_kib, updated_at) VALUES (1, 'system', 'auto', 'public', 1, ?1, ?2, ?3, 2, 0, NULL, ?4)", params![path_text(&model_root), path_text(&output_root), path_text(&runtime_root), Utc::now().to_rfc3339()]).map_err(|error| format!("写入默认设置失败：{error}"))?;
         connection.execute("INSERT OR IGNORE INTO desktop_ai_settings (id, enabled, endpoint_type, base_url, model, updated_at) VALUES (1, 0, 'openai_chat', '', '', ?1)", [Utc::now().to_rfc3339()]).map_err(|error| format!("写入默认 AI 设置失败：{error}"))?;
         Ok(Self { database: Mutex::new(connection), app_data_dir: app_data_dir.to_path_buf(), database_path, scheduler: None, caption_scheduler: None, training_scheduler: None, gallery_sync_scheduler: None, runtime: Arc::new(RuntimeController::initialize(app_data_dir)?), gpu_workload: GpuWorkloadCoordinator::new() })
     }
@@ -102,7 +116,7 @@ impl DesktopState {
     /** 读取唯一桌面设置记录。 */
     pub fn load_settings(&self) -> Result<DesktopSettings, String> {
         let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
-        database.query_row("SELECT theme_mode, dependency_source, default_privacy, model_root, output_root, runtime_root, upload_concurrency, wifi_only, bandwidth_limit_kib FROM desktop_settings WHERE id=1", [], |row| Ok(DesktopSettings { theme_mode: row.get(0)?, dependency_source: row.get(1)?, default_privacy: row.get(2)?, model_root: row.get(3)?, output_root: row.get(4)?, runtime_root: row.get(5)?, upload_concurrency: row.get(6)?, wifi_only: row.get::<_, i64>(7)? != 0, bandwidth_limit_kib: row.get(8)? })).map_err(|error| format!("读取桌面设置失败：{error}"))
+        database.query_row("SELECT theme_mode, dependency_source, default_privacy, auto_upload, model_root, output_root, runtime_root, upload_concurrency, wifi_only, bandwidth_limit_kib FROM desktop_settings WHERE id=1", [], |row| Ok(DesktopSettings { theme_mode: row.get(0)?, dependency_source: row.get(1)?, default_privacy: row.get(2)?, auto_upload: row.get::<_, i64>(3)? != 0, model_root: row.get(4)?, output_root: row.get(5)?, runtime_root: row.get(6)?, upload_concurrency: row.get(7)?, wifi_only: row.get::<_, i64>(8)? != 0, bandwidth_limit_kib: row.get(9)? })).map_err(|error| format!("读取桌面设置失败：{error}"))
     }
 
     /** 校验目录和上传策略后事务化更新设置。 */
@@ -123,7 +137,7 @@ impl DesktopState {
             fs::remove_file(probe).map_err(|error| format!("目录清理测试失败：{path}：{error}"))?;
         }
         let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
-        database.execute("UPDATE desktop_settings SET theme_mode=?1, dependency_source=?2, default_privacy=?3, model_root=?4, output_root=?5, runtime_root=?6, upload_concurrency=?7, wifi_only=?8, bandwidth_limit_kib=?9, updated_at=?10 WHERE id=1", params![settings.theme_mode, settings.dependency_source, settings.default_privacy, settings.model_root, settings.output_root, settings.runtime_root, settings.upload_concurrency, settings.wifi_only, settings.bandwidth_limit_kib, Utc::now().to_rfc3339()]).map_err(|error| format!("保存桌面设置失败：{error}"))?;
+        database.execute("UPDATE desktop_settings SET theme_mode=?1, dependency_source=?2, default_privacy=?3, auto_upload=?4, model_root=?5, output_root=?6, runtime_root=?7, upload_concurrency=?8, wifi_only=?9, bandwidth_limit_kib=?10, updated_at=?11 WHERE id=1", params![settings.theme_mode, settings.dependency_source, settings.default_privacy, settings.auto_upload, settings.model_root, settings.output_root, settings.runtime_root, settings.upload_concurrency, settings.wifi_only, settings.bandwidth_limit_kib, Utc::now().to_rfc3339()]).map_err(|error| format!("保存桌面设置失败：{error}"))?;
         drop(database);
         self.load_settings()
     }
@@ -414,6 +428,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn legacy_generation_jobs_gain_quality_columns_without_data_loss() {
+        let temporary = tempfile::tempdir().expect("创建旧数据库迁移临时目录");
+        let database_path = temporary.path().join("desktop.sqlite3");
+        let database = Connection::open(&database_path).expect("创建旧数据库");
+        database.execute_batch("CREATE TABLE local_jobs (id TEXT PRIMARY KEY,status TEXT NOT NULL,progress INTEGER NOT NULL,prompt TEXT NOT NULL,negative_prompt TEXT,model_id TEXT NOT NULL,model_display_name TEXT NOT NULL,workflow_kind TEXT NOT NULL,model_file_name TEXT NOT NULL,model_relative_path TEXT NOT NULL,model_sha256 TEXT NOT NULL,text_encoder_file_name TEXT,vae_file_name TEXT,width INTEGER NOT NULL,height INTEGER NOT NULL,steps INTEGER NOT NULL,cfg REAL NOT NULL,sampler_name TEXT NOT NULL,scheduler_name TEXT NOT NULL,seed INTEGER NOT NULL,privacy TEXT NOT NULL,runtime_prompt_id TEXT,error TEXT,cancel_requested INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL,started_at TEXT,completed_at TEXT,updated_at TEXT NOT NULL); CREATE TABLE local_job_loras (job_id TEXT NOT NULL,sequence INTEGER NOT NULL,lora_id TEXT NOT NULL,title TEXT NOT NULL,type TEXT NOT NULL,file_name TEXT NOT NULL,relative_path TEXT NOT NULL DEFAULT '',sha256 TEXT NOT NULL,byte_size INTEGER NOT NULL DEFAULT 0,modified_ms INTEGER NOT NULL DEFAULT 0,strength REAL NOT NULL,trigger_words_json TEXT NOT NULL,PRIMARY KEY(job_id,sequence),UNIQUE(job_id,lora_id));").expect("创建旧版生成表");
+        let id = Uuid::new_v4().to_string();
+        let now = Utc::now().to_rfc3339();
+        database.execute("INSERT INTO local_jobs (id,status,progress,prompt,model_id,model_display_name,workflow_kind,model_file_name,model_relative_path,model_sha256,width,height,steps,cfg,sampler_name,scheduler_name,seed,privacy,created_at,updated_at) VALUES (?1,'failed',0,'legacy prompt','legacy-model','旧底模','checkpoint','legacy.safetensors','checkpoints/legacy.safetensors',?2,1024,1024,20,5,'euler','normal',7,'private',?3,?3)", params![id, "a".repeat(64), now]).expect("写入旧任务");
+        drop(database);
+
+        let state = DesktopState::initialize(temporary.path()).expect("迁移旧数据库");
+        let jobs = state.list_local_jobs().expect("读取迁移后的任务");
+        let job = jobs.iter().find(|job| job.id == id).expect("旧任务仍存在");
+        assert_eq!(job.prompt, "legacy prompt");
+        assert_eq!(job.parameters.quality_preset, "custom");
+        assert!(!job.parameters.quality_prompt_enabled);
+        assert!(!job.parameters.default_negative_enabled);
+    }
+
+    #[test]
     fn settings_and_gallery_queue_are_persistent_and_idempotent() {
         let temporary = tempfile::tempdir().expect("创建临时目录");
         let state = DesktopState::initialize(temporary.path()).expect("初始化数据库");
@@ -421,8 +455,12 @@ mod tests {
         assert_eq!(settings.theme_mode, "system");
         assert_eq!(settings.dependency_source, "auto");
         assert_eq!(settings.default_privacy, "public");
+        assert!(settings.auto_upload);
         settings.default_privacy = "public".into();
-        assert_eq!(state.save_settings(settings).expect("保存设置").default_privacy, "public");
+        settings.auto_upload = false;
+        let saved = state.save_settings(settings).expect("保存设置");
+        assert_eq!(saved.default_privacy, "public");
+        assert!(!saved.auto_upload);
         let artifact = temporary.path().join("result.webp");
         fs::write(&artifact, b"verified-local-result").expect("写入结果");
         let first = state.enqueue_gallery_publication(GalleryPublicationInput { local_task_id: "local-task-1".into(), artifact_path: path_text(&artifact), privacy: "private".into() }).expect("加入队列");

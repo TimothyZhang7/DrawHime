@@ -332,6 +332,7 @@ mod tests {
             theme_mode: "system".into(),
             dependency_source: "auto".into(),
             default_privacy: "private".into(),
+            auto_upload: true,
             model_root: temporary
                 .path()
                 .join("models")

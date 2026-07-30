@@ -1,6 +1,7 @@
 //! 本模块负责拉取签名资源清单，并以断点、切源、哈希校验和原子落盘下载桌面依赖。
 
 use crate::models::{DesktopResourceCatalogItemView, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopResourceManifestEnvelope, DesktopResourceManifestItem, DesktopResourceManifestPayload, DesktopResourceSource, DesktopSettings};
+use crate::process::hide_window;
 use crate::storage::LocalModelRegistration;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
@@ -170,9 +171,11 @@ pub fn download_resource(settings: &DesktopSettings, app_data_dir: &Path, resour
     quarantine_invalid_target(&target)?;
     let partial = partial_path(&target);
     if partial.metadata().map(|metadata| metadata.len() > item.byte_size).unwrap_or(false) { fs::remove_file(&partial).map_err(|error| format!("清理超长下载断点失败：{error}"))?; }
-    emit_progress(app, progress_view(&item, "queued", None, partial.metadata().map(|metadata| metadata.len()).unwrap_or(0), 0, None, None, None));
+    let session_start_bytes = partial.metadata().map(|metadata| metadata.len()).unwrap_or(0);
+    emit_progress(app, progress_view(&item, "queued", None, session_start_bytes, 0, None, None, None));
     let client = Client::builder().connect_timeout(Duration::from_secs(4)).timeout(Duration::from_secs(20)).user_agent("DrawHime-Desktop/0.1").build().map_err(|error| format!("创建资源下载客户端失败：{error}"))?;
-    let started_at = Instant::now();
+    // 续传测速只统计本次会话新增字节，历史断点不得参与速度和剩余时间计算。
+    let session_started_at = Instant::now();
     let mut errors = Vec::new();
     let mut switch_reason = None;
     let mut active_source_kind = None;
@@ -180,7 +183,7 @@ pub fn download_resource(settings: &DesktopSettings, app_data_dir: &Path, resour
     for (index, source) in sources.iter().enumerate() {
         if partial.metadata().map(|metadata| metadata.len()).unwrap_or(0) >= item.byte_size { break; }
         active_source_kind = Some(source.kind.clone());
-        match download_from_source(&client, &item, source, &partial, started_at, &notify) {
+        match download_from_source(&client, &item, source, &partial, session_started_at, session_start_bytes, &notify) {
             Ok(()) => record_source_success(source),
             Err(error) => {
                 if error == DOWNLOAD_PAUSED_ERROR {
@@ -196,7 +199,7 @@ pub fn download_resource(settings: &DesktopSettings, app_data_dir: &Path, resour
                 if let Some(next_source) = sources.get(index + 1) {
                     let downloaded = partial.metadata().map(|metadata| metadata.len()).unwrap_or(0);
                     active_source_kind = Some(next_source.kind.clone());
-                    emit_progress(app, progress_view(&item, "downloading", active_source_kind.clone(), downloaded, average_speed(downloaded, started_at), switch_reason.clone(), None, None));
+                    emit_progress(app, progress_view(&item, "downloading", active_source_kind.clone(), downloaded, session_average_speed(downloaded, session_start_bytes, session_started_at), switch_reason.clone(), None, None));
                 }
             }
         }
@@ -204,11 +207,11 @@ pub fn download_resource(settings: &DesktopSettings, app_data_dir: &Path, resour
     let downloaded_bytes = partial.metadata().map(|metadata| metadata.len()).unwrap_or(0);
     if downloaded_bytes != item.byte_size {
         let message = if errors.is_empty() { "下载未达到资源声明大小".into() } else { errors.join("；") };
-        let view = progress_view(&item, "failed", active_source_kind.clone(), downloaded_bytes, average_speed(downloaded_bytes, started_at), switch_reason.clone(), None, Some(message.clone()));
+        let view = progress_view(&item, "failed", active_source_kind.clone(), downloaded_bytes, 0, switch_reason.clone(), None, Some(message.clone()));
         emit_progress(app, view);
         return Err(message);
     }
-    emit_progress(app, progress_view(&item, "verifying", active_source_kind.clone(), downloaded_bytes, average_speed(downloaded_bytes, started_at), switch_reason.clone(), None, None));
+    emit_progress(app, progress_view(&item, "verifying", active_source_kind.clone(), downloaded_bytes, 0, switch_reason.clone(), None, None));
     let actual_sha256 = sha256_file(&partial)?;
     if actual_sha256 != item.sha256 {
         quarantine_file(&partial, "checksum-invalid")?;
@@ -218,7 +221,7 @@ pub fn download_resource(settings: &DesktopSettings, app_data_dir: &Path, resour
     }
     fs::rename(&partial, &target).map_err(|error| format!("原子写入资源缓存失败：{error}"))?;
     write_verified_marker(&target, &item)?;
-    let view = progress_view(&item, "downloaded", active_source_kind, item.byte_size, average_speed(item.byte_size, started_at), switch_reason, Some(&target), None);
+    let view = progress_view(&item, "downloaded", active_source_kind, item.byte_size, 0, switch_reason, Some(&target), None);
     emit_progress(app, view.clone());
     Ok(view)
 }
@@ -413,11 +416,11 @@ fn ordered_sources<'a>(item: &'a DesktopResourceManifestItem, preference: &str) 
     sources
 }
 
-fn download_from_source<F: Fn(DesktopResourceDownloadView)>(client: &Client, item: &DesktopResourceManifestItem, source: &DesktopResourceSource, partial: &Path, started_at: Instant, notify: &F) -> Result<(), String> {
-    download_from_source_with_policy(client, item, source, partial, started_at, notify, PRODUCTION_DOWNLOAD_POLICY)
+fn download_from_source<F: Fn(DesktopResourceDownloadView)>(client: &Client, item: &DesktopResourceManifestItem, source: &DesktopResourceSource, partial: &Path, session_started_at: Instant, session_start_bytes: u64, notify: &F) -> Result<(), String> {
+    download_from_source_with_policy(client, item, source, partial, session_started_at, session_start_bytes, notify, PRODUCTION_DOWNLOAD_POLICY)
 }
 
-fn download_from_source_with_policy<F: Fn(DesktopResourceDownloadView)>(client: &Client, item: &DesktopResourceManifestItem, source: &DesktopResourceSource, partial: &Path, started_at: Instant, notify: &F, policy: DownloadPolicy) -> Result<(), String> {
+fn download_from_source_with_policy<F: Fn(DesktopResourceDownloadView)>(client: &Client, item: &DesktopResourceManifestItem, source: &DesktopResourceSource, partial: &Path, session_started_at: Instant, session_start_bytes: u64, notify: &F, policy: DownloadPolicy) -> Result<(), String> {
     let mut offset = partial.metadata().map(|metadata| metadata.len()).unwrap_or(0);
     let mut file = OpenOptions::new().create(true).read(true).write(true).open(partial).map_err(|error| format!("打开下载断点失败：{error}"))?;
     file.seek(SeekFrom::Start(offset)).map_err(|error| format!("定位下载断点失败：{error}"))?;
@@ -432,7 +435,7 @@ fn download_from_source_with_policy<F: Fn(DesktopResourceDownloadView)>(client: 
             return Err(if response.status().is_success() { "下载来源不支持断点 Range".into() } else { format!("HTTP {}", response.status().as_u16()) });
         }
         validate_range_response(&response, item, offset, end_inclusive, full_single_response)?;
-        offset = stream_response(response, &mut file, item, source, offset, end_inclusive + 1, started_at, source_started, source_start_bytes, notify, policy)?;
+        offset = stream_response(response, &mut file, item, source, offset, end_inclusive + 1, session_started_at, session_start_bytes, source_started, source_start_bytes, notify, policy)?;
     }
     Ok(())
 }
@@ -449,7 +452,7 @@ fn validate_range_response(response: &Response, item: &DesktopResourceManifestIt
     Ok(())
 }
 
-fn stream_response<F: Fn(DesktopResourceDownloadView)>(mut response: Response, file: &mut File, item: &DesktopResourceManifestItem, source: &DesktopResourceSource, mut downloaded: u64, expected_end: u64, started_at: Instant, source_started: Instant, source_start_bytes: u64, notify: &F, policy: DownloadPolicy) -> Result<u64, String> {
+fn stream_response<F: Fn(DesktopResourceDownloadView)>(mut response: Response, file: &mut File, item: &DesktopResourceManifestItem, source: &DesktopResourceSource, mut downloaded: u64, expected_end: u64, session_started_at: Instant, session_start_bytes: u64, source_started: Instant, source_start_bytes: u64, notify: &F, policy: DownloadPolicy) -> Result<u64, String> {
     let mut buffer = vec![0_u8; DOWNLOAD_BUFFER_BYTES];
     let mut last_emit = Instant::now();
     loop {
@@ -464,7 +467,7 @@ fn stream_response<F: Fn(DesktopResourceDownloadView)>(mut response: Response, f
         file.write_all(&buffer[..read]).map_err(|error| format!("写入下载断点失败：{error}"))?;
         downloaded = next;
         if last_emit.elapsed() >= Duration::from_millis(250) {
-            notify(progress_view(item, "downloading", Some(source.kind.clone()), downloaded, average_speed(downloaded, started_at), None, None, None));
+            notify(progress_view(item, "downloading", Some(source.kind.clone()), downloaded, session_average_speed(downloaded, session_start_bytes, session_started_at), None, None, None));
             last_emit = Instant::now();
         }
         let source_elapsed = source_started.elapsed();
@@ -510,7 +513,13 @@ fn marker_path(target: &Path) -> PathBuf { target.with_file_name(format!("{}.ver
 fn verified_marker_matches(target: &Path, item: &DesktopResourceManifestItem) -> bool { target.metadata().is_ok_and(|metadata| metadata.len() == item.byte_size) && fs::read_to_string(marker_path(target)).is_ok_and(|value| value.trim() == item.sha256) }
 fn write_verified_marker(target: &Path, item: &DesktopResourceManifestItem) -> Result<(), String> { fs::write(marker_path(target), format!("{}\n", item.sha256)).map_err(|error| format!("写入资源验证标记失败：{error}")) }
 fn file_matches(path: &Path, item: &DesktopResourceManifestItem) -> Result<bool, String> { Ok(path.metadata().map(|metadata| metadata.len() == item.byte_size).unwrap_or(false) && sha256_file(path)? == item.sha256) }
-fn average_speed(bytes: u64, started_at: Instant) -> u64 { bytes / started_at.elapsed().as_secs().max(1) }
+/** 速度只按本次会话新增字节计算，并等待采样稳定后再向界面提供数值。 */
+fn session_average_speed(downloaded_bytes: u64, session_start_bytes: u64, started_at: Instant) -> u64 {
+    let elapsed_millis = started_at.elapsed().as_millis();
+    let session_bytes = downloaded_bytes.saturating_sub(session_start_bytes);
+    if elapsed_millis < 750 || session_bytes < 64 * 1024 { return 0; }
+    ((session_bytes as u128 * 1_000) / elapsed_millis).min(u64::MAX as u128) as u64
+}
 fn network_error(error: &reqwest::Error) -> String { if error.is_timeout() { "连接或读取超时".into() } else if error.is_connect() { "连接失败".into() } else { "网络传输失败".into() } }
 
 fn install_destination(item: &DesktopResourceManifestItem, settings: &DesktopSettings) -> PathBuf {
@@ -612,7 +621,7 @@ fn extract_7z_safely(archive_path: &Path, staging: &Path, maximum_installed_byte
     if !tar.is_file() { return Err("当前 Windows 缺少系统归档工具 tar.exe".into()); }
     let archive_text = archive_path.to_string_lossy().into_owned();
     let staging_text = staging.to_string_lossy().into_owned();
-    let names_output = Command::new(tar).args(["-tf", archive_text.as_str()]).output().map_err(|error| format!("读取 7z 文件列表失败：{error}"))?;
+    let names_output = hide_window(&mut Command::new(tar)).args(["-tf", archive_text.as_str()]).output().map_err(|error| format!("读取 7z 文件列表失败：{error}"))?;
     if !names_output.status.success() || names_output.stdout.len() > 64 * 1024 * 1024 { return Err("资源 7z 文件列表读取失败或超过限制".into()); }
     let names = String::from_utf8(names_output.stdout).map_err(|_| "资源 7z 文件名不是 UTF-8".to_string())?;
     let mut entry_count = 0_usize;
@@ -622,10 +631,10 @@ fn extract_7z_safely(archive_path: &Path, staging: &Path, maximum_installed_byte
         let normalized = name.trim_end_matches('/').replace('\\', "/");
         validate_windows_relative_path(Path::new(&normalized))?;
     }
-    let verbose = Command::new(tar).args(["-tvf", archive_text.as_str()]).output().map_err(|error| format!("读取 7z 类型列表失败：{error}"))?;
+    let verbose = hide_window(&mut Command::new(tar)).args(["-tvf", archive_text.as_str()]).output().map_err(|error| format!("读取 7z 类型列表失败：{error}"))?;
     if !verbose.status.success() || verbose.stdout.len() > 128 * 1024 * 1024 { return Err("资源 7z 类型列表读取失败或超过限制".into()); }
     if String::from_utf8_lossy(&verbose.stdout).lines().any(|line| matches!(line.chars().next(), Some('l' | 'h'))) { return Err("资源 7z 包含链接条目".into()); }
-    let mut child = Command::new(tar).args(["-xf", archive_text.as_str(), "-C", staging_text.as_str()]).stdout(Stdio::null()).stderr(Stdio::null()).spawn().map_err(|error| format!("启动 7z 解压失败：{error}"))?;
+    let mut child = hide_window(&mut Command::new(tar)).args(["-xf", archive_text.as_str(), "-C", staging_text.as_str()]).stdout(Stdio::null()).stderr(Stdio::null()).spawn().map_err(|error| format!("启动 7z 解压失败：{error}"))?;
     let mut last_size_check = Instant::now();
     loop {
         if let Some(status) = child.try_wait().map_err(|error| format!("读取 7z 解压状态失败：{error}"))? {
@@ -736,7 +745,10 @@ fn quarantine_file(path: &Path, reason: &str) -> Result<(), String> {
 
 fn progress_view(item: &DesktopResourceManifestItem, status: &str, source_kind: Option<String>, downloaded_bytes: u64, bytes_per_second: u64, switch_reason: Option<String>, target_path: Option<&Path>, error: Option<String>) -> DesktopResourceDownloadView {
     let remaining_bytes = item.byte_size.saturating_sub(downloaded_bytes);
-    let eta_seconds = (bytes_per_second > 0 && remaining_bytes > 0).then(|| remaining_bytes.saturating_add(bytes_per_second - 1) / bytes_per_second);
+    // 只有稳定下载阶段才展示 ETA，暂停、校验、完成和失败状态不沿用旧速度。
+    let eta_seconds = (status == "downloading" && bytes_per_second > 0 && remaining_bytes > 0)
+        .then(|| remaining_bytes.saturating_add(bytes_per_second - 1) / bytes_per_second)
+        .filter(|seconds| *seconds <= 7 * 24 * 60 * 60);
     DesktopResourceDownloadView { resource_id: item.id.clone(), status: status.into(), source_kind, downloaded_bytes, total_bytes: item.byte_size, bytes_per_second, eta_seconds, switch_reason, target_path: target_path.map(|path| path.to_string_lossy().into_owned()), error }
 }
 
@@ -905,7 +917,7 @@ mod tests {
         item.sha256 = hex::encode(Sha256::digest(b"abcdefghij"));
         let source = DesktopResourceSource { kind: "official".into(), url: format!("http://{address}/runtime.zip") };
         let client = Client::builder().timeout(Duration::from_secs(5)).build().expect("创建测试客户端");
-        download_from_source(&client, &item, &source, &partial, Instant::now(), &|_| {}).expect("续传测试资源");
+        download_from_source(&client, &item, &source, &partial, Instant::now(), 5, &|_| {}).expect("续传测试资源");
         server.join().expect("等待测试端点退出");
         assert_eq!(fs::read(partial).expect("读取续传结果"), b"abcdefghij");
     }
@@ -926,7 +938,7 @@ mod tests {
         item.sha256 = hex::encode(Sha256::digest(b"abcdefghij"));
         let source = DesktopResourceSource { kind: "official".into(), url: format!("http://{address}/runtime.zip") };
         let client = Client::builder().timeout(Duration::from_secs(5)).build().expect("创建错位分片客户端");
-        let error = download_from_source(&client, &item, &source, &partial, Instant::now(), &|_| {}).expect_err("错位 Content-Range 必须被拒绝");
+        let error = download_from_source(&client, &item, &source, &partial, Instant::now(), 0, &|_| {}).expect_err("错位 Content-Range 必须被拒绝");
         server.join().expect("等待错位分片端点退出");
         assert!(error.contains("Content-Range"));
         assert_eq!(partial.metadata().expect("读取错位分片断点").len(), 0);
@@ -939,6 +951,15 @@ mod tests {
         let view = progress_view(&item, "downloading", Some("official".into()), 1_001, 1_000, None, None, None);
         assert_eq!(view.eta_seconds, Some(9));
         assert!(view.switch_reason.is_none());
+    }
+
+    #[test]
+    fn resumed_session_speed_excludes_existing_partial_bytes() {
+        let started_at = Instant::now() - Duration::from_secs(2);
+        let speed = session_average_speed(8 * 1024 * 1024 + 2 * 1024 * 1024, 8 * 1024 * 1024, started_at);
+        assert!(speed >= 900 * 1024 && speed <= 1100 * 1024);
+        let verifying = progress_view(&item(), "verifying", Some("official".into()), 9, speed, None, None, None);
+        assert_eq!(verifying.eta_seconds, None);
     }
 
     #[test]
@@ -982,11 +1003,11 @@ mod tests {
         let mirror = DesktopResourceSource { kind: "mirror".into(), url: format!("http://{mirror_address}/runtime.zip") };
         let client = Client::builder().timeout(Duration::from_secs(5)).build().expect("创建切源测试客户端");
         let policy = DownloadPolicy { low_speed_window: Duration::from_millis(100), minimum_bytes_per_second: 128 * 1024 };
-        let error = download_from_source_with_policy(&client, &item, &official, &partial, Instant::now(), &|_| {}, policy).expect_err("慢速官方来源应当熔断");
+        let error = download_from_source_with_policy(&client, &item, &official, &partial, Instant::now(), 0, &|_| {}, policy).expect_err("慢速官方来源应当熔断");
         assert!(error.contains("速度过低"));
         let retained = partial.metadata().expect("读取已保留断点").len();
         assert!(retained > 0 && retained < item.byte_size);
-        download_from_source_with_policy(&client, &item, &mirror, &partial, Instant::now(), &|_| {}, DownloadPolicy { low_speed_window: Duration::from_secs(2), minimum_bytes_per_second: 1 }).expect("镜像从原偏移续传");
+        download_from_source_with_policy(&client, &item, &mirror, &partial, Instant::now(), retained, &|_| {}, DownloadPolicy { low_speed_window: Duration::from_secs(2), minimum_bytes_per_second: 1 }).expect("镜像从原偏移续传");
         official_server.join().expect("等待慢速官方端点退出");
         mirror_server.join().expect("等待镜像端点退出");
         assert_eq!(fs::read(partial).expect("读取切源下载结果"), content);
@@ -1048,7 +1069,7 @@ mod tests {
         item.byte_size = cache.metadata().expect("读取 Runtime 缓存大小").len();
         item.installed_size = 4096;
         item.sha256 = sha256_file(&cache).expect("计算 Runtime 缓存哈希");
-        let settings = DesktopSettings { theme_mode: "system".into(), dependency_source: "auto".into(), default_privacy: "private".into(), model_root: temporary.path().join("models").to_string_lossy().into_owned(), output_root: temporary.path().join("outputs").to_string_lossy().into_owned(), runtime_root: temporary.path().join("runtime").to_string_lossy().into_owned(), upload_concurrency: 2, wifi_only: false, bandwidth_limit_kib: None };
+        let settings = DesktopSettings { theme_mode: "system".into(), dependency_source: "auto".into(), default_privacy: "private".into(), auto_upload: true, model_root: temporary.path().join("models").to_string_lossy().into_owned(), output_root: temporary.path().join("outputs").to_string_lossy().into_owned(), runtime_root: temporary.path().join("runtime").to_string_lossy().into_owned(), upload_concurrency: 2, wifi_only: false, bandwidth_limit_kib: None };
         let result = install_cached_resource(&settings, &item, &cache, &|_| {}).expect("安装已验证 Runtime");
         assert_eq!(result.status, "installed");
         assert!(installed_resource_matches(&item, &settings));
@@ -1069,7 +1090,7 @@ mod tests {
         item.sha256 = "6af1b60b6a1fad780b07871e4ff356ac04a1807755ee13c6050e3ec3a4157cc0".into();
         item.archive = "7z".into();
         item.root_directory = Some("ComfyUI_windows_portable".into());
-        let settings = DesktopSettings { theme_mode: "system".into(), dependency_source: "auto".into(), default_privacy: "private".into(), model_root: temporary.path().join("models").to_string_lossy().into_owned(), output_root: temporary.path().join("outputs").to_string_lossy().into_owned(), runtime_root: temporary.path().join("runtime").to_string_lossy().into_owned(), upload_concurrency: 2, wifi_only: false, bandwidth_limit_kib: None };
+        let settings = DesktopSettings { theme_mode: "system".into(), dependency_source: "auto".into(), default_privacy: "private".into(), auto_upload: true, model_root: temporary.path().join("models").to_string_lossy().into_owned(), output_root: temporary.path().join("outputs").to_string_lossy().into_owned(), runtime_root: temporary.path().join("runtime").to_string_lossy().into_owned(), upload_concurrency: 2, wifi_only: false, bandwidth_limit_kib: None };
         let result = install_cached_resource(&settings, &item, Path::new(&archive_path), &|_| {}).expect("安全安装官方 Runtime");
         assert_eq!(result.status, "installed");
         assert!(installed_resource_matches(&item, &settings));
@@ -1101,7 +1122,7 @@ mod tests {
         let runtime_root = temporary.path().join("runtime");
         fs::create_dir_all(runtime_root.join("current")).expect("创建测试 Runtime");
         fs::write(runtime_root.join("current/runtime-manifest.json"), b"{\"status\":\"ready\"}").expect("写入测试 Runtime 清单");
-        let settings = DesktopSettings { theme_mode: "system".into(), dependency_source: "auto".into(), default_privacy: "private".into(), model_root: temporary.path().join("models").to_string_lossy().into_owned(), output_root: temporary.path().join("outputs").to_string_lossy().into_owned(), runtime_root: runtime_root.to_string_lossy().into_owned(), upload_concurrency: 2, wifi_only: false, bandwidth_limit_kib: None };
+        let settings = DesktopSettings { theme_mode: "system".into(), dependency_source: "auto".into(), default_privacy: "private".into(), auto_upload: true, model_root: temporary.path().join("models").to_string_lossy().into_owned(), output_root: temporary.path().join("outputs").to_string_lossy().into_owned(), runtime_root: runtime_root.to_string_lossy().into_owned(), upload_concurrency: 2, wifi_only: false, bandwidth_limit_kib: None };
         let result = install_cached_resource(&settings, &item, Path::new(&archive_path), &|_| {}).expect("安装已发布 Captioner");
         assert_eq!(result.status, "installed");
         let root = PathBuf::from(result.install_path.expect("读取 Captioner 安装路径"));
@@ -1129,7 +1150,7 @@ mod tests {
         fs::write(model_root.join("diffusion_models/anima.safetensors"), b"test").expect("写入测试 DiT");
         fs::write(model_root.join("text_encoders/qwen_3_06b_base.safetensors"), b"test").expect("写入测试文本编码器");
         fs::write(model_root.join("vae/qwen_image_vae.safetensors"), b"test").expect("写入测试 VAE");
-        let settings = DesktopSettings { theme_mode: "system".into(), dependency_source: "auto".into(), default_privacy: "private".into(), model_root: model_root.to_string_lossy().into_owned(), output_root: temporary.path().join("outputs").to_string_lossy().into_owned(), runtime_root: runtime_root.to_string_lossy().into_owned(), upload_concurrency: 2, wifi_only: false, bandwidth_limit_kib: None };
+        let settings = DesktopSettings { theme_mode: "system".into(), dependency_source: "auto".into(), default_privacy: "private".into(), auto_upload: true, model_root: model_root.to_string_lossy().into_owned(), output_root: temporary.path().join("outputs").to_string_lossy().into_owned(), runtime_root: runtime_root.to_string_lossy().into_owned(), upload_concurrency: 2, wifi_only: false, bandwidth_limit_kib: None };
         let result = install_cached_resource(&settings, &item, Path::new(&archive_path), &|_| {}).expect("安装已发布 Trainer");
         assert_eq!(result.status, "installed");
         let root = PathBuf::from(result.install_path.expect("读取 Trainer 安装路径"));
@@ -1142,7 +1163,7 @@ mod tests {
     #[test]
     fn installed_anima_resource_group_becomes_one_registered_model() {
         let temporary = tempfile::tempdir().expect("创建模型组合临时目录");
-        let settings = DesktopSettings { theme_mode: "system".into(), dependency_source: "auto".into(), default_privacy: "private".into(), model_root: temporary.path().join("models").to_string_lossy().into_owned(), output_root: temporary.path().join("outputs").to_string_lossy().into_owned(), runtime_root: temporary.path().join("runtime").to_string_lossy().into_owned(), upload_concurrency: 2, wifi_only: false, bandwidth_limit_kib: None };
+        let settings = DesktopSettings { theme_mode: "system".into(), dependency_source: "auto".into(), default_privacy: "private".into(), auto_upload: true, model_root: temporary.path().join("models").to_string_lossy().into_owned(), output_root: temporary.path().join("outputs").to_string_lossy().into_owned(), runtime_root: temporary.path().join("runtime").to_string_lossy().into_owned(), upload_concurrency: 2, wifi_only: false, bandwidth_limit_kib: None };
         let definitions = [("primary", "diffusion_models", "model.safetensors", b"model".as_slice()), ("text_encoder", "text_encoders", "clip.safetensors", b"clip".as_slice()), ("vae", "vae", "vae.safetensors", b"vae".as_slice())];
         let mut items = Vec::new();
         for (role, directory, file_name, bytes) in definitions {
@@ -1164,7 +1185,7 @@ mod tests {
     #[test]
     fn identical_raw_model_resource_is_shared_across_groups() {
         let temporary = tempfile::tempdir().expect("创建共享模型资源临时目录");
-        let settings = DesktopSettings { theme_mode: "system".into(), dependency_source: "auto".into(), default_privacy: "private".into(), model_root: temporary.path().join("models").to_string_lossy().into_owned(), output_root: temporary.path().join("outputs").to_string_lossy().into_owned(), runtime_root: temporary.path().join("runtime").to_string_lossy().into_owned(), upload_concurrency: 2, wifi_only: false, bandwidth_limit_kib: None };
+        let settings = DesktopSettings { theme_mode: "system".into(), dependency_source: "auto".into(), default_privacy: "private".into(), auto_upload: true, model_root: temporary.path().join("models").to_string_lossy().into_owned(), output_root: temporary.path().join("outputs").to_string_lossy().into_owned(), runtime_root: temporary.path().join("runtime").to_string_lossy().into_owned(), upload_concurrency: 2, wifi_only: false, bandwidth_limit_kib: None };
         let cache = temporary.path().join("shared-encoder.safetensors");
         fs::write(&cache, b"shared-encoder").expect("写入共享文本编码器缓存");
         let mut first = item();

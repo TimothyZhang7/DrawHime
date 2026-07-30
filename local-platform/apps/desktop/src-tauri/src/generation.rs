@@ -21,6 +21,7 @@ const MAX_IMAGE_BYTES: u64 = 80 * 1024 * 1024;
 pub struct GenerationLora {
     pub file_name: String,
     pub strength: f64,
+    pub clip_strength: f64,
 }
 
 /** 生成工作流所需的任务与模型快照。 */
@@ -39,6 +40,15 @@ pub struct GenerationRequest {
     pub cfg: f64,
     pub sampler_name: String,
     pub scheduler_name: String,
+    pub sampling_max_edge: u32,
+    pub sampling_pixel_budget: u32,
+    pub aspect_step_threshold: f64,
+    pub aspect_adjusted_steps: u32,
+    pub upscale_method: String,
+    pub quality_prompt_enabled: bool,
+    pub quality_prefix: Option<String>,
+    pub default_negative_enabled: bool,
+    pub default_negative_prompt: Option<String>,
     pub seed: u32,
     pub output_root: PathBuf,
     pub runtime_output_root: PathBuf,
@@ -163,22 +173,29 @@ pub fn cancel_prompt(endpoint: &str, prompt_id: &str) {
 }
 
 fn build_workflow(request: &GenerationRequest) -> Result<Value, String> {
-    let positive = request.prompt.trim();
-    if positive.is_empty() {
+    if request.prompt.trim().is_empty() {
         return Err("提示词不能为空".into());
     }
-    let negative = request.negative_prompt.as_deref().unwrap_or("").trim();
+    let positive = effective_positive_prompt(request);
+    let negative = effective_negative_prompt(request);
+    let (sampling_width, sampling_height) = sampling_size(request.width, request.height, request.sampling_max_edge, request.sampling_pixel_budget);
+    let aspect = f64::from(request.width.max(request.height)) / f64::from(request.width.min(request.height));
+    let steps = if aspect >= request.aspect_step_threshold { request.aspect_adjusted_steps.min(request.steps) } else { request.steps };
+    let should_scale = sampling_width != request.width || sampling_height != request.height;
     let prefix = format!("drawhime_{}", request.job_id.replace('-', ""));
     if request.workflow_kind == "checkpoint" {
         let mut workflow = json!({
             "1": { "class_type": "CheckpointLoaderSimple", "inputs": { "ckpt_name": request.model_file_name } },
             "2": { "class_type": "CLIPTextEncode", "inputs": { "text": positive, "clip": ["1", 1] } },
             "3": { "class_type": "CLIPTextEncode", "inputs": { "text": negative, "clip": ["1", 1] } },
-            "4": { "class_type": "EmptyLatentImage", "inputs": { "width": request.width, "height": request.height, "batch_size": 1 } },
-            "5": { "class_type": "KSampler", "inputs": { "model": ["1", 0], "seed": request.seed, "steps": request.steps, "cfg": request.cfg, "sampler_name": request.sampler_name, "scheduler": request.scheduler_name, "positive": ["2", 0], "negative": ["3", 0], "latent_image": ["4", 0], "denoise": 1.0 } },
+            "4": { "class_type": "EmptyLatentImage", "inputs": { "width": sampling_width, "height": sampling_height, "batch_size": 1 } },
+            "5": { "class_type": "KSampler", "inputs": { "model": ["1", 0], "seed": request.seed, "steps": steps, "cfg": request.cfg, "sampler_name": request.sampler_name, "scheduler": request.scheduler_name, "positive": ["2", 0], "negative": ["3", 0], "latent_image": ["4", 0], "denoise": 1.0 } },
             "6": { "class_type": "VAEDecode", "inputs": { "samples": ["5", 0], "vae": ["1", 2] } },
-            "7": { "class_type": "SaveImage", "inputs": { "images": ["6", 0], "filename_prefix": prefix } }
+            "7": { "class_type": "SaveImage", "inputs": { "images": if should_scale { json!(["90", 0]) } else { json!(["6", 0]) }, "filename_prefix": prefix } }
         });
+        if should_scale {
+            workflow.as_object_mut().expect("工作流根节点是对象").insert("90".into(), json!({ "class_type": "ImageScale", "inputs": { "image": ["6", 0], "upscale_method": request.upscale_method, "width": request.width, "height": request.height, "crop": "disabled" } }));
+        }
         attach_loras(&mut workflow, request, "1", 1, "2", "3", "5")?;
         return Ok(workflow);
     }
@@ -199,11 +216,14 @@ fn build_workflow(request: &GenerationRequest) -> Result<Value, String> {
         "3": { "class_type": "VAELoader", "inputs": { "vae_name": vae } },
         "4": { "class_type": "CLIPTextEncode", "inputs": { "text": positive, "clip": ["2", 0] } },
         "5": { "class_type": "CLIPTextEncode", "inputs": { "text": negative, "clip": ["2", 0] } },
-        "6": { "class_type": "EmptyLatentImage", "inputs": { "width": request.width, "height": request.height, "batch_size": 1 } },
-        "7": { "class_type": "KSampler", "inputs": { "model": ["1", 0], "seed": request.seed, "steps": request.steps, "cfg": request.cfg, "sampler_name": request.sampler_name, "scheduler": request.scheduler_name, "positive": ["4", 0], "negative": ["5", 0], "latent_image": ["6", 0], "denoise": 1.0 } },
+        "6": { "class_type": "EmptyLatentImage", "inputs": { "width": sampling_width, "height": sampling_height, "batch_size": 1 } },
+        "7": { "class_type": "KSampler", "inputs": { "model": ["1", 0], "seed": request.seed, "steps": steps, "cfg": request.cfg, "sampler_name": request.sampler_name, "scheduler": request.scheduler_name, "positive": ["4", 0], "negative": ["5", 0], "latent_image": ["6", 0], "denoise": 1.0 } },
         "8": { "class_type": "VAEDecode", "inputs": { "samples": ["7", 0], "vae": ["3", 0] } },
-        "9": { "class_type": "SaveImage", "inputs": { "images": ["8", 0], "filename_prefix": prefix } }
+        "9": { "class_type": "SaveImage", "inputs": { "images": if should_scale { json!(["90", 0]) } else { json!(["8", 0]) }, "filename_prefix": prefix } }
     });
+    if should_scale {
+        workflow.as_object_mut().expect("工作流根节点是对象").insert("90".into(), json!({ "class_type": "ImageScale", "inputs": { "image": ["8", 0], "upscale_method": request.upscale_method, "width": request.width, "height": request.height, "crop": "disabled" } }));
+    }
     attach_loras(&mut workflow, request, "1", 0, "4", "5", "7")?;
     Ok(workflow)
 }
@@ -215,7 +235,7 @@ fn attach_loras(workflow: &mut Value, request: &GenerationRequest, base_model_no
     let mut clip_input = if request.workflow_kind == "checkpoint" { json!([base_model_node, base_clip_slot]) } else { json!(["2", base_clip_slot]) };
     for (index, lora) in request.loras.iter().enumerate() {
         let node_id = (20 + index).to_string();
-        object.insert(node_id.clone(), json!({ "class_type": "LoraLoader", "inputs": { "model": model_input, "clip": clip_input, "lora_name": lora.file_name, "strength_model": lora.strength, "strength_clip": lora.strength } }));
+        object.insert(node_id.clone(), json!({ "class_type": "LoraLoader", "inputs": { "model": model_input, "clip": clip_input, "lora_name": lora.file_name, "strength_model": lora.strength, "strength_clip": lora.clip_strength } }));
         model_input = json!([node_id, 0]);
         clip_input = json!([node_id, 1]);
     }
@@ -225,6 +245,46 @@ fn attach_loras(workflow: &mut Value, request: &GenerationRequest, base_model_no
         object.get_mut(sampler_node).and_then(|node| node.get_mut("inputs")).and_then(Value::as_object_mut).ok_or_else(|| "采样器节点结构异常".to_string())?.insert("model".into(), model_input);
     }
     Ok(())
+}
+
+/** 补齐缺失的质量标签但不重复用户已有内容。 */
+fn effective_positive_prompt(request: &GenerationRequest) -> String {
+    let prompt = request.prompt.trim();
+    if !request.quality_prompt_enabled {
+        return prompt.into();
+    }
+    let lower = prompt.to_ascii_lowercase();
+    let missing = request.quality_prefix.as_deref().unwrap_or("").split(',').map(str::trim).filter(|item| !item.is_empty() && !lower.contains(&item.to_ascii_lowercase())).collect::<Vec<_>>();
+    missing.into_iter().chain(std::iter::once(prompt)).filter(|item| !item.is_empty()).collect::<Vec<_>>().join(", ")
+}
+
+/** 用户负面提示词优先，留空时才应用模型级默认负面词。 */
+fn effective_negative_prompt(request: &GenerationRequest) -> String {
+    let user = request.negative_prompt.as_deref().unwrap_or("").trim();
+    if !user.is_empty() {
+        return user.into();
+    }
+    if request.default_negative_enabled {
+        return request.default_negative_prompt.as_deref().unwrap_or("").trim().into();
+    }
+    String::new()
+}
+
+/** 按像素预算保持输出画幅计算潜空间采样尺寸，并按 ComfyUI 要求对齐到 8。 */
+fn sampling_size(width: u32, height: u32, max_edge: u32, pixel_budget: u32) -> (u32, u32) {
+    let max_edge = max_edge.clamp(512, 2048);
+    let budget = pixel_budget.clamp(262_144, 4_194_304) as f64;
+    let width_f = f64::from(width);
+    let height_f = f64::from(height);
+    let edge_scale = f64::from(max_edge) / width_f.max(height_f);
+    let budget_scale = (budget / (width_f * height_f)).sqrt();
+    let scale = edge_scale.min(budget_scale);
+    (align_dimension(width_f * scale, max_edge), align_dimension(height_f * scale, max_edge))
+}
+
+/** 维度四舍五入到 8 的倍数，并限制在有效潜空间范围。 */
+fn align_dimension(value: f64, max_edge: u32) -> u32 {
+    (((value / 8.0).round() as u32) * 8).clamp(64, max_edge)
 }
 
 fn first_output_image(item: &Value) -> Option<&Value> {
@@ -368,8 +428,8 @@ mod tests {
     fn multiple_loras_are_chained_into_model_and_both_conditionings() {
         let mut request = test_request("anima");
         request.loras = vec![
-            GenerationLora { file_name: "character.safetensors".into(), strength: 0.8 },
-            GenerationLora { file_name: "style.safetensors".into(), strength: 0.55 },
+            GenerationLora { file_name: "character.safetensors".into(), strength: 0.8, clip_strength: 0.65 },
+            GenerationLora { file_name: "style.safetensors".into(), strength: 0.55, clip_strength: 0.4 },
         ];
         let workflow = build_workflow(&request).expect("构建多 LoRA 工作流");
         assert_eq!(workflow["20"]["inputs"]["model"], json!(["1", 0]));
@@ -377,6 +437,105 @@ mod tests {
         assert_eq!(workflow["4"]["inputs"]["clip"], json!(["21", 1]));
         assert_eq!(workflow["5"]["inputs"]["clip"], json!(["21", 1]));
         assert_eq!(workflow["7"]["inputs"]["model"], json!(["21", 0]));
+        assert_eq!(workflow["20"]["inputs"]["strength_clip"], 0.65);
+        assert_eq!(workflow["21"]["inputs"]["strength_clip"], 0.4);
+        assert_eq!(workflow["20"]["inputs"]["strength_model"], 0.8);
+        assert_eq!(workflow["21"]["inputs"]["strength_model"], 0.55);
+        assert_eq!(workflow["20"]["inputs"]["lora_name"], "character.safetensors");
+        assert_eq!(workflow["21"]["inputs"]["lora_name"], "style.safetensors");
+    }
+
+    #[test]
+    fn complete_anima_request_keeps_every_user_parameter_in_comfyui_format() {
+        let mut request = test_request("anima");
+        request.model_file_name = "waiANIMA_v10Base10.safetensors".into();
+        request.text_encoder_file_name = Some("qwen_3_06b_base.safetensors".into());
+        request.vae_file_name = Some("qwen_image_vae.safetensors".into());
+        request.prompt = "1girl, solo, red dress, studio light".into();
+        request.negative_prompt = Some("bad anatomy, blurry".into());
+        request.width = 1536;
+        request.height = 1024;
+        request.steps = 29;
+        request.cfg = 4.75;
+        request.sampler_name = "euler_ancestral".into();
+        request.scheduler_name = "normal".into();
+        request.sampling_max_edge = 1536;
+        request.sampling_pixel_budget = 1_350_000;
+        request.aspect_step_threshold = 1.7;
+        request.aspect_adjusted_steps = 24;
+        request.upscale_method = "bicubic".into();
+        request.quality_prompt_enabled = false;
+        request.default_negative_enabled = true;
+        request.default_negative_prompt = Some("default negative must not replace user input".into());
+        request.seed = 1_234_567;
+        request.loras = vec![GenerationLora { file_name: "character.safetensors".into(), strength: 0.9, clip_strength: 0.7 }];
+        let workflow = build_workflow(&request).expect("构建完整 Anima 工作流");
+        assert_eq!(workflow["1"]["inputs"]["unet_name"], "waiANIMA_v10Base10.safetensors");
+        assert_eq!(workflow["2"]["inputs"]["clip_name"], "qwen_3_06b_base.safetensors");
+        assert_eq!(workflow["3"]["inputs"]["vae_name"], "qwen_image_vae.safetensors");
+        assert_eq!(workflow["4"]["inputs"]["text"], request.prompt);
+        assert_eq!(workflow["5"]["inputs"]["text"], "bad anatomy, blurry");
+        assert_eq!(workflow["7"]["inputs"]["seed"], 1_234_567);
+        assert_eq!(workflow["7"]["inputs"]["steps"], 29);
+        assert_eq!(workflow["7"]["inputs"]["cfg"], 4.75);
+        assert_eq!(workflow["7"]["inputs"]["sampler_name"], "euler_ancestral");
+        assert_eq!(workflow["7"]["inputs"]["scheduler"], "normal");
+        assert_eq!(workflow["20"]["inputs"]["strength_model"], 0.9);
+        assert_eq!(workflow["20"]["inputs"]["strength_clip"], 0.7);
+        assert_eq!(workflow["7"]["inputs"]["model"], json!(["20", 0]));
+        assert_eq!(workflow["4"]["inputs"]["clip"], json!(["20", 1]));
+        assert_eq!(workflow["5"]["inputs"]["clip"], json!(["20", 1]));
+        assert_eq!(workflow["90"]["inputs"]["width"], 1536);
+        assert_eq!(workflow["90"]["inputs"]["height"], 1024);
+        assert_eq!(workflow["90"]["inputs"]["upscale_method"], "bicubic");
+        assert_eq!(workflow["9"]["inputs"]["images"], json!(["90", 0]));
+    }
+
+    #[test]
+    fn checkpoint_lora_uses_independent_model_and_clip_weights() {
+        let mut request = test_request("checkpoint");
+        request.loras = vec![GenerationLora { file_name: "checkpoint-style.safetensors".into(), strength: 1.1, clip_strength: 0.45 }];
+        let workflow = build_workflow(&request).expect("构建 Checkpoint LoRA 工作流");
+        assert_eq!(workflow["20"]["inputs"]["model"], json!(["1", 0]));
+        assert_eq!(workflow["20"]["inputs"]["clip"], json!(["1", 1]));
+        assert_eq!(workflow["20"]["inputs"]["strength_model"], 1.1);
+        assert_eq!(workflow["20"]["inputs"]["strength_clip"], 0.45);
+        assert_eq!(workflow["2"]["inputs"]["clip"], json!(["20", 1]));
+        assert_eq!(workflow["3"]["inputs"]["clip"], json!(["20", 1]));
+        assert_eq!(workflow["5"]["inputs"]["model"], json!(["20", 0]));
+    }
+
+    #[test]
+    fn sampling_budget_is_scaled_to_exact_output_size() {
+        let mut request = test_request("anima");
+        request.width = 1536;
+        request.height = 1024;
+        request.sampling_max_edge = 1536;
+        request.sampling_pixel_budget = 786_432;
+        let workflow = build_workflow(&request).expect("构建分离采样尺寸工作流");
+        assert_eq!(workflow["6"]["inputs"]["width"], 1088);
+        assert_eq!(workflow["6"]["inputs"]["height"], 728);
+        assert_eq!(workflow["90"]["class_type"], "ImageScale");
+        assert_eq!(workflow["90"]["inputs"]["width"], 1536);
+        assert_eq!(workflow["90"]["inputs"]["upscale_method"], "lanczos");
+    }
+
+    #[test]
+    fn extreme_aspect_uses_adjusted_steps_and_prompt_defaults() {
+        let mut request = test_request("anima");
+        request.width = 864;
+        request.height = 1536;
+        request.steps = 37;
+        request.aspect_adjusted_steps = 34;
+        request.quality_prompt_enabled = true;
+        request.quality_prefix = Some("masterpiece, best quality, subject".into());
+        request.negative_prompt = None;
+        request.default_negative_enabled = true;
+        request.default_negative_prompt = Some("worst quality".into());
+        let workflow = build_workflow(&request).expect("构建极端画幅工作流");
+        assert_eq!(workflow["7"]["inputs"]["steps"], 34);
+        assert_eq!(workflow["4"]["inputs"]["text"], "masterpiece, best quality, subject");
+        assert_eq!(workflow["5"]["inputs"]["text"], "worst quality");
     }
 
     #[test]
@@ -385,13 +544,13 @@ mod tests {
         let Ok(model_root) = std::env::var("DRAWHIME_GENERATION_TEST_MODEL_ROOT") else { return; };
         let output_root = std::env::var("DRAWHIME_GENERATION_TEST_OUTPUT_ROOT").map(PathBuf::from).unwrap_or_else(|_| tempfile::tempdir().expect("创建真实生成输出目录").keep());
         let temporary = tempfile::tempdir().expect("创建真实生成状态目录");
-        let settings = DesktopSettings { theme_mode: "system".into(), dependency_source: "auto".into(), default_privacy: "private".into(), model_root, output_root: output_root.to_string_lossy().into_owned(), runtime_root, upload_concurrency: 2, wifi_only: false, bandwidth_limit_kib: None };
+        let settings = DesktopSettings { theme_mode: "system".into(), dependency_source: "auto".into(), default_privacy: "private".into(), auto_upload: true, model_root, output_root: output_root.to_string_lossy().into_owned(), runtime_root, upload_concurrency: 2, wifi_only: false, bandwidth_limit_kib: None };
         let controller = RuntimeController::new();
         controller.self_test(&settings, temporary.path()).expect("真实 Runtime 自检");
         let endpoint = controller.endpoint().expect("读取 Runtime 端点");
         // 设置真实 LoRA 文件名时，同一集成测试同时覆盖 Runtime 的 LoraLoader 链路。
-        let loras = std::env::var("DRAWHIME_GENERATION_TEST_LORA_FILE").ok().map(|file_name| vec![GenerationLora { file_name, strength: 0.8 }]).unwrap_or_default();
-        let result = generate_image(&endpoint, GenerationRequest { job_id: Uuid::new_v4().to_string(), workflow_kind: "anima".into(), model_file_name: "animeBulldozer_anima.safetensors".into(), text_encoder_file_name: Some("qwen_3_06b_base.safetensors".into()), vae_file_name: Some("qwen_image_vae.safetensors".into()), loras, prompt: "masterpiece, best quality, 1girl, solo, blue hair, white background".into(), negative_prompt: Some("worst quality, low quality, blurry, bad anatomy".into()), width: 512, height: 512, steps: 4, cfg: 4.0, sampler_name: "euler".into(), scheduler_name: "normal".into(), seed: 20260729, output_root, runtime_output_root: temporary.path().join("runtime-state").join("comfy-output") }, |_| Ok(()), || false).map_err(|failure| match failure { GenerationFailure::Cancelled => "生成被取消".to_string(), GenerationFailure::Failed(error) => error }).expect("真实 Anima 生图");
+        let loras = std::env::var("DRAWHIME_GENERATION_TEST_LORA_FILE").ok().map(|file_name| vec![GenerationLora { file_name, strength: 0.8, clip_strength: 0.8 }]).unwrap_or_default();
+        let result = generate_image(&endpoint, GenerationRequest { job_id: Uuid::new_v4().to_string(), workflow_kind: "anima".into(), model_file_name: "animeBulldozer_anima.safetensors".into(), text_encoder_file_name: Some("qwen_3_06b_base.safetensors".into()), vae_file_name: Some("qwen_image_vae.safetensors".into()), loras, prompt: "masterpiece, best quality, 1girl, solo, blue hair, white background".into(), negative_prompt: Some("worst quality, low quality, blurry, bad anatomy".into()), width: 512, height: 512, steps: 4, cfg: 4.0, sampler_name: "euler".into(), scheduler_name: "normal".into(), sampling_max_edge: 512, sampling_pixel_budget: 262_144, aspect_step_threshold: 1.5, aspect_adjusted_steps: 4, upscale_method: "lanczos".into(), quality_prompt_enabled: false, quality_prefix: None, default_negative_enabled: false, default_negative_prompt: None, seed: 20260729, output_root, runtime_output_root: temporary.path().join("runtime-state").join("comfy-output") }, |_| Ok(()), || false).map_err(|failure| match failure { GenerationFailure::Cancelled => "生成被取消".to_string(), GenerationFailure::Failed(error) => error }).expect("真实 Anima 生图");
         assert!(Path::new(&result.path).is_file());
         assert_eq!((result.width, result.height), (512, 512));
         assert_eq!(result.sha256.len(), 64);
@@ -414,6 +573,15 @@ mod tests {
             cfg: 5.0,
             sampler_name: "euler".into(),
             scheduler_name: "normal".into(),
+            sampling_max_edge: 512,
+            sampling_pixel_budget: 262_144,
+            aspect_step_threshold: 1.5,
+            aspect_adjusted_steps: 8,
+            upscale_method: "lanczos".into(),
+            quality_prompt_enabled: false,
+            quality_prefix: None,
+            default_negative_enabled: false,
+            default_negative_prompt: None,
             seed: 1,
             output_root: PathBuf::from("outputs"),
             runtime_output_root: PathBuf::from("runtime-output"),

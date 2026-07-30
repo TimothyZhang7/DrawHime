@@ -1,6 +1,6 @@
 //! 本模块管理桌面端唯一 ComfyUI 子进程，负责回环启动、健康探测、自检、日志与退出回收。
 
-use crate::models::{DesktopRuntimeStatusView, DesktopSettings};
+use crate::{models::{DesktopRuntimeStatusView, DesktopSettings}, process::hide_window};
 use chrono::Utc;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
@@ -170,6 +170,7 @@ impl RuntimeController {
         let config_argument = config_path.to_string_lossy().into_owned();
         let output_argument = output_directory.to_string_lossy().into_owned();
         let mut command = Command::new(&python);
+        hide_window(&mut command);
         command
             .current_dir(runtime_root.join("ComfyUI"))
             .args([
@@ -189,11 +190,6 @@ impl RuntimeController {
             .stdin(Stdio::null())
             .stdout(Stdio::from(stdout))
             .stderr(Stdio::from(stderr));
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            command.creation_flags(0x0800_0000);
-        }
         process.status = "starting".into();
         process.port = Some(port);
         process.started_at = Some(Utc::now().to_rfc3339());
@@ -519,7 +515,7 @@ fn recover_orphan_runtime(path: &Path) -> Result<(), String> {
 #[cfg(windows)]
 fn windows_process_identity(pid: u32) -> Result<Option<WindowsProcessIdentity>, String> {
     let script = format!("$p=Get-CimInstance Win32_Process -Filter 'ProcessId={pid}';if($null -eq $p){{exit 3}};[ordered]@{{executablePath=[string]$p.ExecutablePath;commandLine=[string]$p.CommandLine}}|ConvertTo-Json -Compress");
-    let output = Command::new("powershell.exe").args(["-NoProfile", "-NonInteractive", "-Command", &script]).output().map_err(|error| format!("查询 Runtime 进程身份失败：{error}"))?;
+    let output = hide_window(&mut Command::new("powershell.exe")).args(["-NoProfile", "-NonInteractive", "-Command", &script]).output().map_err(|error| format!("查询 Runtime 进程身份失败：{error}"))?;
     if output.status.code() == Some(3) { return Ok(None); }
     if !output.status.success() { return Err("查询 Runtime 进程身份失败".into()); }
     serde_json::from_slice(&output.stdout).map(Some).map_err(|error| format!("解析 Runtime 进程身份失败：{error}"))
@@ -538,7 +534,7 @@ fn same_windows_path(left: &str, right: &str) -> bool { left.replace('/', "\\").
 
 #[cfg(windows)]
 fn terminate_windows_process_tree(pid: u32) -> Result<(), String> {
-    let status = Command::new("taskkill").args(["/PID", &pid.to_string(), "/T", "/F"]).output().map_err(|error| format!("回收孤儿 Runtime 失败：{error}"))?.status;
+    let status = hide_window(&mut Command::new("taskkill")).args(["/PID", &pid.to_string(), "/T", "/F"]).output().map_err(|error| format!("回收孤儿 Runtime 失败：{error}"))?.status;
     if status.success() || windows_process_identity(pid)?.is_none() { Ok(()) } else { Err("回收孤儿 Runtime 失败".into()) }
 }
 
@@ -616,6 +612,7 @@ mod tests {
             theme_mode: "system".into(),
             dependency_source: "auto".into(),
             default_privacy: "private".into(),
+            auto_upload: true,
             model_root: temporary
                 .path()
                 .join("models")
@@ -651,6 +648,7 @@ mod tests {
             theme_mode: "system".into(),
             dependency_source: "auto".into(),
             default_privacy: "private".into(),
+            auto_upload: true,
             model_root: temporary
                 .path()
                 .join("models")

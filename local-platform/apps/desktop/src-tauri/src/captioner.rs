@@ -1,6 +1,7 @@
 //! 本模块实现 SQLite 为事实源的离线自动打标队列，并通过签名 Captioner 组件调用 WD14 ONNX 推理。
 
 use crate::models::{DesktopCaptionJobCreateInput, DesktopCaptionJobItemView, DesktopCaptionJobView};
+use crate::process::hide_window;
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
@@ -207,8 +208,9 @@ fn execute_runner(database: &Connection, app_data_dir: &Path, app: &AppHandle, s
         items: job.items.iter().map(|item| RunnerRequestItem { asset_id: item.asset_id.clone(), path: item.path.to_string_lossy().into_owned() }).collect(),
     };
     write_request(&request_path, &request).map_err(ExecutionStop::Failed)?;
-    let mut child = Command::new(&component.python)
-        .args(["-I", component.runner.to_string_lossy().as_ref(), "--request", request_path.to_string_lossy().as_ref()])
+    let mut command = Command::new(&component.python);
+    hide_window(&mut command);
+    let mut child = command.args(["-I", component.runner.to_string_lossy().as_ref(), "--request", request_path.to_string_lossy().as_ref()])
         .current_dir(&component.root)
         .env("PYTHONUTF8", "1")
         .env("PYTHONNOUSERSITE", "1")

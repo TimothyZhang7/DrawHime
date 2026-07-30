@@ -3,6 +3,7 @@
 use crate::{
     auth::{self, DesktopSessionError},
     models::GallerySyncItem,
+    process::hide_window,
 };
 use chrono::{Duration as ChronoDuration, Utc};
 use reqwest::{blocking::{Client, Response}, StatusCode};
@@ -21,8 +22,6 @@ use std::{
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
-#[cfg(windows)]
-use std::os::windows::process::CommandExt;
 use tauri::{AppHandle, Emitter};
 
 const DEFAULT_CHUNK_BYTES: usize = 4 * 1024 * 1024;
@@ -50,10 +49,20 @@ struct PendingPublication {
     model_display_name: String,
     width: u32,
     height: u32,
+    quality_preset: String,
     steps: u32,
     cfg: f64,
     sampler_name: String,
     scheduler_name: String,
+    sampling_max_edge: u32,
+    sampling_pixel_budget: u32,
+    aspect_step_threshold: f64,
+    aspect_adjusted_steps: u32,
+    upscale_method: String,
+    quality_prompt_enabled: bool,
+    quality_prefix: Option<String>,
+    default_negative_enabled: bool,
+    default_negative_prompt: Option<String>,
     seed: u32,
     byte_size: u64,
     mime_type: String,
@@ -120,6 +129,9 @@ fn sync_loop(database_path: &Path, app: &AppHandle, stopping: &AtomicBool, signa
 
 /** 领取最早可重试记录并执行一次完整上传或补偿发布。 */
 fn process_next(database: &Connection, app: &AppHandle) -> Result<(), String> {
+    // 用户关闭自动上传时保留既有队列和本地图片，重新开启后由同一 Worker 继续断点同步。
+    let auto_upload = database.query_row("SELECT auto_upload FROM desktop_settings WHERE id=1", [], |row| Ok(row.get::<_, i64>(0)? != 0)).map_err(|error| format!("读取图库自动上传设置失败：{error}"))?;
+    if !auto_upload { return Ok(()); }
     let now = Utc::now().to_rfc3339();
     let id: Option<String> = database.query_row(
         "SELECT id FROM gallery_sync_queue WHERE status IN ('queued','waiting_network','waiting_auth','failed_retryable','uploading','committing') AND (next_attempt_at IS NULL OR next_attempt_at<=?1) ORDER BY created_at ASC LIMIT 1",
@@ -187,8 +199,14 @@ fn synchronize(database: &Connection, publication: &PendingPublication) -> Resul
 fn create_upload(database: &Connection, publication: &PendingPublication, client: &Client, token: &str) -> Result<UploadView, SyncFailure> {
     let loras = read_lora_parameters(database, &publication.local_task_id).map_err(SyncFailure::Retryable)?;
     let parameters = json!({
-        "width": publication.width, "height": publication.height, "steps": publication.steps, "cfg": publication.cfg,
+        "width": publication.width, "height": publication.height, "qualityPreset": publication.quality_preset,
+        "steps": publication.steps, "cfg": publication.cfg,
         "samplerName": publication.sampler_name, "schedulerName": publication.scheduler_name, "seed": publication.seed,
+        "samplingMaxEdge": publication.sampling_max_edge, "samplingPixelBudget": publication.sampling_pixel_budget,
+        "aspectStepThreshold": publication.aspect_step_threshold, "aspectAdjustedSteps": publication.aspect_adjusted_steps,
+        "upscaleMethod": publication.upscale_method, "qualityPromptEnabled": publication.quality_prompt_enabled,
+        "qualityPrefix": publication.quality_prefix, "defaultNegativeEnabled": publication.default_negative_enabled,
+        "defaultNegativePrompt": publication.default_negative_prompt,
         // 本机导入 LoRA 尚未必对应网站仓库版本，使用独立审计键避免生成失效详情链接。
         "desktopLoraSelections": loras,
     });
@@ -232,13 +250,13 @@ fn parse_upload_response(result: Result<Response, reqwest::Error>) -> Result<Upl
 
 /** 从 SQLite 读取任务和产物快照，不读取或上传参考图、模型、LoRA 文件。 */
 fn read_pending(database: &Connection, id: &str) -> Result<PendingPublication, String> {
-    database.query_row("SELECT q.id,q.local_task_id,q.artifact_path,q.artifact_sha256,q.privacy,q.retry_count,q.owner_issuer,q.owner_subject,q.server_upload_id,j.prompt,j.negative_prompt,j.model_display_name,j.width,j.height,j.steps,j.cfg,j.sampler_name,j.scheduler_name,j.seed,a.byte_size,a.mime_type FROM gallery_sync_queue q JOIN local_jobs j ON j.id=q.local_task_id JOIN local_artifacts a ON a.job_id=j.id WHERE q.id=?1", [id], |row| Ok(PendingPublication { id: row.get(0)?, local_task_id: row.get(1)?, artifact_path: row.get(2)?, artifact_sha256: row.get(3)?, privacy: row.get(4)?, retry_count: row.get(5)?, owner_issuer: row.get(6)?, owner_subject: row.get(7)?, server_upload_id: row.get(8)?, prompt: row.get(9)?, negative_prompt: row.get(10)?, model_display_name: row.get(11)?, width: row.get(12)?, height: row.get(13)?, steps: row.get(14)?, cfg: row.get(15)?, sampler_name: row.get(16)?, scheduler_name: row.get(17)?, seed: row.get(18)?, byte_size: row.get(19)?, mime_type: row.get(20)? })).map_err(|error| format!("读取图库任务快照失败：{error}"))
+    database.query_row("SELECT q.id,q.local_task_id,q.artifact_path,q.artifact_sha256,q.privacy,q.retry_count,q.owner_issuer,q.owner_subject,q.server_upload_id,j.prompt,j.negative_prompt,j.model_display_name,j.width,j.height,j.quality_preset,j.steps,j.cfg,j.sampler_name,j.scheduler_name,j.sampling_max_edge,j.sampling_pixel_budget,j.aspect_step_threshold,j.aspect_adjusted_steps,j.upscale_method,j.quality_prompt_enabled,j.quality_prefix,j.default_negative_enabled,j.default_negative_prompt,j.seed,a.byte_size,a.mime_type FROM gallery_sync_queue q JOIN local_jobs j ON j.id=q.local_task_id JOIN local_artifacts a ON a.job_id=j.id WHERE q.id=?1", [id], |row| Ok(PendingPublication { id: row.get(0)?, local_task_id: row.get(1)?, artifact_path: row.get(2)?, artifact_sha256: row.get(3)?, privacy: row.get(4)?, retry_count: row.get(5)?, owner_issuer: row.get(6)?, owner_subject: row.get(7)?, server_upload_id: row.get(8)?, prompt: row.get(9)?, negative_prompt: row.get(10)?, model_display_name: row.get(11)?, width: row.get(12)?, height: row.get(13)?, quality_preset: row.get(14)?, steps: row.get(15)?, cfg: row.get(16)?, sampler_name: row.get(17)?, scheduler_name: row.get(18)?, sampling_max_edge: row.get(19)?, sampling_pixel_budget: row.get(20)?, aspect_step_threshold: row.get(21)?, aspect_adjusted_steps: row.get(22)?, upscale_method: row.get(23)?, quality_prompt_enabled: row.get::<_, i64>(24)? != 0, quality_prefix: row.get(25)?, default_negative_enabled: row.get::<_, i64>(26)? != 0, default_negative_prompt: row.get(27)?, seed: row.get(28)?, byte_size: row.get(29)?, mime_type: row.get(30)? })).map_err(|error| format!("读取图库任务快照失败：{error}"))
 }
 
 /** 只把 LoRA 名称、类型和权重写入图库参数，不上传本机模型文件。 */
 fn read_lora_parameters(database: &Connection, task_id: &str) -> Result<Vec<Value>, String> {
-    let mut statement = database.prepare("SELECT lora_id,title,type,strength FROM local_job_loras WHERE job_id=?1 ORDER BY sequence ASC").map_err(|error| format!("读取任务 LoRA 失败：{error}"))?;
-    let rows = statement.query_map([task_id], |row| Ok(json!({ "id": row.get::<_, String>(0)?, "title": row.get::<_, String>(1)?, "type": row.get::<_, String>(2)?, "strength": row.get::<_, f64>(3)? }))).map_err(|error| format!("查询任务 LoRA 失败：{error}"))?;
+    let mut statement = database.prepare("SELECT lora_id,title,type,strength,clip_strength FROM local_job_loras WHERE job_id=?1 ORDER BY sequence ASC").map_err(|error| format!("读取任务 LoRA 失败：{error}"))?;
+    let rows = statement.query_map([task_id], |row| Ok(json!({ "id": row.get::<_, String>(0)?, "title": row.get::<_, String>(1)?, "type": row.get::<_, String>(2)?, "strength": row.get::<_, f64>(3)?, "clipStrength": row.get::<_, f64>(4)? }))).map_err(|error| format!("查询任务 LoRA 失败：{error}"))?;
     rows.collect::<Result<Vec<_>, _>>().map_err(|error| format!("解析任务 LoRA 失败：{error}"))
 }
 
@@ -269,8 +287,7 @@ fn wifi_only(database: &Connection) -> bool { database.query_row("SELECT wifi_on
 /** 使用 Windows 自带 WLAN 状态确认真实 Wi-Fi 连接，不依赖第三方常驻服务。 */
 #[cfg(windows)]
 fn wifi_connected() -> bool {
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
-    let output = std::process::Command::new("netsh").args(["wlan", "show", "interfaces"]).creation_flags(CREATE_NO_WINDOW).output();
+    let output = hide_window(&mut std::process::Command::new("netsh")).args(["wlan", "show", "interfaces"]).output();
     let Ok(output) = output else { return false; };
     if !output.status.success() { return false; }
     let text = String::from_utf8_lossy(&output.stdout);

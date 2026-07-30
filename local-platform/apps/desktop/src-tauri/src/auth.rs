@@ -125,6 +125,9 @@ pub(crate) fn authenticated_session() -> Result<Option<DesktopAuthenticatedSessi
     }
 }
 
+/** 只检查 Credential Manager 是否存在桌面会话，不执行网络请求也不暴露密钥。 */
+pub(crate) fn has_stored_session() -> Result<bool, String> { read_credential().map(|value| value.is_some()) }
+
 /** 拼接固定生产 API 地址，调用方只能传登记过的相对路径。 */
 pub(crate) fn api_url(path: &str) -> String { format!("{API_BASE_URL}{path}") }
 

@@ -3,6 +3,7 @@
 use crate::{
     local_model,
     models::{DesktopLocalLoraImportInput, DesktopSettings, DesktopTrainingSuggestionView},
+    process::hide_window,
     runtime::RuntimeController,
     training::{self, TrainingExecution},
     workload::GpuWorkloadCoordinator,
@@ -147,7 +148,7 @@ fn execute_runner(database: &Connection, app_data_dir: &Path, runtime: &RuntimeC
     write_request(&request_path, &request).map_err(failed)?;
     let mut command = Command::new(&component.python);
     command.args(["-I", component.runner.to_string_lossy().as_ref(), "--request", request_path.to_string_lossy().as_ref()]).current_dir(&component.root).env("PYTHONUTF8", "1").env("PYTHONNOUSERSITE", "1").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
-    #[cfg(windows)] { use std::os::windows::process::CommandExt; command.creation_flags(0x0800_0000); }
+    hide_window(&mut command);
     let mut child = command.spawn().map_err(|error| failed(format!("启动本地 Trainer 失败：{error}")))?;
     let stderr = child.stderr.take();
     let stderr_reader = thread::spawn(move || read_limited_stderr(stderr));
@@ -273,19 +274,13 @@ fn classify_runner_error(stderr: &str, component: &TrainerComponent) -> (String,
 }
 
 fn kill_process_tree(child: &mut Child) {
-    #[cfg(windows)] { let _ = Command::new("taskkill").args(["/PID", &child.id().to_string(), "/T", "/F"]).creation_flags_hidden().output(); }
+    #[cfg(windows)] { let _ = hide_window(&mut Command::new("taskkill")).args(["/PID", &child.id().to_string(), "/T", "/F"]).output(); }
     #[cfg(not(windows))] { let _ = child.kill(); }
     let _ = child.wait();
 }
 
-#[cfg(windows)]
-trait HiddenCommand { fn creation_flags_hidden(&mut self) -> &mut Self; }
-#[cfg(windows)]
-impl HiddenCommand for Command {
-    fn creation_flags_hidden(&mut self) -> &mut Self { use std::os::windows::process::CommandExt; self.creation_flags(0x0800_0000) }
-}
 
-fn load_settings(database: &Connection) -> Result<DesktopSettings, String> { database.query_row("SELECT theme_mode,dependency_source,default_privacy,model_root,output_root,runtime_root,upload_concurrency,wifi_only,bandwidth_limit_kib FROM desktop_settings WHERE id=1", [], |row| Ok(DesktopSettings { theme_mode: row.get(0)?, dependency_source: row.get(1)?, default_privacy: row.get(2)?, model_root: row.get(3)?, output_root: row.get(4)?, runtime_root: row.get(5)?, upload_concurrency: row.get(6)?, wifi_only: row.get::<_,i64>(7)? != 0, bandwidth_limit_kib: row.get(8)? })).map_err(|error| format!("读取 Trainer 设置失败：{error}")) }
+fn load_settings(database: &Connection) -> Result<DesktopSettings, String> { database.query_row("SELECT theme_mode,dependency_source,default_privacy,auto_upload,model_root,output_root,runtime_root,upload_concurrency,wifi_only,bandwidth_limit_kib FROM desktop_settings WHERE id=1", [], |row| Ok(DesktopSettings { theme_mode: row.get(0)?, dependency_source: row.get(1)?, default_privacy: row.get(2)?, auto_upload: row.get::<_,i64>(3)? != 0, model_root: row.get(4)?, output_root: row.get(5)?, runtime_root: row.get(6)?, upload_concurrency: row.get(7)?, wifi_only: row.get::<_,i64>(8)? != 0, bandwidth_limit_kib: row.get(9)? })).map_err(|error| format!("读取 Trainer 设置失败：{error}")) }
 fn sha256_file(path: &Path) -> Result<String, String> { let mut reader = BufReader::new(File::open(path).map_err(|error| format!("读取训练快照失败：{error}"))?); let mut hash = Sha256::new(); let mut buffer = [0_u8; 1024 * 1024]; loop { let read = reader.read(&mut buffer).map_err(|error| format!("计算训练快照哈希失败：{error}"))?; if read == 0 { break; } hash.update(&buffer[..read]); } Ok(hex::encode(hash.finalize())) }
 fn modified_millis(metadata: &fs::Metadata) -> Result<u64, String> { metadata.modified().map_err(|error| format!("读取训练底模修改时间失败：{error}"))?.duration_since(std::time::UNIX_EPOCH).map(|duration| duration.as_millis() as u64).map_err(|_| "训练底模修改时间早于系统纪元".to_string()) }
 fn safe_output_name(id: &str) -> String { format!("drawhime-{}", id.replace('-', "")) }

@@ -57,6 +57,12 @@ node scripts/publish-desktop-application-update.mjs prepare --installer INSTALLE
 node scripts/publish-desktop-application-update.mjs publish --installer INSTALLER.exe --version X.Y.Z --minimum-version X.Y.Z --release-notes "版本说明"
 ```
 
+发布到稳定通道后，必须从仍安装的上一版本执行一次真实在线升级，不以直接安装新包替代更新链路；验收脚本通过客户端自身 Tauri IPC 完成检查、下载、应用与重启确认，并核对模型、Runtime、作品和训练数据统计保持一致：
+
+```powershell
+pnpm desktop:validate-update-e2e -- --from-version OLD_VERSION --to-version NEW_VERSION --evidence .private/desktop-update-e2e.json
+```
+
 每台 Windows/DPI/GPU 验收主机使用同一脚本执行真实静默安装、业务数据库保留、安装目录边界、WebView2、Per-Monitor V2 和十秒启动检查；证据默认写入私有目录，不提交机器信息：
 
 ```powershell
