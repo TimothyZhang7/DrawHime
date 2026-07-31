@@ -63,6 +63,16 @@ node scripts/publish-desktop-application-update.mjs publish --installer INSTALLE
 pnpm desktop:validate-update-e2e -- --from-version OLD_VERSION --to-version NEW_VERSION --evidence .private/desktop-update-e2e.json
 ```
 
+桌面更新发布前必须一次确定最终版本号、最低直升版本和发布说明。签名资源属于不可变内容，已经发布的安装包或元数据禁止覆盖；测试用的最低版本不得进入稳定通道。`minimum-version` 必须表示最早能够真实完成自更新的客户端版本，而不是当前测试版本。旧客户端若因自身更新助手缺陷无法完成应用阶段，服务器清单无法反向修复旧二进制，必须提供一次完整安装包过渡，并在后续版本持续保留已验证的更新助手。
+
+用于在线升级起点的测试程序必须来自正式 Tauri 构建或安装包。禁止用普通 `cargo build --release` 产物覆盖已安装程序，因为该产物可能继续加载 `devUrl`，表现为 WebView 打开 `127.0.0.1` 并返回 `ERR_CONNECTION_REFUSED`。需要跳过 NSIS 但保留生产协议时使用：
+
+```powershell
+pnpm --filter @drawhime/desktop tauri build --no-bundle
+```
+
+更新助手启动后必须先写入启动握手文件，主程序确认握手成功后才能退出。Windows 子进程需要脱离父进程 Job，并以新控制台运行；`cmd.exe` 使用 `/D /C` 并把脚本路径作为单独参数，禁止使用 `/S /C call "..."` 拼接命令行，避免含空格路径被二次剥离引号。端到端验收必须覆盖 `available/downloaded -> applying -> up_to_date`，允许复用已完整验签的缓存，但不得跳过安装、重启、注册表版本和受保护数据目录核验。
+
 每台 Windows/DPI/GPU 验收主机使用同一脚本执行真实静默安装、业务数据库保留、安装目录边界、WebView2、Per-Monitor V2 和十秒启动检查；证据默认写入私有目录，不提交机器信息：
 
 ```powershell
@@ -113,6 +123,16 @@ pnpm desktop:deploy-manifest --envelope NEXT_ENVELOPE.json --state-payload CURRE
 | GitHub 首次推送出现 443 连接超时 | 保留本地提交，最多三次递增退避重试；成功后核对远端 SHA，连续失败才报告网络阻塞 |
 | 本地执行 Prisma 校验提示缺少 `DATABASE_URL` | 校验和 Client 生成使用明确的回环开发占位连接串；不得读取或回显生产数据库凭证，部署脚本继续使用自身受控环境 |
 | Windows PowerShell 继承 PowerShell 7 的 `PSModulePath` 后找不到 `Get-FileHash` | 更新辅助脚本使用 `System.Security.Cryptography.SHA256` 和文件流计算哈希，不依赖 PowerShell 模块自动加载；必须在该继承环境执行一次真实升级 |
+| Windows 系统代理开启后桌面端仍无法登录或访问仓库 | 所有公网 `reqwest` 客户端统一读取当前用户 `Internet Settings` 的 `ProxyEnable`、`ProxyServer` 和 `ProxyOverride`；支持统一、HTTP/HTTPS 分协议和 SOCKS 代理；回环 Runtime、ComfyUI 与调试地址始终绕过代理 |
+| 系统代理可用但 GitHub 推送仍直连超时 | Git 不保证使用 Windows 系统代理；用户明确要求使用梯子时，只对当前 `git push` 和 `git ls-remote` 使用 `git -c http.proxy=... -c https.proxy=...`，不得未经授权写入永久 Git 配置 |
+| 普通 `cargo build --release` 测试程序打开 `127.0.0.1` 开发页 | 桌面正式构建使用 `tauri:build`；只生成生产协议二进制使用 `tauri build --no-bundle`，禁止把未注入 Tauri 生产配置的原始 Cargo 产物复制到安装目录 |
+| 更新 IPC 返回后主程序退出，安装助手随父进程消失 | 更新助手使用新控制台、新进程组和脱离父 Job 的创建标志；脚本启动立即写握手文件，未握手、提前退出或超时均回写失败状态并阻止主程序退出 |
+| `cmd /S /C call "脚本路径"` 启动助手后立即退出码 1 | 使用 `cmd.exe /D /C`，脚本路径通过独立参数传递；真实安装目录必须覆盖含空格路径，禁止在多个 Shell 层手工拼接引号 |
+| Tauri IPC 拒绝在 CDP 中只显示 `Uncaught (in promise)` | 验收脚本先把 IPC Promise 转成 `{ ok, value/error }` 的可序列化结果，再抛出真实错误；不得根据空异常文本猜测安装状态 |
+| 已下载更新缓存导致验收只接受 `available` 而失败 | 初始状态允许 `available` 或完整的 `downloaded`；后者必须同时满足字节数、签名信封和校验缓存门禁，只复用可信完整缓存 |
+| 先发布测试用最低直升版本，导致旧版本无法看到最终更新 | 发布前先验证 `minimum-version` 的业务含义；稳定资源发布后不可修改，错误元数据只能提升版本重新发布，因此测试元数据不得进入正式清单 |
+| PowerShell 文件复制报错但命令仍以退出码 0 结束 | 文件写入、复制和替换使用 `-ErrorAction Stop`，随后比较源与目标 SHA-256；非终止错误未通过后置条件时必须判定整步失败 |
+| 公网清单检查误按裸 payload 解析 `{ ok, data }` 响应 | 先确认真实响应层级，再从 `data.payload` 读取签名载荷；使用有上限的网络重试，并断言最新版本、最低直升版本、资源数量和 `nonMirror=0` |
 
 ## 失败分支
 
