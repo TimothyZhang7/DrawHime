@@ -523,6 +523,26 @@
 
 .repository-detail-actions button:disabled { border-color: var(--success-border); background: var(--success-soft); color: var(--success); }
 
+/* 删除操作保持独立危险语义，避免与“已安装”状态按钮混淆。 */
+.repository-detail-actions .danger {
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.repository-detail-actions .danger:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger-soft) 78%, var(--danger) 22%);
+}
+
+.repository-detail-actions .danger:disabled {
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+  color: var(--danger);
+  cursor: wait;
+  opacity: .58;
+}
+
 .repository-detail-progress {
   position: relative;
   height: 22px;
@@ -614,6 +634,79 @@
 .repository-file-field input { flex: 1; }
 .repository-file-field button { min-height: 35px; flex: 0 0 auto; }
 
+/* Anima 默认导入只突出主文件，高级组件按需展开并保持成对选择。 */
+.repository-model-import {
+  display: grid;
+  gap: 11px;
+  margin-top: 14px;
+}
+
+.repository-model-import > label {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.repository-model-import > label > span {
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 700;
+}
+
+.repository-model-import input {
+  width: 100%;
+  min-width: 0;
+  height: 35px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  outline: 0;
+  background: var(--control);
+  color: var(--text);
+  font-size: 9px;
+}
+
+.repository-model-import input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+
+.repository-advanced-toggle {
+  min-height: 36px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  background: var(--panel-muted);
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 800;
+  text-align: left;
+}
+
+.repository-advanced-toggle svg { width: 14px; }
+.repository-advanced-toggle svg:last-child { transition: transform 160ms ease; }
+.repository-advanced-toggle.active { border-color: var(--accent-border); background: var(--accent-soft); color: var(--accent); }
+.repository-advanced-toggle.active svg:last-child { transform: rotate(90deg); }
+
+.repository-advanced-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 11px;
+  border: 1px solid var(--border);
+  background: var(--panel-muted);
+}
+
+.repository-advanced-fields > p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--muted);
+  font-size: 8px;
+  line-height: 1.6;
+}
+
+.repository-advanced-fields .wide { grid-column: auto; }
+
 .repository-dialog-actions { justify-content: flex-end; gap: 7px; margin-top: 16px; padding-top: 13px; border-top: 1px solid var(--border); }
 .repository-dialog-actions button:disabled { cursor: not-allowed; opacity: .45; }
 
@@ -646,6 +739,7 @@
   .repository-detail-hero > .repository-cover { height: 260px; min-height: 260px; border-right: 0; border-bottom: 1px solid var(--border); }
   .repository-detail-summary { padding: 20px; }
   .repository-dialog-backdrop { padding: 10px; }
+  .repository-advanced-fields { grid-template-columns: 1fr; }
 }
 
 /* 仓库卡片和弹窗统一收敛为小圆角，突出图片、标题和状态而非容器装饰。 */

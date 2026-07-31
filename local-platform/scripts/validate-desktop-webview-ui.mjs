@@ -123,7 +123,7 @@ async function captureFontSettings(client, directory) {
   return { ...result, screenshot };
 }
 
-/** 验证生成窄预览、三栏参数、根级悬浮帮助、训练集列表和分步骤训练入口。 */
+/** 验证生成单栏、独立原生预览、三栏参数、根级悬浮帮助、训练集列表和分步骤训练入口。 */
 async function captureGenerationAndTrainingPages(client, directory) {
   const targetDirectory = path.resolve(directory);
   await mkdir(targetDirectory, { recursive: true });
@@ -133,8 +133,8 @@ async function captureGenerationAndTrainingPages(client, directory) {
     navigation.click();
     await new Promise((resolve) => setTimeout(resolve, 300));
     const layout = document.querySelector('.generate-layout');
-    const form = layout?.querySelector('.generation-form');
     const preview = layout?.querySelector('.generation-preview');
+    const previewButton = [...(layout?.querySelectorAll('.generation-heading-actions button') || [])].find((button) => button.textContent.includes('预览窗口'));
     const fields = [...(layout?.querySelectorAll('.generation-parameter') || [])];
     const controlsFit = fields.every((field) => { const control = field.querySelector('input, select'); return !control || control.getBoundingClientRect().right <= field.getBoundingClientRect().right + 1; });
     const firstRow = fields.slice(0, 3).map((field) => Math.round(field.getBoundingClientRect().top));
@@ -146,14 +146,14 @@ async function captureGenerationAndTrainingPages(client, directory) {
     help?.blur();
     return {
       layoutVisible: Boolean(layout?.getClientRects().length),
-      twoColumns: Boolean(form && preview && Math.abs(form.getBoundingClientRect().top - preview.getBoundingClientRect().top) < 2 && preview.getBoundingClientRect().left > form.getBoundingClientRect().left),
-      previewNarrower: Boolean(form && preview && preview.getBoundingClientRect().width < form.getBoundingClientRect().width),
+      singleColumn: getComputedStyle(layout).gridTemplateColumns.split(' ').length === 1,
       threeParameterColumns: fields.length < 3 || new Set(firstRow).size === 1,
       parameterFields: fields.length,
       helpIcons: layout?.querySelectorAll('.parameter-help').length || 0,
       tooltipVisible,
       emptyState: Boolean(layout?.querySelector('.resource-unconfigured')),
-      previewVisible: Boolean(preview?.getClientRects().length),
+      embeddedPreviewAbsent: !preview,
+      previewButtonVisible: Boolean(previewButton?.getClientRects().length),
       sidebarThemeControls: document.querySelectorAll('.sidebar-theme-switch button').length,
       topbarRecheckVisible: Boolean(document.querySelector('.desktop-topbar .recheck-button')),
       controlsFit,
@@ -161,7 +161,13 @@ async function captureGenerationAndTrainingPages(client, directory) {
     };
   })()`);
   const parameterHelpReady = generation.parameterFields > 0 ? generation.helpIcons >= generation.parameterFields : generation.emptyState;
-  if (!generation.layoutVisible || !generation.twoColumns || !generation.previewNarrower || !generation.threeParameterColumns || !parameterHelpReady || !generation.tooltipVisible || !generation.previewVisible || generation.sidebarThemeControls !== 3 || generation.topbarRecheckVisible || !generation.controlsFit || generation.horizontalOverflow) throw new Error(`本地生成布局验收失败：${JSON.stringify(generation)}`);
+  if (!generation.layoutVisible || !generation.singleColumn || !generation.threeParameterColumns || !parameterHelpReady || !generation.tooltipVisible || !generation.embeddedPreviewAbsent || !generation.previewButtonVisible || generation.sidebarThemeControls !== 3 || generation.topbarRecheckVisible || !generation.controlsFit || generation.horizontalOverflow) throw new Error(`本地生成布局验收失败：${JSON.stringify(generation)}`);
+  // 真实点击主窗口按钮，并通过只读 Tauri 命令确认原生窗口表完成创建和销毁。
+  await client.evaluate("[...document.querySelectorAll('.generation-heading-actions button')].find((button) => button.textContent.includes('预览窗口'))?.click()");
+  generation.previewWindowOpened = await waitForNativePreviewState(client, true);
+  await client.evaluate("[...document.querySelectorAll('.generation-heading-actions button')].find((button) => button.textContent.includes('预览窗口'))?.click()");
+  generation.previewWindowClosed = await waitForNativePreviewState(client, false);
+  if (!generation.previewWindowOpened || !generation.previewWindowClosed) throw new Error(`独立生成预览窗口验收失败：${JSON.stringify(generation)}`);
   const generationFile = "generation-workspace.png";
   await writeFile(path.join(targetDirectory, generationFile), Buffer.from(await client.captureScreenshot(), "base64"));
 
@@ -189,6 +195,17 @@ async function captureGenerationAndTrainingPages(client, directory) {
   const trainingFile = "training-workflow.png";
   await writeFile(path.join(targetDirectory, trainingFile), Buffer.from(await client.captureScreenshot(), "base64"));
   return { generation: { ...generation, screenshot: generationFile }, captioning: { ...captioning, screenshot: captioningFile }, training: { ...training, screenshot: trainingFile } };
+}
+
+/** 原生 WebView 创建和销毁均为异步过程，以真实窗口表和有界轮询确认收敛。 */
+async function waitForNativePreviewState(client, expectedOpen) {
+  const deadline = Date.now() + 3_000;
+  do {
+    const open = await client.evaluate("window.__TAURI_INTERNALS__.invoke('desktop_generation_preview_open')");
+    if (open === expectedOpen) return true;
+    await delay(100);
+  } while (Date.now() < deadline);
+  return false;
 }
 
 /** 验证图库作品子页面和全宽记录列表；存在真实数据时继续验证任务详情弹窗。 */

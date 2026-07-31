@@ -47,10 +47,13 @@
 | `desktop_start_runtime` | desktop webview/local scheduler | desktop core | 校验已安装 Runtime 后，以私有 Python、动态回环端口和受控模型目录配置启动 ComfyUI；等待 `/system_stats` 真实就绪后返回，不向局域网或公网监听 |
 | `desktop_stop_runtime` | desktop webview | desktop core | 幂等终止由当前桌面进程创建的 ComfyUI 子进程并等待退出；运行中本地任务存在时由 Local Scheduler 阻止停止 |
 | `desktop_self_test_runtime` | desktop webview | desktop core | 启动或复用本机 Runtime，校验 `/system_stats`、GPU 设备及生成必需节点；成功后原子更新 Runtime 内部自检状态，失败时保留具体原因而不伪造就绪 |
-| `desktop_import_local_model` | desktop webview | desktop core | 校验用户选择的 safetensors、计算 SHA-256、原子复制到受控模型目录并登记 `DesktopLocalModelView`；Anima 同时校验独立 UNet、文本编码器和 VAE，不加载 pickle 权重 |
+| `desktop_import_local_model` | desktop webview | desktop core | 当前只接受 Anima safetensors 主模型；计算 SHA-256 后原子复制到受控模型目录，默认复用已签名安装的 Qwen 文本编码器和 VAE，高级输入可成对覆盖共享组件，不加载 pickle 权重 |
 | `desktop_list_local_models` | desktop webview | desktop core | 返回当前设备已登记且文件元数据仍匹配的本地底模，不扫描或读取未登记文件内容 |
+| `desktop_delete_local_model_file` | desktop webview | desktop core | 按 UUID 删除已登记底模的受管主文件；活动生成或训练任务引用时拒绝，保留数据库登记与历史任务快照，并返回 `DesktopManagedFileRemovalView` |
 | `desktop_import_local_lora` | desktop webview | desktop core | 校验并原子导入单个 safetensors LoRA，固化标题、类型、触发词、SHA-256、字节数和修改时间；同内容幂等复用，不覆盖其他文件 |
 | `desktop_list_local_loras` | desktop webview | desktop core | 返回当前设备已登记 LoRA 及实时文件可用性；本地任务可选择任意数量的不同内容 LoRA，每个独立设置模型与 CLIP 强度 |
+| `desktop_delete_local_lora_file` | desktop webview | desktop core | 按 UUID 删除已登记 LoRA 的受管文件；活动生成任务引用时拒绝，保留数据库登记与历史任务快照，并返回 `DesktopManagedFileRemovalView` |
+| `desktop_storage_cleanup` | desktop webview | desktop core | 使用 `DesktopStorageCleanupInput.execute` 区分只读扫描与确认执行；仅回收已安装依赖缓存、已登记 LoRA 重复下载、终态训练工作区和受管临时/隔离文件，返回按类别汇总的 `DesktopStorageCleanupView`，不删除作品、训练集、当前模型、当前 Runtime、更新回滚包或未知文件 |
 | `desktop_create_training_dataset` | desktop webview | desktop core | 创建角色、画风或概念训练集并持久化标题和触发词，返回 `DesktopTrainingDatasetView` |
 | `desktop_list_training_datasets` | desktop webview | desktop core | 返回当前设备训练集、真实图片文件摘要、逐图 Caption 和确认状态；应用重启后仍以 SQLite 为准 |
 | `desktop_update_training_trigger_words` | desktop webview | desktop core | 校验、去重并更新当前训练集触发词；既有训练任务继续使用自己的不可变快照，新任务读取更新后的触发词 |
@@ -69,7 +72,12 @@
 | `desktop-training-job-updated` | desktop core/training scheduler | desktop webview | 本地训练任务状态变化事件；载荷为 `DesktopTrainingJobView` |
 | `desktop_create_local_job` | desktop webview | desktop core/local scheduler | 校验底模、组件与全部所选 LoRA 的受控路径、文件名和不可变快照后立即创建 `DesktopLocalJobView`；输出最长边限制 1536，尺寸与比例独立选择；支持快速、质量、极致和自定义参数，后台串行调度不会阻塞页面 |
 | `desktop_list_local_jobs` | desktop webview | desktop core | 分页前的首版接口返回当前设备最近 100 个本地任务及产物摘要，任务、尝试和错误在应用重启后保留 |
+| `desktop_latest_local_job` | desktop preview webview | desktop core | 只返回当前设备最新 1 个本地任务及其 LoRA、尝试和产物摘要；独立预览启动不读取完整任务列表 |
+| `desktop_load_preview_settings` | desktop preview webview | desktop core | 只读取主题、字体和本地设置，不触发硬件、Runtime、资源或网络检测 |
 | `desktop_cancel_local_job` | desktop webview | desktop core/local scheduler | 幂等取消排队任务；运行中任务向当前 ComfyUI prompt 发出删除和中断请求，终态任务保持不变 |
+| `desktop_toggle_generation_preview` | desktop main webview | desktop core | 按真实窗口状态创建或关闭 `generation-preview` 原生窗口并返回是否已打开；窗口支持系统拖动、缩放、最小化、最大化和前后台切换 |
+| `desktop_mark_generation_preview_ready` | desktop preview webview | desktop core | 预览 React 根组件应用主窗口主题后登记就绪并显示原生窗口；空白 WebView 不得报告为已打开 |
+| `desktop_set_generation_preview_always_on_top` | desktop preview webview | desktop core | 仅修改预览原生窗口的置顶状态并返回最终值；关闭置顶后恢复普通 Windows Z 序，可位于主窗口后方 |
 | `desktop-local-job-updated` | desktop core/local scheduler | desktop webview | 本地任务状态、进度或产物变化事件；载荷为 `DesktopLocalJobView`，刷新页面后仍以 SQLite 为准 |
 | `desktop_enqueue_gallery_publication` | desktop runtime/UI | desktop core | 校验本地结果文件、计算 SHA-256，并以本地任务和文件哈希幂等写入图库同步队列 |
 | `desktop_list_gallery_sync_queue` | desktop webview | desktop core | 读取当前设备本地图库同步队列；对应 `DesktopGallerySyncItem[]` |

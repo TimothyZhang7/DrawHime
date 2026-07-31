@@ -988,11 +988,42 @@ export const desktopLocalModelViewSchema = z.object({
 /** 桌面端从用户已有文件导入底模的请求。 */
 export const desktopLocalModelImportInputSchema = z.object({
   displayName: z.string().trim().min(1).max(191),
-  family: z.string().trim().min(1).max(100),
-  workflowKind: desktopLocalModelViewSchema.shape.workflowKind,
+  family: z.literal("anima"),
+  workflowKind: z.literal("anima"),
   modelSourcePath: z.string().min(1),
   textEncoderSourcePath: z.string().min(1).nullable(),
   vaeSourcePath: z.string().min(1).nullable(),
+});
+
+/** 删除底模或 LoRA 受管文件时只接受已登记 UUID。 */
+export const desktopManagedFileDeleteInputSchema = z.object({ id: z.string().uuid() });
+
+/** 受管文件删除保留历史登记，只返回本次真实释放空间。 */
+export const desktopManagedFileRemovalViewSchema = z.object({
+  id: z.string().uuid(),
+  kind: z.enum(["model", "lora"]),
+  fileName: z.string().min(1),
+  removed: z.boolean(),
+  freedBytes: z.number().int().nonnegative(),
+  retainedSharedFiles: z.number().int().nonnegative(),
+});
+
+/** 存储清理先预览再执行，禁止页面跳过确认直接删除。 */
+export const desktopStorageCleanupInputSchema = z.object({ execute: z.boolean() });
+
+export const desktopStorageCleanupCategorySchema = z.object({
+  key: z.enum(["dependency_cache", "download_residue", "training_workspace", "install_residue"]),
+  label: z.string().min(1),
+  fileCount: z.number().int().nonnegative(),
+  byteSize: z.number().int().nonnegative(),
+});
+
+/** 清理结果仅汇总受管文件，不向 WebView 暴露用户磁盘绝对路径。 */
+export const desktopStorageCleanupViewSchema = z.object({
+  executed: z.boolean(),
+  categories: z.array(desktopStorageCleanupCategorySchema),
+  totalFiles: z.number().int().nonnegative(),
+  totalBytes: z.number().int().nonnegative(),
 });
 
 /** 桌面端本机 LoRA 的可用视图。 */
@@ -1598,6 +1629,11 @@ export type DesktopResourceInstallView = z.infer<typeof desktopResourceInstallVi
 export type DesktopRuntimeStatusView = z.infer<typeof desktopRuntimeStatusViewSchema>;
 export type DesktopLocalModelView = z.infer<typeof desktopLocalModelViewSchema>;
 export type DesktopLocalModelImportInput = z.infer<typeof desktopLocalModelImportInputSchema>;
+export type DesktopManagedFileDeleteInput = z.infer<typeof desktopManagedFileDeleteInputSchema>;
+export type DesktopManagedFileRemovalView = z.infer<typeof desktopManagedFileRemovalViewSchema>;
+export type DesktopStorageCleanupInput = z.infer<typeof desktopStorageCleanupInputSchema>;
+export type DesktopStorageCleanupCategory = z.infer<typeof desktopStorageCleanupCategorySchema>;
+export type DesktopStorageCleanupView = z.infer<typeof desktopStorageCleanupViewSchema>;
 export type DesktopLocalLoraView = z.infer<typeof desktopLocalLoraViewSchema>;
 export type DesktopLocalLoraImportInput = z.infer<typeof desktopLocalLoraImportInputSchema>;
 export type DesktopLocalLoraSelection = z.infer<typeof desktopLocalLoraSelectionSchema>;

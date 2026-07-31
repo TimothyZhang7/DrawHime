@@ -2,8 +2,7 @@
  * 本文件实现本地生成的固定参数栏、质量预设、专业参数和持久任务预览。
  */
 import type { DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraView, DesktopLocalModelView, DesktopSettings, DesktopWebsiteLoraInstallProgress, DesktopWebsiteLoraView } from "@drawhime/contracts";
-import { convertFileSrc } from "@tauri-apps/api/core";
-import { CheckCircle2, ChevronDown, CircleHelp, Database, Gauge, Image, Layers3, LoaderCircle, Play, SlidersHorizontal, Sparkles, Zap } from "lucide-react";
+import { CheckCircle2, ChevronDown, CircleHelp, Database, Gauge, Layers3, LoaderCircle, PictureInPicture2, Play, SlidersHorizontal, Sparkles, Zap } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -17,11 +16,12 @@ interface GenerationPageProps {
   loras: DesktopLocalLoraView[];
   websiteLoras: DesktopWebsiteLoraView[];
   websiteLoraProgress: Record<string, DesktopWebsiteLoraInstallProgress>;
-  jobs: DesktopLocalJobView[];
   inferenceReady: boolean;
   defaultPrivacy: DesktopSettings["defaultPrivacy"];
   onCreated: (job: DesktopLocalJobView) => void;
   onInstallWebsiteLora: (id: string) => void;
+  onOpenLoraLibrary: () => void;
+  onTogglePreview: () => void;
   onError: (message: string) => void;
 }
 
@@ -43,10 +43,9 @@ const ASPECT_RATIOS = [
 type AspectRatioId = typeof ASPECT_RATIOS[number]["id"];
 
 /** 本地生成页在页面切换时保持表单实例，任务提交后立即交给 SQLite 队列。 */
-export function GenerationPage({ models, loras, websiteLoras, websiteLoraProgress, jobs, inferenceReady, defaultPrivacy, onCreated, onInstallWebsiteLora, onError }: GenerationPageProps) {
+export function GenerationPage({ models, loras, websiteLoras, websiteLoraProgress, inferenceReady, defaultPrivacy, onCreated, onInstallWebsiteLora, onOpenLoraLibrary, onTogglePreview, onError }: GenerationPageProps) {
   const availableModels = useMemo(() => models.filter((model) => model.available), [models]);
   const availableLoras = useMemo(() => loras.filter((lora) => lora.available), [loras]);
-  const latestJob = useMemo(() => jobs.reduce<DesktopLocalJobView | null>((latest, job) => !latest || job.createdAt > latest.createdAt ? job : latest, null), [jobs]);
   const [form, setForm] = useState<DesktopLocalJobCreateInput>(() => createInitialForm(defaultPrivacy));
   const [busy, setBusy] = useState(false);
   const [loraDialogOpen, setLoraDialogOpen] = useState(false);
@@ -76,6 +75,8 @@ export function GenerationPage({ models, loras, websiteLoras, websiteLoraProgres
     const model = availableModels.find((item) => item.id === modelId) || null;
     setForm((current) => current.qualityPreset === "custom" ? { ...current, modelId } : applyPreset({ ...current, modelId }, current.qualityPreset, model));
   };
+  /** 打开选择器时才读取主站 LoRA 目录，普通启动和页面切换不下载仓库媒体。 */
+  const openLoraDialog = () => { onOpenLoraLibrary(); setLoraDialogOpen(true); };
   /** LoRA 数量由用户和本机资源决定，新选择默认让模型与 CLIP 强度保持一致。 */
   const toggleLora = (id: string) => setForm((current) => {
     if (current.loras.some((item) => item.id === id)) return { ...current, loras: current.loras.filter((item) => item.id !== id) };
@@ -94,7 +95,7 @@ export function GenerationPage({ models, loras, websiteLoras, websiteLoraProgres
 
   return <div className="desktop-page generate-layout">
     <section className="section-card generation-form">
-      <header><div><span>LOCAL GENERATION</span><h2>本地生成</h2></div><small>{inferenceReady ? "参数随任务固化 · 后台串行执行" : "GPU、Runtime 或底模未就绪"}</small></header>
+      <header><div><span>LOCAL GENERATION</span><h2>本地生成</h2></div><div className="generation-heading-actions"><small>{inferenceReady ? "参数随任务固化 · 后台串行执行" : "GPU、Runtime 或底模未就绪"}</small><button type="button" onClick={onTogglePreview}><PictureInPicture2 />预览窗口</button></div></header>
       <div className="generation-form-scroll">{availableModels.length === 0 ? <div className="resource-unconfigured"><Database /><div><strong>尚无可用底模</strong><span>请先前往模型仓库安装底模，或导入已有 safetensors。</span></div></div> : <>
         <section className="generation-presets" aria-label="生成质量预设">{PRESETS.map(({ id, title, detail, Icon }) => <button key={id} type="button" className={form.qualityPreset === id ? "active" : ""} onClick={() => choosePreset(id)}><Icon /><span><strong>{title}</strong><small>{presetSummary(id, selectedModel)}</small></span><HelpTip text={detail} />{form.qualityPreset === id && <CheckCircle2 className="preset-selected" />}</button>)}</section>
         {form.qualityPreset === "custom" && <div className="generation-custom-notice"><SlidersHorizontal /><span><strong>自定义参数</strong><small>点击任一预设可恢复经过验证的整套参数。</small></span></div>}
@@ -118,13 +119,12 @@ export function GenerationPage({ models, loras, websiteLoras, websiteLoraProgres
           <SwitchField label="模型质量前缀" help="自动补齐当前底模验证过的质量标签；已存在的标签不会重复。" checked={form.qualityPromptEnabled} onChange={(checked) => changeProfessional("qualityPromptEnabled", checked)} />
           <SwitchField label="默认负面词" help="仅在负面提示词留空时使用模型级默认内容，不覆盖你的手动输入。" checked={form.defaultNegativeEnabled} onChange={(checked) => changeProfessional("defaultNegativeEnabled", checked)} />
         </div></details>
-        <section className="generation-lora-summary"><header><div><strong>使用的 LoRA</strong><span>本机训练 LoRA 仅在其精确训练底模下可选，外部 LoRA 按仓库兼容范围使用</span></div><button type="button" onClick={() => setLoraDialogOpen(true)}><Layers3 />选择 LoRA</button></header>{form.loras.length ? <div>{form.loras.map((selection) => { const lora = compatibleLoras.find((item) => item.id === selection.id); return <button key={selection.id} type="button" onClick={() => setLoraDialogOpen(true)}><strong>{lora?.title || "LoRA"}</strong><span>模型 {selection.strength.toFixed(2)} · CLIP {selection.clipStrength.toFixed(2)}</span></button>; })}</div> : <p>当前未选择 LoRA</p>}</section>
+        <section className="generation-lora-summary"><header><div><strong>使用的 LoRA</strong><span>本机训练 LoRA 仅在其精确训练底模下可选，外部 LoRA 按仓库兼容范围使用</span></div><button type="button" onClick={openLoraDialog}><Layers3 />选择 LoRA</button></header>{form.loras.length ? <div>{form.loras.map((selection) => { const lora = compatibleLoras.find((item) => item.id === selection.id); return <button key={selection.id} type="button" onClick={openLoraDialog}><strong>{lora?.title || "LoRA"}</strong><span>模型 {selection.strength.toFixed(2)} · CLIP {selection.clipStrength.toFixed(2)}</span></button>; })}</div> : <p>当前未选择 LoRA</p>}</section>
         <label className="prompt-field"><span>提示词<HelpTip text="描述主体、画风、构图、光影和细节；开启质量前缀时只补齐缺失的模型标签。" /></span><textarea value={form.prompt} onChange={(event) => setForm((current) => ({ ...current, prompt: event.target.value }))} placeholder="支持 Anima 标签或自然语言" /></label>
         <label className="prompt-field negative"><span>负面提示词<HelpTip text="通过独立 negative conditioning 进入工作流，不会与正面提示词合并。" /></span><textarea value={form.negativePrompt || ""} onChange={(event) => setForm((current) => ({ ...current, negativePrompt: event.target.value || null }))} placeholder="可选；留空时可使用模型级默认负面词" /></label>
       </>}</div>
       {availableModels.length > 0 && <footer><div><strong>{presetLabel(form.qualityPreset)}</strong><span>{form.steps} 步 · CFG {form.cfg} · {form.samplerName} / {form.schedulerName}</span></div><button disabled={busy || !inferenceReady || !form.modelId || !form.prompt.trim()} onClick={() => void submit()}>{busy ? <LoaderCircle className="spin" /> : <Play />}{busy ? "正在创建任务" : inferenceReady ? "提交本地任务" : "等待环境就绪"}</button></footer>}
     </section>
-    <GenerationPreview job={latestJob} />
     {loraDialogOpen && <GenerationLoraDialog localLoras={compatibleLoras} websiteLoras={websiteLoras} selected={form.loras} progress={websiteLoraProgress} onToggle={toggleLora} onStrength={changeLoraStrength} onInstall={onInstallWebsiteLora} onClose={() => setLoraDialogOpen(false)} />}
   </div>;
 }
@@ -164,11 +164,6 @@ function HelpTip({ text }: { text: string }) {
 
 /** 高级布尔参数使用可点击整行的稳定开关。 */
 function SwitchField({ label, help, checked, onChange }: { label: string; help: string; checked: boolean; onChange: (checked: boolean) => void }) { return <label className="generation-switch"><span><strong>{label}</strong><HelpTip text={help} /></span><input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} /><i /></label>; }
-
-/** 右侧预览只读取 SQLite 持久任务状态，刷新页面后仍能恢复最后任务。 */
-function GenerationPreview({ job }: { job: DesktopLocalJobView | null }) {
-  return <aside className="section-card generation-preview"><header><div><span>LAST TASK</span><h2>最近任务</h2></div>{job && <b className={`is-${job.status}`}>{jobStatusLabel(job.status)}</b>}</header><div className="generation-preview-stage">{job?.artifact ? <img src={convertFileSrc(job.artifact.path)} alt={job.prompt.slice(0, 80)} /> : <div className="generation-preview-empty"><Image /><strong>{job ? jobStatusLabel(job.status) : "尚未提交任务"}</strong><span>{job ? job.error || `本地任务进度 ${job.progress}%` : "提交任务后，此处会持续展示状态与最终图片。"}</span></div>}{job && !job.artifact && <i><em style={{ width: `${job.progress}%` }} /></i>}</div>{job && <footer><div><span>模型</span><strong>{job.modelDisplayName}</strong></div><div><span>输出</span><strong>{job.parameters.width} × {job.parameters.height}</strong></div><div><span>LoRA</span><strong>{job.loras.length} 个</strong></div><div><span>Seed</span><strong>{job.parameters.seed}</strong></div></footer>}</aside>;
-}
 
 /** 创建默认质量档表单，首个任务无需专业调参即可获得服务器级参数。 */
 function createInitialForm(privacy: DesktopSettings["defaultPrivacy"]): DesktopLocalJobCreateInput {
@@ -220,5 +215,3 @@ function presetSummary(preset: PresetName, model: DesktopLocalModelView | null):
 
 /** 质量档外显名称用于提交区确认当前行为。 */
 function presetLabel(preset: DesktopLocalJobCreateInput["qualityPreset"]): string { return { fast: "快速预设", quality: "质量预设", extreme: "极致预设", custom: "自定义参数" }[preset]; }
-/** 本地任务状态使用稳定中文外显。 */
-function jobStatusLabel(status: DesktopLocalJobView["status"]): string { return { queued: "排队中", running: "生成中", succeeded: "生成完成", failed: "生成失败", cancelled: "已取消" }[status]; }

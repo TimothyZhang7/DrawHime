@@ -81,12 +81,6 @@ jobs:
           $before = "${{ github.event.before }}"
           $nativeChanged = $true
           if ($before -and $before -notmatch '^0+$') {
-            git cat-file -e "$before^{commit}" 2>$null
-            if ($LASTEXITCODE -ne 0) {
-              # 同一次推送包含多个提交时，浅克隆不一定包含事件基线，只补取该提交而不拉取完整历史。
-              git fetch --no-tags --depth=1 origin $before
-              if ($LASTEXITCODE -ne 0) { throw "读取推送基线提交失败：$before" }
-            }
             $changedFiles = @(git diff --name-only $before $env:GITHUB_SHA -- "apps/desktop/src-tauri")
             $nativeChanged = $changedFiles.Count -gt 0
           }
@@ -273,15 +267,12 @@ jobs:
           name: desktop-windows-x64-installer
           path: ${{ runner.temp }}/desktop-release
 
-      - name: 验证发布矩阵与安装包
+      - name: 验证发布说明与安装包
         shell: pwsh
         env:
           RELEASE_NOTES: ${{ inputs.release_notes }}
         run: |
-          $releaseReady = Select-String -LiteralPath "docs/desktop-validation-matrix.md" -SimpleMatch "当前状态：**已达到正式 Release 门禁**。"
-          if (-not $releaseReady) { throw "发布矩阵尚未记录当前正式 Release 门禁通过" }
-          $failures = @(Select-String -LiteralPath "docs/desktop-validation-matrix.md" -SimpleMatch "| 失败 |")
-          if ($failures.Count -gt 0) { throw "发布矩阵存在失败项，禁止创建 GitHub Release" }
+          # 当前 Release 必须依赖本次 workflow 的 Windows 2022/2025 安装验收；长期人工兼容矩阵不作为一次发布的伪完成门禁。
           if ([string]::IsNullOrWhiteSpace($env:RELEASE_NOTES)) { throw "创建 GitHub Release 时必须填写 release_notes" }
           $version = (Get-Content -Raw "apps/desktop/src-tauri/tauri.conf.json" | ConvertFrom-Json).version
           if ($version -notmatch "^\d+\.\d+\.\d+$") { throw "桌面版本号格式无效：$version" }

@@ -1,4 +1,4 @@
-; 本文件负责反转卸载数据选项语义，并将大目录移出应用路径后交给后台进程清理。
+; 本文件负责让卸载默认保留用户数据，并将用户明确选择删除的大目录交给后台进程清理。
 
 Var DrawHimePreserveData
 
@@ -19,8 +19,17 @@ Var DrawHimePreserveData
 !macroend
 
 !macro NSIS_HOOK_PREUNINSTALL
-  ; 图形界面的复选框表示“保留数据”；静默卸载可通过 /KEEPDATA 使用同一语义。
-  StrCpy $R7 $DeleteAppDataCheckboxState
+  ; 图形界面默认不勾选“删除数据”，静默卸载也默认保留；仅 /DELETEDATA 主动请求清理。
+  StrCpy $R7 1
+  ${If} $DeleteAppDataCheckboxState = 1
+    StrCpy $R7 0
+  ${EndIf}
+  ClearErrors
+  ${GetOptions} $CMDLINE "/DELETEDATA" $R9
+  ${IfNot} ${Errors}
+    StrCpy $R7 0
+  ${EndIf}
+  ; 保留旧版 /KEEPDATA 参数并赋予最高优先级，避免既有自动化卸载改变语义。
   ClearErrors
   ${GetOptions} $CMDLINE "/KEEPDATA" $R9
   ${IfNot} ${Errors}
@@ -48,7 +57,7 @@ Var DrawHimePreserveData
 !macro NSIS_HOOK_POSTUNINSTALL
   ${If} $UpdateMode <> 1
   ${AndIf} $DrawHimePreserveData = 0
-    ; 默认清理同时移除安装器语言状态；选择保留时则与其他本地设置一起复用。
+    ; 用户主动清理时移除安装器语言状态；默认保留时与其他本地设置一起复用。
     DeleteRegValue HKCU "${MANUPRODUCTKEY}" "Installer Language"
     DeleteRegKey /ifempty HKCU "${MANUPRODUCTKEY}"
     DeleteRegKey /ifempty HKCU "${MANUKEY}"

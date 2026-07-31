@@ -56,6 +56,52 @@ pub struct DesktopLocalModelImportInput {
     pub vae_source_path: Option<String>,
 }
 
+/** 删除本机已登记受管文件的输入。 */
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopManagedFileDeleteInput {
+    pub id: String,
+}
+
+/** 删除底模或 LoRA 文件后的真实空间释放结果。 */
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopManagedFileRemovalView {
+    pub id: String,
+    pub kind: String,
+    pub file_name: String,
+    pub removed: bool,
+    pub freed_bytes: u64,
+    pub retained_shared_files: u32,
+}
+
+/** 存储清理必须先扫描，再由用户确认执行。 */
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopStorageCleanupInput {
+    pub execute: bool,
+}
+
+/** 单类受管清理候选的数量和空间。 */
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopStorageCleanupCategory {
+    pub key: String,
+    pub label: String,
+    pub file_count: u64,
+    pub byte_size: u64,
+}
+
+/** 存储清理预览或执行结果，不暴露本机绝对路径。 */
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopStorageCleanupView {
+    pub executed: bool,
+    pub categories: Vec<DesktopStorageCleanupCategory>,
+    pub total_files: u64,
+    pub total_bytes: u64,
+}
+
 /** 已登记的本机 LoRA 视图。 */
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -453,15 +499,28 @@ pub struct DesktopEnvironmentReport {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct OsView { pub name: String, pub version: String, pub build: Option<u64>, pub arch: String, pub supported: bool }
+pub struct OsView {
+    pub name: String,
+    pub version: String,
+    pub build: Option<u64>,
+    pub arch: String,
+    pub supported: bool,
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CpuView { pub name: String, pub logical_cores: usize }
+pub struct CpuView {
+    pub name: String,
+    pub logical_cores: usize,
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct MemoryView { pub total_bytes: u64, pub available_bytes: u64, pub virtual_total_bytes: u64 }
+pub struct MemoryView {
+    pub total_bytes: u64,
+    pub available_bytes: u64,
+    pub virtual_total_bytes: u64,
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -481,19 +540,39 @@ pub struct GpuView {
 /** 签名资源清单中的单个下载来源。 */
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DiskView { pub name: String, pub file_system: String, pub total_bytes: u64, pub available_bytes: u64 }
+pub struct DiskView {
+    pub name: String,
+    pub file_system: String,
+    pub total_bytes: u64,
+    pub available_bytes: u64,
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct RuntimeView { pub installed: bool, pub status: String, pub root_path: String }
+pub struct RuntimeView {
+    pub installed: bool,
+    pub status: String,
+    pub root_path: String,
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CapabilityView { pub inference: bool, pub training: bool, pub captioning: bool, pub model_management: bool }
+pub struct CapabilityView {
+    pub inference: bool,
+    pub training: bool,
+    pub captioning: bool,
+    pub model_management: bool,
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct EnvironmentIssue { pub code: String, pub severity: String, pub title: String, pub message: String, pub action: String }
+pub struct EnvironmentIssue {
+    pub code: String,
+    pub severity: String,
+    pub title: String,
+    pub message: String,
+    pub action: String,
+}
 
 /** 签名资源清单中的不可变资源项目。 */
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -516,27 +595,50 @@ pub struct DesktopSettings {
 /** 桌面 AI 辅助设置视图不包含 Windows Credential Manager 中的密钥正文。 */
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DesktopAiSettings { pub enabled: bool, pub endpoint_type: String, pub base_url: String, pub model: String, pub api_key_configured: bool }
+pub struct DesktopAiSettings {
+    pub enabled: bool,
+    pub endpoint_type: String,
+    pub base_url: String,
+    pub model: String,
+    pub api_key_configured: bool,
+}
 
 /** 桌面 AI 辅助设置更新请求使用显式清除字段，避免空输入覆盖既有密钥。 */
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DesktopAiSettingsUpdate { pub enabled: bool, pub endpoint_type: String, pub base_url: String, pub model: String, pub api_key: Option<String>, pub clear_api_key: bool }
+pub struct DesktopAiSettingsUpdate {
+    pub enabled: bool,
+    pub endpoint_type: String,
+    pub base_url: String,
+    pub model: String,
+    pub api_key: Option<String>,
+    pub clear_api_key: bool,
+}
 
 /** 桌面 AI 图片分析请求只允许固定的打标和反推用途。 */
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DesktopAiAnalyzeInput { pub image_path: String, pub purpose: String, pub user_instruction: Option<String> }
+pub struct DesktopAiAnalyzeInput {
+    pub image_path: String,
+    pub purpose: String,
+    pub user_instruction: Option<String>,
+}
 
 /** 桌面 AI 图片分析结果可直接写入 Caption 或生成提示词。 */
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DesktopAiAnalyzeView { pub purpose: String, pub text: String }
+pub struct DesktopAiAnalyzeView {
+    pub purpose: String,
+    pub text: String,
+}
 
 /** 服务端签名前的资源清单载荷。 */
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DesktopResourceSource { pub kind: String, pub url: String }
+pub struct DesktopResourceSource {
+    pub kind: String,
+    pub url: String,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -562,17 +664,34 @@ pub struct DesktopResourceManifestItem {
 /** 签名清单中 application 更新包的版本门禁和用户说明。 */
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DesktopApplicationUpdateMetadata { pub minimum_version: String, pub release_notes: String, pub mandatory: bool }
+pub struct DesktopApplicationUpdateMetadata {
+    pub minimum_version: String,
+    pub release_notes: String,
+    pub mandatory: bool,
+}
 
 /** 桌面软件更新检查、下载、暂存、应用和回滚视图。 */
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DesktopSoftwareUpdateView { pub current_version: String, pub latest_version: Option<String>, pub status: String, pub mandatory: bool, pub release_notes: Option<String>, pub byte_size: u64, pub downloaded_bytes: u64, pub rollback_version: Option<String>, pub error: Option<String> }
+pub struct DesktopSoftwareUpdateView {
+    pub current_version: String,
+    pub latest_version: Option<String>,
+    pub status: String,
+    pub mandatory: bool,
+    pub release_notes: Option<String>,
+    pub byte_size: u64,
+    pub downloaded_bytes: u64,
+    pub rollback_version: Option<String>,
+    pub error: Option<String>,
+}
 
 /** 离线更新安装包与签名信封输入。 */
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DesktopOfflineUpdateImportInput { pub installer_path: String, pub envelope_path: String }
+pub struct DesktopOfflineUpdateImportInput {
+    pub installer_path: String,
+    pub envelope_path: String,
+}
 
 /** 签名清单中把多个原始文件组合为一个可用底模的登记元数据。 */
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -598,7 +717,11 @@ pub struct DesktopResourceManifestPayload {
 /** 服务端返回的资源清单签名信封。 */
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DesktopResourceManifestEnvelope { pub key_id: String, pub payload: String, pub signature: String }
+pub struct DesktopResourceManifestEnvelope {
+    pub key_id: String,
+    pub payload: String,
+    pub signature: String,
+}
 
 /** 桌面界面展示的单个资源和本机缓存状态。 */
 #[derive(Debug, Clone, Serialize)]
@@ -660,7 +783,11 @@ pub struct DesktopResourceInstallView {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct GalleryPublicationInput { pub local_task_id: String, pub artifact_path: String, pub privacy: String }
+pub struct GalleryPublicationInput {
+    pub local_task_id: String,
+    pub artifact_path: String,
+    pub privacy: String,
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -682,32 +809,80 @@ pub struct GallerySyncItem {
 /** 当前账号可访问的网站 LoRA 目录项。 */
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DesktopWebsiteLoraView { pub id: String, pub title: String, pub description: String, pub r#type: String, pub model_family: String, pub model_family_name: String, pub trigger_words: Vec<String>, pub owner_display_name: String, pub privacy: String, pub is_owner: bool, pub version_id: String, pub file_name: String, pub sha256: String, pub byte_size: u64, pub installed: bool, pub cover_path: Option<String>, pub example_paths: Vec<String> }
+pub struct DesktopWebsiteLoraView {
+    pub id: String,
+    pub title: String,
+    pub description: String,
+    pub r#type: String,
+    pub model_family: String,
+    pub model_family_name: String,
+    pub trigger_words: Vec<String>,
+    pub owner_display_name: String,
+    pub privacy: String,
+    pub is_owner: bool,
+    pub version_id: String,
+    pub file_name: String,
+    pub sha256: String,
+    pub byte_size: u64,
+    pub installed: bool,
+    pub cover_path: Option<String>,
+    pub example_paths: Vec<String>,
+}
 
 /** 桌面端网站底模仓库视图；远端封面已转换为受控本机缓存路径。 */
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DesktopWebsiteModelView { pub id: String, pub display_name: String, pub description: String, pub family: String, pub family_name: String, pub model_file_name: String, pub resource_group_id: Option<String>, pub download: Option<DesktopWebsiteModelDownload>, pub components: DesktopWebsiteModelComponents, pub runtime_format: String, pub usage_guide: String, pub source_links: Vec<DesktopWebsiteSourceLink>, pub parameters: DesktopWebsiteModelParameters, pub cover_path: Option<String>, pub example_paths: Vec<String> }
+pub struct DesktopWebsiteModelView {
+    pub id: String,
+    pub display_name: String,
+    pub description: String,
+    pub family: String,
+    pub family_name: String,
+    pub model_file_name: String,
+    pub resource_group_id: Option<String>,
+    pub download: Option<DesktopWebsiteModelDownload>,
+    pub components: DesktopWebsiteModelComponents,
+    pub runtime_format: String,
+    pub usage_guide: String,
+    pub source_links: Vec<DesktopWebsiteSourceLink>,
+    pub parameters: DesktopWebsiteModelParameters,
+    pub cover_path: Option<String>,
+    pub example_paths: Vec<String>,
+}
 
 /** 网站底模统一由主站提供的可断点下载文件。 */
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DesktopWebsiteModelDownload { pub file_name: String, pub sha256: String, pub byte_size: u64, pub content_url: String }
+pub struct DesktopWebsiteModelDownload {
+    pub file_name: String,
+    pub sha256: String,
+    pub byte_size: u64,
+    pub content_url: String,
+}
 
 /** 由主站模型目录下发的 Anima 共享组件，客户端按文件名和哈希同时校验。 */
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DesktopWebsiteModelComponents { pub text_encoder: DesktopWebsiteModelComponent, pub vae: DesktopWebsiteModelComponent }
+pub struct DesktopWebsiteModelComponents {
+    pub text_encoder: DesktopWebsiteModelComponent,
+    pub vae: DesktopWebsiteModelComponent,
+}
 
 /** 一个可复用 Runtime 组件的受控文件身份。 */
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DesktopWebsiteModelComponent { pub file_name: String, pub sha256: String }
+pub struct DesktopWebsiteModelComponent {
+    pub file_name: String,
+    pub sha256: String,
+}
 
 /** 网站底模来源链接只包含可公开展示的站点名称和 HTTPS 地址。 */
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DesktopWebsiteSourceLink { pub label: String, pub url: String }
+pub struct DesktopWebsiteSourceLink {
+    pub label: String,
+    pub url: String,
+}
 
 /** 网站底模详情中的推荐采样参数。 */
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -732,22 +907,45 @@ pub struct DesktopWebsiteModelParameters {
 /** 在线底模目录的三个质量档，实际提交时由核心再次校验范围。 */
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DesktopWebsiteModelPresets { pub fast: DesktopWebsiteModelPreset, pub quality: DesktopWebsiteModelPreset, pub extreme: DesktopWebsiteModelPreset }
+pub struct DesktopWebsiteModelPresets {
+    pub fast: DesktopWebsiteModelPreset,
+    pub quality: DesktopWebsiteModelPreset,
+    pub extreme: DesktopWebsiteModelPreset,
+}
 
 /** 一个质量档的步数和潜空间预算。 */
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DesktopWebsiteModelPreset { pub steps: u32, pub aspect_adjusted_steps: u32, pub sampling_max_edge: u32, pub sampling_pixel_budget: u32 }
+pub struct DesktopWebsiteModelPreset {
+    pub steps: u32,
+    pub aspect_adjusted_steps: u32,
+    pub sampling_max_edge: u32,
+    pub sampling_pixel_budget: u32,
+}
 
 /** 网站 LoRA 断点下载、校验与安装进度。 */
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DesktopWebsiteLoraInstallProgress { pub lora_id: String, pub status: String, pub downloaded_bytes: u64, pub total_bytes: u64, pub bytes_per_second: u64, pub error: Option<String> }
+pub struct DesktopWebsiteLoraInstallProgress {
+    pub lora_id: String,
+    pub status: String,
+    pub downloaded_bytes: u64,
+    pub total_bytes: u64,
+    pub bytes_per_second: u64,
+    pub error: Option<String>,
+}
 
 /** 网站底模断点下载、校验和安装进度。 */
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DesktopWebsiteModelInstallProgress { pub model_id: String, pub status: String, pub downloaded_bytes: u64, pub total_bytes: u64, pub bytes_per_second: u64, pub error: Option<String> }
+pub struct DesktopWebsiteModelInstallProgress {
+    pub model_id: String,
+    pub status: String,
+    pub downloaded_bytes: u64,
+    pub total_bytes: u64,
+    pub bytes_per_second: u64,
+    pub error: Option<String>,
+}
 
 /** PowerShell 一次性采集的 Windows 系统与显卡硬件探针结果。 */
 #[derive(Debug, Deserialize)]

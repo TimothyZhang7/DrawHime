@@ -2,7 +2,14 @@
 
 use crate::captioner::CaptionScheduler;
 use crate::gallery_sync::GallerySyncScheduler;
-use crate::models::{DesktopAiSettings, DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraView, DesktopLocalModelView, DesktopSettings, DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetView, DesktopTrainingJobCreateInput, DesktopTrainingJobView, DesktopTrainingTriggerWordsUpdateInput, DesktopWebsiteModelView, GalleryPublicationInput, GallerySyncItem};
+use crate::models::{
+    DesktopAiSettings, DesktopCaptionJobCreateInput, DesktopCaptionJobView,
+    DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraView, DesktopLocalModelView,
+    DesktopSettings, DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput,
+    DesktopTrainingDatasetView, DesktopTrainingJobCreateInput, DesktopTrainingJobView,
+    DesktopTrainingTriggerWordsUpdateInput, DesktopWebsiteModelView, GalleryPublicationInput,
+    GallerySyncItem,
+};
 use crate::runtime::RuntimeController;
 use crate::scheduler::LocalScheduler;
 use crate::trainer::TrainingScheduler;
@@ -10,7 +17,12 @@ use crate::workload::GpuWorkloadCoordinator;
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};
 use sha2::{Digest, Sha256};
-use std::{fs, io::{BufReader, Read}, path::{Path, PathBuf}, sync::{Arc, Mutex}};
+use std::{
+    fs,
+    io::{BufReader, Read},
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex},
+};
 use uuid::Uuid;
 
 pub struct DesktopState {
@@ -28,9 +40,11 @@ pub struct DesktopState {
 impl DesktopState {
     /** 创建本地数据目录和数据库结构，任何失败都阻止桌面核心伪装为可用。 */
     pub fn initialize(app_data_dir: &Path) -> Result<Self, String> {
-        fs::create_dir_all(app_data_dir).map_err(|error| format!("创建桌面数据目录失败：{error}"))?;
+        fs::create_dir_all(app_data_dir)
+            .map_err(|error| format!("创建桌面数据目录失败：{error}"))?;
         let database_path = app_data_dir.join("desktop.sqlite3");
-        let connection = Connection::open(&database_path).map_err(|error| format!("打开桌面数据库失败：{error}"))?;
+        let connection = Connection::open(&database_path)
+            .map_err(|error| format!("打开桌面数据库失败：{error}"))?;
         connection.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
             CREATE TABLE IF NOT EXISTS desktop_settings (id INTEGER PRIMARY KEY CHECK(id=1), theme_mode TEXT NOT NULL DEFAULT 'system', font_scale REAL NOT NULL DEFAULT 1.1, default_privacy TEXT NOT NULL DEFAULT 'public', auto_upload INTEGER NOT NULL DEFAULT 1, model_root TEXT NOT NULL, output_root TEXT NOT NULL, runtime_root TEXT NOT NULL, upload_concurrency INTEGER NOT NULL, wifi_only INTEGER NOT NULL, bandwidth_limit_kib INTEGER, updated_at TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS desktop_ai_settings (id INTEGER PRIMARY KEY CHECK(id=1), enabled INTEGER NOT NULL DEFAULT 0, endpoint_type TEXT NOT NULL DEFAULT 'openai_chat', base_url TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL);
@@ -66,80 +80,226 @@ impl DesktopState {
         connection.execute("UPDATE local_training_job_attempts SET status='interrupted',error='桌面程序退出，训练任务已恢复排队',completed_at=?1 WHERE status='running'", [&recovery_time]).map_err(|error| format!("恢复中断的训练尝试失败：{error}"))?;
         connection.execute("UPDATE local_training_jobs SET status='cancelled',progress=100,completed_at=?1,updated_at=?1 WHERE status='running' AND cancel_requested=1", [&recovery_time]).map_err(|error| format!("恢复已取消的训练任务失败：{error}"))?;
         connection.execute("UPDATE local_training_jobs SET status='queued',progress=0,current_epoch=0,started_at=NULL,error=NULL,suggestion_json=NULL,updated_at=?1 WHERE status='running' AND cancel_requested=0", [&recovery_time]).map_err(|error| format!("恢复中断的训练任务失败：{error}"))?;
-        ensure_column(&connection, "desktop_settings", "theme_mode", "TEXT NOT NULL DEFAULT 'system'")?;
-        ensure_column(&connection, "desktop_settings", "font_scale", "REAL NOT NULL DEFAULT 1.1")?;
-        ensure_column(&connection, "desktop_settings", "auto_upload", "INTEGER NOT NULL DEFAULT 1")?;
+        ensure_column(
+            &connection,
+            "desktop_settings",
+            "theme_mode",
+            "TEXT NOT NULL DEFAULT 'system'",
+        )?;
+        ensure_column(
+            &connection,
+            "desktop_settings",
+            "font_scale",
+            "REAL NOT NULL DEFAULT 1.1",
+        )?;
+        ensure_column(
+            &connection,
+            "desktop_settings",
+            "auto_upload",
+            "INTEGER NOT NULL DEFAULT 1",
+        )?;
         ensure_column(&connection, "local_models", "resource_group_id", "TEXT")?;
-        ensure_column(&connection, "local_models", "generation_profile_json", "TEXT")?;
+        ensure_column(
+            &connection,
+            "local_models",
+            "generation_profile_json",
+            "TEXT",
+        )?;
         ensure_column(&connection, "local_loras", "base_model_sha256", "TEXT")?;
-        ensure_column(&connection, "local_job_loras", "relative_path", "TEXT NOT NULL DEFAULT ''")?;
-        ensure_column(&connection, "local_job_loras", "byte_size", "INTEGER NOT NULL DEFAULT 0")?;
-        ensure_column(&connection, "local_job_loras", "modified_ms", "INTEGER NOT NULL DEFAULT 0")?;
+        ensure_column(
+            &connection,
+            "local_job_loras",
+            "relative_path",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
+        ensure_column(
+            &connection,
+            "local_job_loras",
+            "byte_size",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        ensure_column(
+            &connection,
+            "local_job_loras",
+            "modified_ms",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
         ensure_column(&connection, "local_job_loras", "clip_strength", "REAL")?;
         // 生成参数迁移只补列并保留旧任务原始行为，历史任务不会被静默套用质量前缀。
-        ensure_column(&connection, "local_jobs", "quality_preset", "TEXT NOT NULL DEFAULT 'custom'")?;
-        ensure_column(&connection, "local_jobs", "sampling_max_edge", "INTEGER NOT NULL DEFAULT 1536")?;
-        ensure_column(&connection, "local_jobs", "sampling_pixel_budget", "INTEGER NOT NULL DEFAULT 1350000")?;
-        ensure_column(&connection, "local_jobs", "aspect_step_threshold", "REAL NOT NULL DEFAULT 1.5")?;
-        ensure_column(&connection, "local_jobs", "aspect_adjusted_steps", "INTEGER NOT NULL DEFAULT 34")?;
-        ensure_column(&connection, "local_jobs", "upscale_method", "TEXT NOT NULL DEFAULT 'lanczos'")?;
-        ensure_column(&connection, "local_jobs", "quality_prompt_enabled", "INTEGER NOT NULL DEFAULT 0")?;
+        ensure_column(
+            &connection,
+            "local_jobs",
+            "quality_preset",
+            "TEXT NOT NULL DEFAULT 'custom'",
+        )?;
+        ensure_column(
+            &connection,
+            "local_jobs",
+            "sampling_max_edge",
+            "INTEGER NOT NULL DEFAULT 1536",
+        )?;
+        ensure_column(
+            &connection,
+            "local_jobs",
+            "sampling_pixel_budget",
+            "INTEGER NOT NULL DEFAULT 1350000",
+        )?;
+        ensure_column(
+            &connection,
+            "local_jobs",
+            "aspect_step_threshold",
+            "REAL NOT NULL DEFAULT 1.5",
+        )?;
+        ensure_column(
+            &connection,
+            "local_jobs",
+            "aspect_adjusted_steps",
+            "INTEGER NOT NULL DEFAULT 34",
+        )?;
+        ensure_column(
+            &connection,
+            "local_jobs",
+            "upscale_method",
+            "TEXT NOT NULL DEFAULT 'lanczos'",
+        )?;
+        ensure_column(
+            &connection,
+            "local_jobs",
+            "quality_prompt_enabled",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
         ensure_column(&connection, "local_jobs", "quality_prefix", "TEXT")?;
-        ensure_column(&connection, "local_jobs", "default_negative_enabled", "INTEGER NOT NULL DEFAULT 0")?;
+        ensure_column(
+            &connection,
+            "local_jobs",
+            "default_negative_enabled",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
         ensure_column(&connection, "local_jobs", "default_negative_prompt", "TEXT")?;
-        ensure_column(&connection, "local_training_assets", "caption_source", "TEXT")?;
+        ensure_column(
+            &connection,
+            "local_training_assets",
+            "caption_source",
+            "TEXT",
+        )?;
         ensure_column(&connection, "gallery_sync_queue", "owner_issuer", "TEXT")?;
         ensure_column(&connection, "gallery_sync_queue", "owner_subject", "TEXT")?;
-        ensure_column(&connection, "gallery_sync_queue", "server_upload_id", "TEXT")?;
+        ensure_column(
+            &connection,
+            "gallery_sync_queue",
+            "server_upload_id",
+            "TEXT",
+        )?;
         ensure_column(&connection, "gallery_sync_queue", "next_attempt_at", "TEXT")?;
         connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS local_caption_jobs_active_dataset_idx ON local_caption_jobs(dataset_id) WHERE status IN ('queued','running')", []).map_err(|error| format!("创建打标任务活动索引失败：{error}"))?;
         connection.execute("CREATE INDEX IF NOT EXISTS local_caption_jobs_created_idx ON local_caption_jobs(created_at DESC)", []).map_err(|error| format!("创建打标任务时间索引失败：{error}"))?;
         // 旧开发版本已经生成的 LoRA 快照补齐文件元数据，避免升级后任务失去可执行性。
         connection.execute("UPDATE local_job_loras SET relative_path=COALESCE(NULLIF(relative_path,''),(SELECT relative_path FROM local_loras WHERE id=local_job_loras.lora_id)),byte_size=CASE WHEN byte_size=0 THEN COALESCE((SELECT byte_size FROM local_loras WHERE id=local_job_loras.lora_id),0) ELSE byte_size END,modified_ms=CASE WHEN modified_ms=0 THEN COALESCE((SELECT modified_ms FROM local_loras WHERE id=local_job_loras.lora_id),0) ELSE modified_ms END", []).map_err(|error| format!("补齐任务 LoRA 快照失败：{error}"))?;
-        connection.execute("UPDATE local_job_loras SET clip_strength=strength WHERE clip_strength IS NULL", []).map_err(|error| format!("补齐任务 LoRA 文本编码器强度失败：{error}"))?;
+        connection
+            .execute(
+                "UPDATE local_job_loras SET clip_strength=strength WHERE clip_strength IS NULL",
+                [],
+            )
+            .map_err(|error| format!("补齐任务 LoRA 文本编码器强度失败：{error}"))?;
         let model_root = app_data_dir.join("models");
         let runtime_root = app_data_dir.join("runtime");
         let output_root = app_data_dir.join("outputs");
-        for directory in [&model_root, &runtime_root, &output_root] { fs::create_dir_all(directory).map_err(|error| format!("创建本地目录失败：{error}"))?; }
+        for directory in [&model_root, &runtime_root, &output_root] {
+            fs::create_dir_all(directory).map_err(|error| format!("创建本地目录失败：{error}"))?;
+        }
         connection.execute("INSERT OR IGNORE INTO desktop_settings (id, theme_mode, font_scale, default_privacy, auto_upload, model_root, output_root, runtime_root, upload_concurrency, wifi_only, bandwidth_limit_kib, updated_at) VALUES (1, 'system', 1.1, 'public', 1, ?1, ?2, ?3, 2, 0, NULL, ?4)", params![path_text(&model_root), path_text(&output_root), path_text(&runtime_root), Utc::now().to_rfc3339()]).map_err(|error| format!("写入默认设置失败：{error}"))?;
         connection.execute("INSERT OR IGNORE INTO desktop_ai_settings (id, enabled, endpoint_type, base_url, model, updated_at) VALUES (1, 0, 'openai_chat', '', '', ?1)", [Utc::now().to_rfc3339()]).map_err(|error| format!("写入默认 AI 设置失败：{error}"))?;
-        Ok(Self { database: Mutex::new(connection), app_data_dir: app_data_dir.to_path_buf(), database_path, scheduler: None, caption_scheduler: None, training_scheduler: None, gallery_sync_scheduler: None, runtime: Arc::new(RuntimeController::initialize(app_data_dir)?), gpu_workload: GpuWorkloadCoordinator::new() })
+        Ok(Self {
+            database: Mutex::new(connection),
+            app_data_dir: app_data_dir.to_path_buf(),
+            database_path,
+            scheduler: None,
+            caption_scheduler: None,
+            training_scheduler: None,
+            gallery_sync_scheduler: None,
+            runtime: Arc::new(RuntimeController::initialize(app_data_dir)?),
+            gpu_workload: GpuWorkloadCoordinator::new(),
+        })
     }
 
     /** 数据库初始化完成后启动唯一后台调度线程。 */
     pub fn start_scheduler(&mut self, app: tauri::AppHandle) -> Result<(), String> {
-        if self.scheduler.is_some() { return Ok(()); }
-        self.scheduler = Some(LocalScheduler::start(self.database_path.clone(), self.app_data_dir.clone(), self.runtime.clone(), self.gpu_workload.clone(), app.clone())?);
-        self.caption_scheduler = Some(CaptionScheduler::start(self.database_path.clone(), self.app_data_dir.clone(), app.clone())?);
-        self.training_scheduler = Some(TrainingScheduler::start(self.database_path.clone(), self.app_data_dir.clone(), self.runtime.clone(), self.gpu_workload.clone(), app.clone())?);
-        self.gallery_sync_scheduler = Some(GallerySyncScheduler::start(self.database_path.clone(), app)?);
+        if self.scheduler.is_some() {
+            return Ok(());
+        }
+        self.scheduler = Some(LocalScheduler::start(
+            self.database_path.clone(),
+            self.app_data_dir.clone(),
+            self.runtime.clone(),
+            self.gpu_workload.clone(),
+            app.clone(),
+        )?);
+        self.caption_scheduler = Some(CaptionScheduler::start(
+            self.database_path.clone(),
+            self.app_data_dir.clone(),
+            app.clone(),
+        )?);
+        self.training_scheduler = Some(TrainingScheduler::start(
+            self.database_path.clone(),
+            self.app_data_dir.clone(),
+            self.runtime.clone(),
+            self.gpu_workload.clone(),
+            app.clone(),
+        )?);
+        self.gallery_sync_scheduler = Some(GallerySyncScheduler::start(
+            self.database_path.clone(),
+            app,
+        )?);
         Ok(())
     }
 
     /** 读取唯一桌面设置记录。 */
     pub fn load_settings(&self) -> Result<DesktopSettings, String> {
-        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        let database = self
+            .database
+            .lock()
+            .map_err(|_| "桌面数据库锁已损坏".to_string())?;
         database.query_row("SELECT theme_mode, font_scale, default_privacy, auto_upload, model_root, output_root, runtime_root, upload_concurrency, wifi_only, bandwidth_limit_kib FROM desktop_settings WHERE id=1", [], |row| Ok(DesktopSettings { theme_mode: row.get(0)?, font_scale: row.get(1)?, default_privacy: row.get(2)?, auto_upload: row.get::<_, i64>(3)? != 0, model_root: row.get(4)?, output_root: row.get(5)?, runtime_root: row.get(6)?, upload_concurrency: row.get(7)?, wifi_only: row.get::<_, i64>(8)? != 0, bandwidth_limit_kib: row.get(9)? })).map_err(|error| format!("读取桌面设置失败：{error}"))
     }
 
     /** 校验目录和上传策略后事务化更新设置。 */
     pub fn save_settings(&self, mut settings: DesktopSettings) -> Result<DesktopSettings, String> {
-        if !matches!(settings.theme_mode.as_str(), "system" | "dark" | "light") { return Err("主题模式不正确".into()); }
-        if !settings.font_scale.is_finite() || !(1.0..=1.3).contains(&settings.font_scale) || ((settings.font_scale * 20.0).round() - settings.font_scale * 20.0).abs() > 0.001 { return Err("字体大小必须是 100%–130% 的 5% 档位".into()); }
-        if !matches!(settings.default_privacy.as_str(), "public" | "private") { return Err("默认图库权限不正确".into()); }
-        if !(1..=4).contains(&settings.upload_concurrency) { return Err("上传并发数必须是 1–4".into()); }
+        if !matches!(settings.theme_mode.as_str(), "system" | "dark" | "light") {
+            return Err("主题模式不正确".into());
+        }
+        if !settings.font_scale.is_finite()
+            || !(1.0..=1.3).contains(&settings.font_scale)
+            || ((settings.font_scale * 20.0).round() - settings.font_scale * 20.0).abs() > 0.001
+        {
+            return Err("字体大小必须是 100%–130% 的 5% 档位".into());
+        }
+        if !matches!(settings.default_privacy.as_str(), "public" | "private") {
+            return Err("默认图库权限不正确".into());
+        }
+        if !(1..=4).contains(&settings.upload_concurrency) {
+            return Err("上传并发数必须是 1–4".into());
+        }
         // 存储目录固定跟随安装目录，前端传入的旧目录值不得把模型或作品重新写到其他磁盘位置。
         settings.model_root = path_text(&self.app_data_dir.join("models"));
         settings.output_root = path_text(&self.app_data_dir.join("outputs"));
         settings.runtime_root = path_text(&self.app_data_dir.join("runtime"));
-        for path in [&settings.model_root, &settings.output_root, &settings.runtime_root] {
-            if path.trim().is_empty() { return Err("本地目录不能为空".into()); }
+        for path in [
+            &settings.model_root,
+            &settings.output_root,
+            &settings.runtime_root,
+        ] {
+            if path.trim().is_empty() {
+                return Err("本地目录不能为空".into());
+            }
             fs::create_dir_all(path).map_err(|error| format!("目录不可写：{path}：{error}"))?;
             let probe = Path::new(path).join(".drawhime-write-test");
             fs::write(&probe, b"ok").map_err(|error| format!("目录不可写：{path}：{error}"))?;
             fs::remove_file(probe).map_err(|error| format!("目录清理测试失败：{path}：{error}"))?;
         }
-        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        let database = self
+            .database
+            .lock()
+            .map_err(|_| "桌面数据库锁已损坏".to_string())?;
         database.execute("UPDATE desktop_settings SET theme_mode=?1, font_scale=?2, default_privacy=?3, auto_upload=?4, model_root=?5, output_root=?6, runtime_root=?7, upload_concurrency=?8, wifi_only=?9, bandwidth_limit_kib=?10, updated_at=?11 WHERE id=1", params![settings.theme_mode, settings.font_scale, settings.default_privacy, settings.auto_upload, settings.model_root, settings.output_root, settings.runtime_root, settings.upload_concurrency, settings.wifi_only, settings.bandwidth_limit_kib, Utc::now().to_rfc3339()]).map_err(|error| format!("保存桌面设置失败：{error}"))?;
         drop(database);
         self.load_settings()
@@ -147,144 +307,286 @@ impl DesktopState {
 
     /** 读取不含密钥正文的 AI 辅助设置，凭据状态由调用方从 Credential Manager 合并。 */
     pub fn load_ai_settings(&self, api_key_configured: bool) -> Result<DesktopAiSettings, String> {
-        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        let database = self
+            .database
+            .lock()
+            .map_err(|_| "桌面数据库锁已损坏".to_string())?;
         database.query_row("SELECT enabled, endpoint_type, base_url, model FROM desktop_ai_settings WHERE id=1", [], |row| Ok(DesktopAiSettings { enabled: row.get::<_, i64>(0)? != 0, endpoint_type: row.get(1)?, base_url: row.get(2)?, model: row.get(3)?, api_key_configured })).map_err(|error| format!("读取 AI 辅助设置失败：{error}"))
     }
 
     /** 持久化 AI 辅助非敏感配置，API Key 由独立凭据链路写入系统凭据库。 */
-    pub fn save_ai_settings_metadata(&self, enabled: bool, endpoint_type: &str, base_url: &str, model: &str, api_key_configured: bool) -> Result<DesktopAiSettings, String> {
-        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+    pub fn save_ai_settings_metadata(
+        &self,
+        enabled: bool,
+        endpoint_type: &str,
+        base_url: &str,
+        model: &str,
+        api_key_configured: bool,
+    ) -> Result<DesktopAiSettings, String> {
+        let database = self
+            .database
+            .lock()
+            .map_err(|_| "桌面数据库锁已损坏".to_string())?;
         database.execute("UPDATE desktop_ai_settings SET enabled=?1, endpoint_type=?2, base_url=?3, model=?4, updated_at=?5 WHERE id=1", params![i64::from(enabled), endpoint_type, base_url, model, Utc::now().to_rfc3339()]).map_err(|error| format!("保存 AI 辅助设置失败：{error}"))?;
         drop(database);
         self.load_ai_settings(api_key_configured)
     }
 
     /** 保存脱敏环境快照并只保留最近 20 次检查。 */
-    pub fn save_environment_snapshot(&self, report_json: &str, checked_at: &str) -> Result<(), String> {
-        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
-        let transaction = database.unchecked_transaction().map_err(|error| format!("开启环境快照事务失败：{error}"))?;
-        transaction.execute("INSERT INTO environment_snapshots (report_json, checked_at) VALUES (?1, ?2)", params![report_json, checked_at]).map_err(|error| format!("保存环境快照失败：{error}"))?;
+    pub fn save_environment_snapshot(
+        &self,
+        report_json: &str,
+        checked_at: &str,
+    ) -> Result<(), String> {
+        let database = self
+            .database
+            .lock()
+            .map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        let transaction = database
+            .unchecked_transaction()
+            .map_err(|error| format!("开启环境快照事务失败：{error}"))?;
+        transaction
+            .execute(
+                "INSERT INTO environment_snapshots (report_json, checked_at) VALUES (?1, ?2)",
+                params![report_json, checked_at],
+            )
+            .map_err(|error| format!("保存环境快照失败：{error}"))?;
         transaction.execute("DELETE FROM environment_snapshots WHERE id NOT IN (SELECT id FROM environment_snapshots ORDER BY id DESC LIMIT 20)", []).map_err(|error| format!("清理环境快照失败：{error}"))?;
-        transaction.commit().map_err(|error| format!("提交环境快照失败：{error}"))
+        transaction
+            .commit()
+            .map_err(|error| format!("提交环境快照失败：{error}"))
     }
 
     /** 校验真实本地文件并按任务与哈希幂等加入网页图库同步队列。 */
-    pub fn enqueue_gallery_publication(&self, input: GalleryPublicationInput) -> Result<GallerySyncItem, String> {
-        if input.local_task_id.trim().is_empty() { return Err("本地任务 ID 不能为空".into()); }
-        if !matches!(input.privacy.as_str(), "public" | "private") { return Err("图库权限不正确".into()); }
+    pub fn enqueue_gallery_publication(
+        &self,
+        input: GalleryPublicationInput,
+    ) -> Result<GallerySyncItem, String> {
+        if input.local_task_id.trim().is_empty() {
+            return Err("本地任务 ID 不能为空".into());
+        }
+        if !matches!(input.privacy.as_str(), "public" | "private") {
+            return Err("图库权限不正确".into());
+        }
         let path = PathBuf::from(&input.artifact_path);
-        if !path.is_file() { return Err("本地生成结果不存在".into()); }
+        if !path.is_file() {
+            return Err("本地生成结果不存在".into());
+        }
         let sha256 = sha256_file(&path)?;
         let now = Utc::now().to_rfc3339();
-        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
-        let existing: Option<String> = database.query_row("SELECT id FROM gallery_sync_queue WHERE local_task_id=?1 AND artifact_sha256=?2", params![input.local_task_id, sha256], |row| row.get(0)).optional().map_err(|error| format!("查询图库同步队列失败：{error}"))?;
+        let database = self
+            .database
+            .lock()
+            .map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        let existing: Option<String> = database
+            .query_row(
+                "SELECT id FROM gallery_sync_queue WHERE local_task_id=?1 AND artifact_sha256=?2",
+                params![input.local_task_id, sha256],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|error| format!("查询图库同步队列失败：{error}"))?;
         let id = existing.unwrap_or_else(|| Uuid::new_v4().to_string());
         database.execute("INSERT INTO gallery_sync_queue (id, local_task_id, artifact_path, artifact_sha256, privacy, status, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, 'queued', ?6, ?6) ON CONFLICT(local_task_id, artifact_sha256) DO UPDATE SET privacy=CASE WHEN gallery_sync_queue.privacy='private' OR excluded.privacy='private' THEN 'private' ELSE 'public' END, artifact_path=excluded.artifact_path,updated_at=excluded.updated_at", params![id, input.local_task_id, input.artifact_path, sha256, input.privacy, now]).map_err(|error| format!("写入图库同步队列失败：{error}"))?;
         drop(database);
-        self.gallery_item(&id)?.ok_or_else(|| "图库同步记录写入后不存在".into())
+        self.gallery_item(&id)?
+            .ok_or_else(|| "图库同步记录写入后不存在".into())
     }
 
     /** 列出本机全部图库同步记录，新的记录优先。 */
     pub fn list_gallery_sync_queue(&self) -> Result<Vec<GallerySyncItem>, String> {
-        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        let database = self
+            .database
+            .lock()
+            .map_err(|_| "桌面数据库锁已损坏".to_string())?;
         let mut statement = database.prepare("SELECT id, local_task_id, artifact_path, artifact_sha256, privacy, status, uploaded_bytes, retry_count, gallery_item_id, last_error, created_at, updated_at FROM gallery_sync_queue ORDER BY created_at DESC").map_err(|error| format!("读取图库同步队列失败：{error}"))?;
-        let rows = statement.query_map([], gallery_item_from_row).map_err(|error| format!("查询图库同步队列失败：{error}"))?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(|error| format!("解析图库同步队列失败：{error}"))
+        let rows = statement
+            .query_map([], gallery_item_from_row)
+            .map_err(|error| format!("查询图库同步队列失败：{error}"))?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("解析图库同步队列失败：{error}"))
     }
 
     /** 统计尚未完成网页同步的本地作品。 */
     pub fn pending_gallery_sync_count(&self) -> Result<u64, String> {
-        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        let database = self
+            .database
+            .lock()
+            .map_err(|_| "桌面数据库锁已损坏".to_string())?;
         database.query_row("SELECT COUNT(*) FROM gallery_sync_queue WHERE status NOT IN ('synced','remote_deleted')", [], |row| row.get(0)).map_err(|error| format!("统计图库同步队列失败：{error}"))
     }
 
     /** 按模型内容哈希幂等登记受控目录中的真实 safetensors。 */
-    pub fn register_local_model(&self, model: LocalModelRegistration) -> Result<DesktopLocalModelView, String> {
-        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
-        let existing: Option<String> = database.query_row("SELECT id FROM local_models WHERE model_sha256=?1 AND workflow_kind=?2", params![model.model_sha256, model.workflow_kind], |row| row.get(0)).optional().map_err(|error| format!("查询本地模型失败：{error}"))?;
+    pub fn register_local_model(
+        &self,
+        model: LocalModelRegistration,
+    ) -> Result<DesktopLocalModelView, String> {
+        let database = self
+            .database
+            .lock()
+            .map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        let existing: Option<String> = database
+            .query_row(
+                "SELECT id FROM local_models WHERE model_sha256=?1 AND workflow_kind=?2",
+                params![model.model_sha256, model.workflow_kind],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|error| format!("查询本地模型失败：{error}"))?;
         let id = existing.unwrap_or_else(|| Uuid::new_v4().to_string());
         let now = Utc::now().to_rfc3339();
         database.execute("INSERT INTO local_models (id, display_name, family, workflow_kind, model_file_name, model_relative_path, model_sha256, byte_size, model_modified_ms, text_encoder_file_name, text_encoder_relative_path, text_encoder_sha256, vae_file_name, vae_relative_path, vae_sha256, resource_group_id, generation_profile_json, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?18) ON CONFLICT(model_sha256, workflow_kind) DO UPDATE SET display_name=excluded.display_name, family=excluded.family, model_file_name=excluded.model_file_name, model_relative_path=excluded.model_relative_path, byte_size=excluded.byte_size, model_modified_ms=excluded.model_modified_ms, text_encoder_file_name=excluded.text_encoder_file_name, text_encoder_relative_path=excluded.text_encoder_relative_path, text_encoder_sha256=excluded.text_encoder_sha256, vae_file_name=excluded.vae_file_name, vae_relative_path=excluded.vae_relative_path, vae_sha256=excluded.vae_sha256, resource_group_id=COALESCE(excluded.resource_group_id,local_models.resource_group_id), generation_profile_json=COALESCE(excluded.generation_profile_json,local_models.generation_profile_json), updated_at=excluded.updated_at", params![id, model.display_name, model.family, model.workflow_kind, model.model_file_name, model.model_relative_path, model.model_sha256, model.byte_size, model.model_modified_ms, model.text_encoder_file_name, model.text_encoder_relative_path, model.text_encoder_sha256, model.vae_file_name, model.vae_relative_path, model.vae_sha256, model.resource_group_id, model.generation_profile_json, now]).map_err(|error| format!("登记本地模型失败：{error}"))?;
         drop(database);
-        self.local_model(&id)?.ok_or_else(|| "本地模型登记后不存在".into())
+        self.local_model(&id)?
+            .ok_or_else(|| "本地模型登记后不存在".into())
     }
 
     /** 返回所有已登记模型，并实时校验主文件大小和修改时间。 */
     pub fn list_local_models(&self) -> Result<Vec<DesktopLocalModelView>, String> {
         let settings = self.load_settings()?;
-        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        let database = self
+            .database
+            .lock()
+            .map_err(|_| "桌面数据库锁已损坏".to_string())?;
         let mut statement = database.prepare("SELECT id,display_name,family,workflow_kind,model_file_name,model_relative_path,model_sha256,byte_size,model_modified_ms,text_encoder_file_name,text_encoder_relative_path,vae_file_name,vae_relative_path,resource_group_id,generation_profile_json,created_at,updated_at FROM local_models ORDER BY updated_at DESC").map_err(|error| format!("读取本地模型列表失败：{error}"))?;
-        let rows = statement.query_map([], |row| local_model_from_row(row, &settings.model_root)).map_err(|error| format!("查询本地模型列表失败：{error}"))?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(|error| format!("解析本地模型列表失败：{error}"))
+        let rows = statement
+            .query_map([], |row| local_model_from_row(row, &settings.model_root))
+            .map_err(|error| format!("查询本地模型列表失败：{error}"))?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("解析本地模型列表失败：{error}"))
     }
 
     /** 把 Rust 核心刚获取或从可信缓存读取的在线目录参数同步到已安装底模。 */
     pub fn sync_model_profiles(&self, models: &[DesktopWebsiteModelView]) -> Result<(), String> {
-        let mut database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
-        let transaction = database.transaction().map_err(|error| format!("开启底模参数同步事务失败：{error}"))?;
+        let mut database = self
+            .database
+            .lock()
+            .map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        let transaction = database
+            .transaction()
+            .map_err(|error| format!("开启底模参数同步事务失败：{error}"))?;
         for model in models {
-            let Some(group_id) = model.resource_group_id.as_deref() else { continue; };
-            let profile = serde_json::to_string(&model.parameters).map_err(|error| format!("序列化底模生成参数失败：{error}"))?;
+            let Some(group_id) = model.resource_group_id.as_deref() else {
+                continue;
+            };
+            let profile = serde_json::to_string(&model.parameters)
+                .map_err(|error| format!("序列化底模生成参数失败：{error}"))?;
             transaction.execute("UPDATE local_models SET generation_profile_json=?1,updated_at=?2 WHERE resource_group_id=?3", params![profile, Utc::now().to_rfc3339(), group_id]).map_err(|error| format!("同步底模生成参数失败：{error}"))?;
         }
-        transaction.commit().map_err(|error| format!("提交底模参数同步失败：{error}"))
+        transaction
+            .commit()
+            .map_err(|error| format!("提交底模参数同步失败：{error}"))
     }
 
     /** 按内容哈希幂等登记本机 LoRA。 */
-    pub fn register_local_lora(&self, lora: LocalLoraRegistration) -> Result<DesktopLocalLoraView, String> {
-        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
-        let existing: Option<String> = database.query_row("SELECT id FROM local_loras WHERE sha256=?1", [&lora.sha256], |row| row.get(0)).optional().map_err(|error| format!("查询本地 LoRA 失败：{error}"))?;
+    pub fn register_local_lora(
+        &self,
+        lora: LocalLoraRegistration,
+    ) -> Result<DesktopLocalLoraView, String> {
+        let database = self
+            .database
+            .lock()
+            .map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        let existing: Option<String> = database
+            .query_row(
+                "SELECT id FROM local_loras WHERE sha256=?1",
+                [&lora.sha256],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|error| format!("查询本地 LoRA 失败：{error}"))?;
         let id = existing.unwrap_or_else(|| Uuid::new_v4().to_string());
         let now = Utc::now().to_rfc3339();
-        let trigger_words_json = serde_json::to_string(&lora.trigger_words).map_err(|error| format!("序列化 LoRA 触发词失败：{error}"))?;
+        let trigger_words_json = serde_json::to_string(&lora.trigger_words)
+            .map_err(|error| format!("序列化 LoRA 触发词失败：{error}"))?;
         database.execute("INSERT INTO local_loras (id,title,type,file_name,relative_path,sha256,byte_size,modified_ms,trigger_words_json,base_model_sha256,created_at,updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?11) ON CONFLICT(sha256) DO UPDATE SET title=excluded.title,type=excluded.type,file_name=excluded.file_name,relative_path=excluded.relative_path,byte_size=excluded.byte_size,modified_ms=excluded.modified_ms,trigger_words_json=excluded.trigger_words_json,base_model_sha256=COALESCE(excluded.base_model_sha256,local_loras.base_model_sha256),updated_at=excluded.updated_at", params![id,lora.title,lora.r#type,lora.file_name,lora.relative_path,lora.sha256,lora.byte_size,lora.modified_ms,trigger_words_json,lora.base_model_sha256,now]).map_err(|error| format!("登记本地 LoRA 失败：{error}"))?;
         drop(database);
-        self.local_lora(&id)?.ok_or_else(|| "本地 LoRA 登记后不存在".into())
+        self.local_lora(&id)?
+            .ok_or_else(|| "本地 LoRA 登记后不存在".into())
     }
 
     /** 返回当前设备全部已登记 LoRA 和实时文件可用性。 */
     pub fn list_local_loras(&self) -> Result<Vec<DesktopLocalLoraView>, String> {
         let settings = self.load_settings()?;
-        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        let database = self
+            .database
+            .lock()
+            .map_err(|_| "桌面数据库锁已损坏".to_string())?;
         let mut statement = database.prepare("SELECT id,title,type,file_name,relative_path,sha256,byte_size,modified_ms,trigger_words_json,base_model_sha256,created_at,updated_at FROM local_loras ORDER BY updated_at DESC").map_err(|error| format!("读取本地 LoRA 列表失败：{error}"))?;
-        let rows = statement.query_map([], |row| local_lora_from_row(row, &settings.model_root)).map_err(|error| format!("查询本地 LoRA 列表失败：{error}"))?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(|error| format!("解析本地 LoRA 列表失败：{error}"))
+        let rows = statement
+            .query_map([], |row| local_lora_from_row(row, &settings.model_root))
+            .map_err(|error| format!("查询本地 LoRA 列表失败：{error}"))?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("解析本地 LoRA 列表失败：{error}"))
     }
 
     fn local_lora(&self, id: &str) -> Result<Option<DesktopLocalLoraView>, String> {
         let settings = self.load_settings()?;
-        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        let database = self
+            .database
+            .lock()
+            .map_err(|_| "桌面数据库锁已损坏".to_string())?;
         database.query_row("SELECT id,title,type,file_name,relative_path,sha256,byte_size,modified_ms,trigger_words_json,base_model_sha256,created_at,updated_at FROM local_loras WHERE id=?1", [id], |row| local_lora_from_row(row, &settings.model_root)).optional().map_err(|error| format!("读取本地 LoRA 失败：{error}"))
     }
 
     /** 创建持久化本地训练集，后续图片导入、打标和训练共用同一记录。 */
-    pub fn create_training_dataset(&self, input: DesktopTrainingDatasetCreateInput) -> Result<DesktopTrainingDatasetView, String> {
-        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+    pub fn create_training_dataset(
+        &self,
+        input: DesktopTrainingDatasetCreateInput,
+    ) -> Result<DesktopTrainingDatasetView, String> {
+        let database = self
+            .database
+            .lock()
+            .map_err(|_| "桌面数据库锁已损坏".to_string())?;
         crate::training_dataset::create_dataset(&database, input)
     }
 
     /** 返回当前设备全部训练集与真实图片摘要。 */
     pub fn list_training_datasets(&self) -> Result<Vec<DesktopTrainingDatasetView>, String> {
-        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        let database = self
+            .database
+            .lock()
+            .map_err(|_| "桌面数据库锁已损坏".to_string())?;
         crate::training_dataset::list_datasets(&database, &self.app_data_dir)
     }
 
     /** 更新训练集触发词并返回最新完整视图。 */
-    pub fn update_training_trigger_words(&self, input: DesktopTrainingTriggerWordsUpdateInput) -> Result<DesktopTrainingDatasetView, String> {
-        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+    pub fn update_training_trigger_words(
+        &self,
+        input: DesktopTrainingTriggerWordsUpdateInput,
+    ) -> Result<DesktopTrainingDatasetView, String> {
+        let database = self
+            .database
+            .lock()
+            .map_err(|_| "桌面数据库锁已损坏".to_string())?;
         crate::training_dataset::update_trigger_words(&database, &self.app_data_dir, input)
     }
 
     /** 保存单张训练图片 Caption 并重新计算确认门禁。 */
-    pub fn update_training_caption(&self, input: DesktopTrainingCaptionUpdateInput) -> Result<DesktopTrainingDatasetView, String> {
-        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+    pub fn update_training_caption(
+        &self,
+        input: DesktopTrainingCaptionUpdateInput,
+    ) -> Result<DesktopTrainingDatasetView, String> {
+        let database = self
+            .database
+            .lock()
+            .map_err(|_| "桌面数据库锁已损坏".to_string())?;
         crate::training_dataset::update_caption(&database, &self.app_data_dir, input)
     }
 
     /** 创建持久化打标任务并立即唤醒独立 Caption Worker。 */
-    pub fn create_caption_job(&self, input: DesktopCaptionJobCreateInput) -> Result<DesktopCaptionJobView, String> {
-        let scheduler = self.caption_scheduler.as_ref().ok_or_else(|| "本地打标调度器尚未启动".to_string())?;
-        let mut database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+    pub fn create_caption_job(
+        &self,
+        input: DesktopCaptionJobCreateInput,
+    ) -> Result<DesktopCaptionJobView, String> {
+        let scheduler = self
+            .caption_scheduler
+            .as_ref()
+            .ok_or_else(|| "本地打标调度器尚未启动".to_string())?;
+        let mut database = self
+            .database
+            .lock()
+            .map_err(|_| "桌面数据库锁已损坏".to_string())?;
         let job = crate::captioner::create_job(&mut database, input)?;
         drop(database);
         scheduler.wake();
@@ -293,26 +595,48 @@ impl DesktopState {
 
     /** 返回最近的离线自动打标任务。 */
     pub fn list_caption_jobs(&self) -> Result<Vec<DesktopCaptionJobView>, String> {
-        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        let database = self
+            .database
+            .lock()
+            .map_err(|_| "桌面数据库锁已损坏".to_string())?;
         crate::captioner::list_jobs(&database)
     }
 
     /** 幂等请求取消排队或运行中的离线自动打标任务。 */
     pub fn cancel_caption_job(&self, id: &str) -> Result<DesktopCaptionJobView, String> {
-        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        let database = self
+            .database
+            .lock()
+            .map_err(|_| "桌面数据库锁已损坏".to_string())?;
         let job = crate::captioner::cancel_job(&database, id)?;
         drop(database);
-        if let Some(scheduler) = &self.caption_scheduler { scheduler.wake(); }
+        if let Some(scheduler) = &self.caption_scheduler {
+            scheduler.wake();
+        }
         Ok(job)
     }
 
     /** 固化已确认数据集和 Anima 底模后创建本地训练任务。 */
-    pub fn create_training_job(&self, input: DesktopTrainingJobCreateInput) -> Result<DesktopTrainingJobView, String> {
-        let scheduler = self.training_scheduler.as_ref().ok_or_else(|| "本地训练调度器尚未启动".to_string())?;
+    pub fn create_training_job(
+        &self,
+        input: DesktopTrainingJobCreateInput,
+    ) -> Result<DesktopTrainingJobView, String> {
+        let scheduler = self
+            .training_scheduler
+            .as_ref()
+            .ok_or_else(|| "本地训练调度器尚未启动".to_string())?;
         let settings = self.load_settings()?;
         crate::environment::require_training_ready(&settings)?;
-        let mut database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
-        let job = crate::training::create_job(&mut database, &self.app_data_dir, Path::new(&settings.model_root), input)?;
+        let mut database = self
+            .database
+            .lock()
+            .map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        let job = crate::training::create_job(
+            &mut database,
+            &self.app_data_dir,
+            Path::new(&settings.model_root),
+            input,
+        )?;
         drop(database);
         scheduler.wake();
         Ok(job)
@@ -320,25 +644,42 @@ impl DesktopState {
 
     /** 返回最近的持久化本地训练任务。 */
     pub fn list_training_jobs(&self) -> Result<Vec<DesktopTrainingJobView>, String> {
-        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        let database = self
+            .database
+            .lock()
+            .map_err(|_| "桌面数据库锁已损坏".to_string())?;
         crate::training::list_jobs(&database)
     }
 
     /** 幂等取消排队或运行中的本地训练任务。 */
     pub fn cancel_training_job(&self, id: &str) -> Result<DesktopTrainingJobView, String> {
-        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        let database = self
+            .database
+            .lock()
+            .map_err(|_| "桌面数据库锁已损坏".to_string())?;
         let job = crate::training::cancel_job(&database, id)?;
         drop(database);
-        if let Some(scheduler) = &self.training_scheduler { scheduler.wake(); }
+        if let Some(scheduler) = &self.training_scheduler {
+            scheduler.wake();
+        }
         Ok(job)
     }
 
     /** 创建持久任务后唤醒串行调度器，提交线程不等待生成完成。 */
-    pub fn create_local_job(&self, input: DesktopLocalJobCreateInput) -> Result<DesktopLocalJobView, String> {
-        let scheduler = self.scheduler.as_ref().ok_or_else(|| "本地调度器尚未启动".to_string())?;
+    pub fn create_local_job(
+        &self,
+        input: DesktopLocalJobCreateInput,
+    ) -> Result<DesktopLocalJobView, String> {
+        let scheduler = self
+            .scheduler
+            .as_ref()
+            .ok_or_else(|| "本地调度器尚未启动".to_string())?;
         let settings = self.load_settings()?;
         crate::environment::require_inference_ready(&settings)?;
-        let mut database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        let mut database = self
+            .database
+            .lock()
+            .map_err(|_| "桌面数据库锁已损坏".to_string())?;
         let job = crate::scheduler::create_job(&mut database, &settings, input)?;
         drop(database);
         scheduler.wake();
@@ -347,33 +688,65 @@ impl DesktopState {
 
     /** 读取最近本地任务。 */
     pub fn list_local_jobs(&self) -> Result<Vec<DesktopLocalJobView>, String> {
-        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        let database = self
+            .database
+            .lock()
+            .map_err(|_| "桌面数据库锁已损坏".to_string())?;
         crate::scheduler::list_jobs(&database)
+    }
+
+    /** 为独立预览读取最新一条任务，避免加载完整记录页数据。 */
+    pub fn latest_local_job(&self) -> Result<Option<DesktopLocalJobView>, String> {
+        let database = self
+            .database
+            .lock()
+            .map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        crate::scheduler::latest_job(&database)
     }
 
     /** 请求取消任务并唤醒调度器处理状态变化。 */
     pub fn cancel_local_job(&self, id: &str) -> Result<DesktopLocalJobView, String> {
-        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        let database = self
+            .database
+            .lock()
+            .map_err(|_| "桌面数据库锁已损坏".to_string())?;
         let job = crate::scheduler::cancel_job(&database, id)?;
         drop(database);
-        if let Some(scheduler) = &self.scheduler { scheduler.wake(); }
+        if let Some(scheduler) = &self.scheduler {
+            scheduler.wake();
+        }
         Ok(job)
     }
 
     /** Runtime 停止门禁只统计真实运行中的本地任务。 */
     pub fn running_local_job_count(&self) -> Result<u64, String> {
-        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
-        database.query_row("SELECT COUNT(*) FROM local_jobs WHERE status='running'", [], |row| row.get(0)).map_err(|error| format!("统计运行中本地任务失败：{error}"))
+        let database = self
+            .database
+            .lock()
+            .map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        database
+            .query_row(
+                "SELECT COUNT(*) FROM local_jobs WHERE status='running'",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|error| format!("统计运行中本地任务失败：{error}"))
     }
 
     fn local_model(&self, id: &str) -> Result<Option<DesktopLocalModelView>, String> {
         let settings = self.load_settings()?;
-        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        let database = self
+            .database
+            .lock()
+            .map_err(|_| "桌面数据库锁已损坏".to_string())?;
         database.query_row("SELECT id,display_name,family,workflow_kind,model_file_name,model_relative_path,model_sha256,byte_size,model_modified_ms,text_encoder_file_name,text_encoder_relative_path,vae_file_name,vae_relative_path,resource_group_id,generation_profile_json,created_at,updated_at FROM local_models WHERE id=?1", [id], |row| local_model_from_row(row, &settings.model_root)).optional().map_err(|error| format!("读取本地模型失败：{error}"))
     }
 
     fn gallery_item(&self, id: &str) -> Result<Option<GallerySyncItem>, String> {
-        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        let database = self
+            .database
+            .lock()
+            .map_err(|_| "桌面数据库锁已损坏".to_string())?;
         database.query_row("SELECT id, local_task_id, artifact_path, artifact_sha256, privacy, status, uploaded_bytes, retry_count, gallery_item_id, last_error, created_at, updated_at FROM gallery_sync_queue WHERE id=?1", [id], gallery_item_from_row).optional().map_err(|error| format!("读取图库同步记录失败：{error}"))
     }
 }
@@ -411,7 +784,10 @@ pub struct LocalLoraRegistration {
     pub trigger_words: Vec<String>,
 }
 
-fn local_model_from_row(row: &rusqlite::Row<'_>, model_root: &str) -> rusqlite::Result<DesktopLocalModelView> {
+fn local_model_from_row(
+    row: &rusqlite::Row<'_>,
+    model_root: &str,
+) -> rusqlite::Result<DesktopLocalModelView> {
     let relative_path: String = row.get(5)?;
     let expected_size: u64 = row.get(7)?;
     let expected_modified_ms: u64 = row.get(8)?;
@@ -419,35 +795,148 @@ fn local_model_from_row(row: &rusqlite::Row<'_>, model_root: &str) -> rusqlite::
     let workflow_kind: String = row.get(3)?;
     let text_relative_path: Option<String> = row.get(10)?;
     let vae_relative_path: Option<String> = row.get(12)?;
-    let primary_available = metadata.as_ref().is_some_and(|value| value.is_file() && value.len() == expected_size && modified_millis(value).ok() == Some(expected_modified_ms));
-    let components_available = workflow_kind != "anima" || (text_relative_path.as_ref().is_some_and(|path| Path::new(model_root).join(path).is_file()) && vae_relative_path.as_ref().is_some_and(|path| Path::new(model_root).join(path).is_file()));
+    let primary_available = metadata.as_ref().is_some_and(|value| {
+        value.is_file()
+            && value.len() == expected_size
+            && modified_millis(value).ok() == Some(expected_modified_ms)
+    });
+    let components_available = workflow_kind != "anima"
+        || (text_relative_path
+            .as_ref()
+            .is_some_and(|path| Path::new(model_root).join(path).is_file())
+            && vae_relative_path
+                .as_ref()
+                .is_some_and(|path| Path::new(model_root).join(path).is_file()));
     let profile_json: Option<String> = row.get(14)?;
-    let generation_profile = profile_json.map(|value| serde_json::from_str(&value).map_err(|error| rusqlite::Error::FromSqlConversionFailure(14, rusqlite::types::Type::Text, Box::new(error)))).transpose()?;
-    Ok(DesktopLocalModelView { id: row.get(0)?, display_name: row.get(1)?, family: row.get(2)?, workflow_kind, model_file_name: row.get(4)?, resource_group_id: row.get(13)?, generation_profile, model_sha256: row.get(6)?, byte_size: expected_size, text_encoder_file_name: row.get(9)?, vae_file_name: row.get(11)?, available: primary_available && components_available, created_at: row.get(15)?, updated_at: row.get(16)? })
+    let generation_profile = profile_json
+        .map(|value| {
+            serde_json::from_str(&value).map_err(|error| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    14,
+                    rusqlite::types::Type::Text,
+                    Box::new(error),
+                )
+            })
+        })
+        .transpose()?;
+    Ok(DesktopLocalModelView {
+        id: row.get(0)?,
+        display_name: row.get(1)?,
+        family: row.get(2)?,
+        workflow_kind,
+        model_file_name: row.get(4)?,
+        resource_group_id: row.get(13)?,
+        generation_profile,
+        model_sha256: row.get(6)?,
+        byte_size: expected_size,
+        text_encoder_file_name: row.get(9)?,
+        vae_file_name: row.get(11)?,
+        available: primary_available && components_available,
+        created_at: row.get(15)?,
+        updated_at: row.get(16)?,
+    })
 }
 
-fn local_lora_from_row(row: &rusqlite::Row<'_>, model_root: &str) -> rusqlite::Result<DesktopLocalLoraView> {
+fn local_lora_from_row(
+    row: &rusqlite::Row<'_>,
+    model_root: &str,
+) -> rusqlite::Result<DesktopLocalLoraView> {
     let relative_path: String = row.get(4)?;
     let expected_size: u64 = row.get(6)?;
     let expected_modified_ms: u64 = row.get(7)?;
     let metadata = Path::new(model_root).join(relative_path).metadata().ok();
     let trigger_words_json: String = row.get(8)?;
-    let trigger_words = serde_json::from_str(&trigger_words_json).map_err(|error| rusqlite::Error::FromSqlConversionFailure(8, rusqlite::types::Type::Text, Box::new(error)))?;
-    let available = metadata.as_ref().is_some_and(|value| value.is_file() && value.len() == expected_size && modified_millis(value).ok() == Some(expected_modified_ms));
-    Ok(DesktopLocalLoraView { id: row.get(0)?, title: row.get(1)?, r#type: row.get(2)?, file_name: row.get(3)?, sha256: row.get(5)?, base_model_sha256: row.get(9)?, byte_size: expected_size, trigger_words, available, created_at: row.get(10)?, updated_at: row.get(11)? })
+    let trigger_words = serde_json::from_str(&trigger_words_json).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(8, rusqlite::types::Type::Text, Box::new(error))
+    })?;
+    let available = metadata.as_ref().is_some_and(|value| {
+        value.is_file()
+            && value.len() == expected_size
+            && modified_millis(value).ok() == Some(expected_modified_ms)
+    });
+    Ok(DesktopLocalLoraView {
+        id: row.get(0)?,
+        title: row.get(1)?,
+        r#type: row.get(2)?,
+        file_name: row.get(3)?,
+        sha256: row.get(5)?,
+        base_model_sha256: row.get(9)?,
+        byte_size: expected_size,
+        trigger_words,
+        available,
+        created_at: row.get(10)?,
+        updated_at: row.get(11)?,
+    })
 }
 
-fn gallery_item_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<GallerySyncItem> { Ok(GallerySyncItem { id: row.get(0)?, local_task_id: row.get(1)?, artifact_path: row.get(2)?, artifact_sha256: row.get(3)?, privacy: row.get(4)?, status: row.get(5)?, uploaded_bytes: row.get(6)?, retry_count: row.get(7)?, gallery_item_id: row.get(8)?, last_error: row.get(9)?, created_at: row.get(10)?, updated_at: row.get(11)? }) }
+fn gallery_item_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<GallerySyncItem> {
+    Ok(GallerySyncItem {
+        id: row.get(0)?,
+        local_task_id: row.get(1)?,
+        artifact_path: row.get(2)?,
+        artifact_sha256: row.get(3)?,
+        privacy: row.get(4)?,
+        status: row.get(5)?,
+        uploaded_bytes: row.get(6)?,
+        retry_count: row.get(7)?,
+        gallery_item_id: row.get(8)?,
+        last_error: row.get(9)?,
+        created_at: row.get(10)?,
+        updated_at: row.get(11)?,
+    })
+}
 /** 旧版本数据库按列幂等迁移，升级不会覆盖已有目录、隐私或同步队列。 */
-fn ensure_column(database: &Connection, table: &str, column: &str, definition: &str) -> Result<(), String> {
-    let mut statement = database.prepare(&format!("PRAGMA table_info({table})")).map_err(|error| format!("读取桌面数据库结构失败：{error}"))?;
-    let columns = statement.query_map([], |row| row.get::<_, String>(1)).map_err(|error| format!("查询桌面数据库字段失败：{error}"))?.collect::<Result<Vec<_>, _>>().map_err(|error| format!("解析桌面数据库字段失败：{error}"))?;
-    if !columns.iter().any(|item| item == column) { database.execute(&format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"), []).map_err(|error| format!("升级桌面数据库失败：{error}"))?; }
+fn ensure_column(
+    database: &Connection,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> Result<(), String> {
+    let mut statement = database
+        .prepare(&format!("PRAGMA table_info({table})"))
+        .map_err(|error| format!("读取桌面数据库结构失败：{error}"))?;
+    let columns = statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|error| format!("查询桌面数据库字段失败：{error}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("解析桌面数据库字段失败：{error}"))?;
+    if !columns.iter().any(|item| item == column) {
+        database
+            .execute(
+                &format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"),
+                [],
+            )
+            .map_err(|error| format!("升级桌面数据库失败：{error}"))?;
+    }
     Ok(())
 }
-fn path_text(path: &Path) -> String { path.to_string_lossy().into_owned() }
-fn modified_millis(metadata: &fs::Metadata) -> Result<u64, String> { metadata.modified().map_err(|error| format!("读取模型修改时间失败：{error}"))?.duration_since(std::time::UNIX_EPOCH).map(|duration| duration.as_millis() as u64).map_err(|_| "模型修改时间早于系统纪元".to_string()) }
-fn sha256_file(path: &Path) -> Result<String, String> { let file = fs::File::open(path).map_err(|error| format!("读取本地结果失败：{error}"))?; let mut reader = BufReader::new(file); let mut hasher = Sha256::new(); let mut buffer = [0_u8; 1024 * 1024]; loop { let read = reader.read(&mut buffer).map_err(|error| format!("计算文件哈希失败：{error}"))?; if read == 0 { break; } hasher.update(&buffer[..read]); } Ok(hex::encode(hasher.finalize())) }
+fn path_text(path: &Path) -> String {
+    path.to_string_lossy().into_owned()
+}
+fn modified_millis(metadata: &fs::Metadata) -> Result<u64, String> {
+    metadata
+        .modified()
+        .map_err(|error| format!("读取模型修改时间失败：{error}"))?
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .map_err(|_| "模型修改时间早于系统纪元".to_string())
+}
+fn sha256_file(path: &Path) -> Result<String, String> {
+    let file = fs::File::open(path).map_err(|error| format!("读取本地结果失败：{error}"))?;
+    let mut reader = BufReader::new(file);
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0_u8; 1024 * 1024];
+    loop {
+        let read = reader
+            .read(&mut buffer)
+            .map_err(|error| format!("计算文件哈希失败：{error}"))?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(hex::encode(hasher.finalize()))
+}
 
 #[cfg(test)]
 mod tests {
@@ -491,8 +980,20 @@ mod tests {
         assert!((saved.font_scale - 1.2).abs() < f64::EPSILON);
         let artifact = temporary.path().join("result.webp");
         fs::write(&artifact, b"verified-local-result").expect("写入结果");
-        let first = state.enqueue_gallery_publication(GalleryPublicationInput { local_task_id: "local-task-1".into(), artifact_path: path_text(&artifact), privacy: "private".into() }).expect("加入队列");
-        let second = state.enqueue_gallery_publication(GalleryPublicationInput { local_task_id: "local-task-1".into(), artifact_path: path_text(&artifact), privacy: "public".into() }).expect("幂等更新队列");
+        let first = state
+            .enqueue_gallery_publication(GalleryPublicationInput {
+                local_task_id: "local-task-1".into(),
+                artifact_path: path_text(&artifact),
+                privacy: "private".into(),
+            })
+            .expect("加入队列");
+        let second = state
+            .enqueue_gallery_publication(GalleryPublicationInput {
+                local_task_id: "local-task-1".into(),
+                artifact_path: path_text(&artifact),
+                privacy: "public".into(),
+            })
+            .expect("幂等更新队列");
         assert_eq!(first.id, second.id);
         // 同一产物的隐私冲突始终保留更严格的私有状态。
         assert_eq!(second.privacy, "private");
@@ -518,7 +1019,11 @@ mod tests {
 
         let restored = DesktopState::initialize(temporary.path()).expect("重新初始化数据库");
         let database = restored.database.lock().expect("锁定恢复后的数据库");
-        let job = crate::captioner::list_jobs(&database).expect("读取恢复后的任务").into_iter().find(|item| item.id == job_id).expect("找到恢复后的任务");
+        let job = crate::captioner::list_jobs(&database)
+            .expect("读取恢复后的任务")
+            .into_iter()
+            .find(|item| item.id == job_id)
+            .expect("找到恢复后的任务");
         assert_eq!(job.status, "cancelled");
         assert_eq!(job.progress, 100);
         assert_eq!(job.processed_assets, 1);

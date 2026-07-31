@@ -115,7 +115,8 @@ function QueueRow({ resource, current, installing, bulkBusy, onDownload, onPause
 }
 
 /** 资源按钮根据真实下载和安装状态选择暂停、继续、安装或完成。 */
-function ResourceAction({ resource, current, installing, bulkBusy, onDownload, onPause, onInstall }: { resource: ResourceItem; current?: DesktopResourceDownloadView; installing?: DesktopResourceInstallView; bulkBusy: boolean } & ResourceActions) {
+/** 必需依赖列表和启动页共用同一真实下载、暂停与安装状态机。 */
+export function ResourceAction({ resource, current, installing, bulkBusy, onDownload, onPause, onInstall }: { resource: ResourceItem; current?: DesktopResourceDownloadView; installing?: DesktopResourceInstallView; bulkBusy: boolean } & ResourceActions) {
   const downloadBusy = Boolean(current && ACTIVE_DOWNLOAD_STATES.has(current.status));
   const installBusy = Boolean(installing && ACTIVE_INSTALL_STATES.has(installing.status));
   const sourceAvailable = resource.sourceKinds.length > 0;

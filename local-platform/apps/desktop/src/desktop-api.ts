@@ -1,5 +1,5 @@
 /** 本文件封装 WebView 到 Tauri 本地核心的受类型约束命令。 */
-import type { DesktopAccountView, DesktopAuthorizationRequestView, DesktopAuthorizationStartRequest, DesktopBootstrapView, DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopEnvironmentReport, DesktopGalleryPrivacy, DesktopGallerySyncItem, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopOfflineUpdateImportInput, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView, DesktopSettings, DesktopSettingsUpdate, DesktopSoftwareUpdateView, DesktopTrainingAssetDeleteInput, DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetIdInput, DesktopTrainingDatasetView, DesktopTrainingImagesAddInput, DesktopTrainingJobCreateInput, DesktopTrainingJobView, DesktopTrainingTagTranslationInput, DesktopTrainingTriggerWordsUpdateInput, DesktopWebsiteLoraInstallProgress, DesktopWebsiteLoraView, DesktopWebsiteModelInstallProgress, DesktopWebsiteModelView, TrainingTagTranslationView } from "@drawhime/contracts";
+import type { DesktopAccountView, DesktopAuthorizationRequestView, DesktopAuthorizationStartRequest, DesktopBootstrapView, DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopEnvironmentReport, DesktopGalleryPrivacy, DesktopGallerySyncItem, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopManagedFileDeleteInput, DesktopManagedFileRemovalView, DesktopOfflineUpdateImportInput, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView, DesktopSettings, DesktopSettingsUpdate, DesktopSoftwareUpdateView, DesktopStorageCleanupInput, DesktopStorageCleanupView, DesktopTrainingAssetDeleteInput, DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetIdInput, DesktopTrainingDatasetView, DesktopTrainingImagesAddInput, DesktopTrainingJobCreateInput, DesktopTrainingJobView, DesktopTrainingTagTranslationInput, DesktopTrainingTriggerWordsUpdateInput, DesktopWebsiteLoraInstallProgress, DesktopWebsiteLoraView, DesktopWebsiteModelInstallProgress, DesktopWebsiteModelView, TrainingTagTranslationView } from "@drawhime/contracts";
 import type { DesktopAiAnalyzeInput, DesktopAiAnalyzeView, DesktopAiSettings, DesktopAiSettingsUpdate } from "@drawhime/contracts";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -60,10 +60,16 @@ export function selfTestDesktopRuntime(): Promise<DesktopRuntimeStatusView> { re
 export function importDesktopLocalModel(input: DesktopLocalModelImportInput): Promise<DesktopLocalModelView> { return invoke("desktop_import_local_model", { input }); }
 /** 读取当前设备已登记模型。 */
 export function listDesktopLocalModels(): Promise<DesktopLocalModelView[]> { return invoke("desktop_list_local_models"); }
+/** 删除底模受管主文件并保留历史任务登记。 */
+export function deleteDesktopLocalModelFile(input: DesktopManagedFileDeleteInput): Promise<DesktopManagedFileRemovalView> { return invoke("desktop_delete_local_model_file", { input }); }
 /** 导入并登记本机已有 safetensors LoRA。 */
 export function importDesktopLocalLora(input: DesktopLocalLoraImportInput): Promise<DesktopLocalLoraView> { return invoke("desktop_import_local_lora", { input }); }
 /** 读取当前设备已登记 LoRA。 */
 export function listDesktopLocalLoras(): Promise<DesktopLocalLoraView[]> { return invoke("desktop_list_local_loras"); }
+/** 删除 LoRA 受管文件并保留历史任务登记。 */
+export function deleteDesktopLocalLoraFile(input: DesktopManagedFileDeleteInput): Promise<DesktopManagedFileRemovalView> { return invoke("desktop_delete_local_lora_file", { input }); }
+/** 预览或确认执行无引用受管文件清理。 */
+export function cleanupDesktopStorage(input: DesktopStorageCleanupInput): Promise<DesktopStorageCleanupView> { return invoke("desktop_storage_cleanup", { input }); }
 /** 读取当前账号可访问的网站 LoRA 目录。 */
 export function loadDesktopWebsiteLoras(forceRefresh = false): Promise<DesktopWebsiteLoraView[]> { return invoke("desktop_load_website_loras", { forceRefresh }); }
 
@@ -123,7 +129,17 @@ export function confirmDesktopTrainingDataset(input: DesktopTrainingDatasetIdInp
 export function createDesktopLocalJob(input: DesktopLocalJobCreateInput): Promise<DesktopLocalJobView> { return invoke("desktop_create_local_job", { input }); }
 /** 读取当前设备最近本地生成任务。 */
 export function listDesktopLocalJobs(): Promise<DesktopLocalJobView[]> { return invoke("desktop_list_local_jobs"); }
+/** 独立预览只读取最新一条任务，避免加载完整记录页。 */
+export function loadDesktopLatestLocalJob(): Promise<DesktopLocalJobView | null> { return invoke("desktop_latest_local_job"); }
+/** 独立预览只读取界面设置，不触发硬件与 Runtime 检测。 */
+export function loadDesktopPreviewSettings(): Promise<DesktopSettings> { return invoke("desktop_load_preview_settings"); }
 /** 取消排队中或运行中的本地任务。 */
 export function cancelDesktopLocalJob(id: string): Promise<DesktopLocalJobView> { return invoke("desktop_cancel_local_job", { id }); }
+/** 创建或关闭独立原生生成预览窗口，返回切换后的打开状态。 */
+export function toggleDesktopGenerationPreview(): Promise<boolean> { return invoke("desktop_toggle_generation_preview"); }
+/** 预览根组件完成挂载后向 Rust 核心登记，防止空白 WebView 被误判为可用。 */
+export function markDesktopGenerationPreviewReady(): Promise<boolean> { return invoke("desktop_mark_generation_preview_ready"); }
+/** 切换生成预览窗口是否始终位于普通窗口之上。 */
+export function setDesktopGenerationPreviewAlwaysOnTop(alwaysOnTop: boolean): Promise<boolean> { return invoke("desktop_set_generation_preview_always_on_top", { alwaysOnTop }); }
 /** 监听 SQLite 已持久化的任务状态更新。 */
 export function listenDesktopLocalJobUpdates(handler: (job: DesktopLocalJobView) => void): Promise<UnlistenFn> { return listen<DesktopLocalJobView>("desktop-local-job-updated", (event) => handler(event.payload)); }

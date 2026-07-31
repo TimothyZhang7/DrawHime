@@ -3,7 +3,7 @@
  */
 import type { DesktopBootstrapView, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView } from "@drawhime/contracts";
 import { Activity, AlertTriangle, CheckCircle2, Cpu, Download, HardDrive, LoaderCircle, MemoryStick, PackageCheck, Power, RefreshCw, ShieldCheck } from "lucide-react";
-import { coreResources, dependencySummary, visibleEnvironmentIssues } from "./ResourceCenter";
+import { coreResources, dependencySummary, ResourceAction, visibleEnvironmentIssues } from "./ResourceCenter";
 
 /** 启动流程阶段用于按钮和页面状态实时同步。 */
 export type StartupPhase = "checking" | "installing" | "starting" | "self_testing" | null;
@@ -15,13 +15,18 @@ interface StartupPageProps {
   installProgress: Record<string, DesktopResourceInstallView>;
   phase: StartupPhase;
   checking: boolean;
+  bulkBusy: boolean;
   onPrimary: () => void;
   onRecheck: () => void;
   onOpenQueue: () => void;
+  onInstallRequired: () => void;
+  onDownload: (resourceId: string) => void;
+  onPause: (resourceId: string) => void;
+  onInstall: (resourceId: string) => void;
 }
 
 /** 启动页把首次安装和日常启动收敛成一个主操作，避免用户理解多个技术步骤。 */
-export function StartupPage({ state, catalog, progress, installProgress, phase, checking, onPrimary, onRecheck, onOpenQueue }: StartupPageProps) {
+export function StartupPage({ state, catalog, progress, installProgress, phase, checking, bulkBusy, onPrimary, onRecheck, onOpenQueue, onInstallRequired, onDownload, onPause, onInstall }: StartupPageProps) {
   const resources = coreResources(catalog);
   const summary = dependencySummary(resources, progress, installProgress);
   const dependenciesReady = Boolean(catalog?.configured && resources.length > 0 && resources.every((resource) => resource.installed));
@@ -44,7 +49,7 @@ export function StartupPage({ state, catalog, progress, installProgress, phase, 
     </section>
 
     <div className="startup-detail-grid">
-      <section className="startup-panel dependency-panel"><header><div><span>REQUIRED FILES</span><h2>必需依赖</h2></div><button onClick={onOpenQueue}><Download />下载队列</button></header><div className="startup-dependency-list">{resources.length ? resources.map((resource) => <article key={resource.id}><PackageCheck /><div><strong>{dependencyName(resource)}</strong><span>{formatResourceSize(resource.byteSize)}</span></div><b className={resource.installed ? "is-ready" : isBusy(resource.id, progress, installProgress) ? "is-active" : "is-pending"}>{resource.installed ? "已加载" : isBusy(resource.id, progress, installProgress) ? "处理中" : resource.downloaded ? "待安装" : "待下载"}</b></article>) : <div className="startup-panel-empty">正在读取签名依赖清单</div>}</div></section>
+      <section className="startup-panel dependency-panel"><header><div><span>REQUIRED FILES</span><h2>必需依赖</h2></div><div className="startup-panel-actions"><button onClick={onOpenQueue}><Download />下载队列</button><button className="primary" disabled={!catalog?.configured || summary.waiting === 0 || bulkBusy} onClick={onInstallRequired}>{bulkBusy ? <LoaderCircle className="spin" /> : <PackageCheck />}{bulkBusy ? "正在补齐" : summary.waiting ? `补齐缺失依赖（${summary.waiting}）` : "依赖已齐全"}</button></div></header><div className="startup-dependency-list">{resources.length ? resources.map((resource) => <article key={resource.id}><PackageCheck /><div><strong>{dependencyName(resource)}</strong><span>{formatResourceSize(resource.byteSize)}</span></div><div className="startup-dependency-actions"><b className={resource.installed ? "is-ready" : isBusy(resource.id, progress, installProgress) ? "is-active" : "is-pending"}>{resource.installed ? "已加载" : isBusy(resource.id, progress, installProgress) ? "处理中" : resource.downloaded ? "待安装" : "待下载"}</b><ResourceAction resource={resource} current={progress[resource.id]} installing={installProgress[resource.id]} bulkBusy={bulkBusy} onDownload={onDownload} onPause={onPause} onInstall={onInstall} /></div></article>) : <div className="startup-panel-empty">正在读取签名依赖清单</div>}</div></section>
 
       <section className="startup-panel environment-panel"><header><div><span>DEVICE CHECK</span><h2>当前电脑</h2></div><button disabled={checking || Boolean(phase)} onClick={onRecheck}>{checking ? <LoaderCircle className="spin" /> : <RefreshCw />}重新检测</button></header><div className="startup-device"><div className="startup-gpu"><Cpu /><span><small>图形设备</small><strong>{gpu?.name || "未检测到受支持的 GPU"}</strong></span></div><dl><div><dt><MemoryStick />显存</dt><dd>{gpu ? `${formatBytes(gpu.memoryFreeBytes)} / ${formatBytes(gpu.memoryTotalBytes)}` : "-"}</dd></div><div><dt><Cpu />处理器</dt><dd>{state.environment.cpu.logicalCores} 线程</dd></div><div><dt><HardDrive />系统内存</dt><dd>{formatBytes(state.environment.memory.totalBytes)}</dd></div></dl></div>{blockingIssue ? <div className="startup-blocking"><AlertTriangle /><div><strong>{blockingIssue.title}</strong><span>{blockingIssue.message}</span></div></div> : <div className="startup-check-ok"><CheckCircle2 /><span>硬件和系统满足当前启动条件</span></div>}</section>
     </div>
