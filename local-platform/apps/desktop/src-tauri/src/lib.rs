@@ -48,7 +48,7 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
 };
 use storage::DesktopState;
-use tauri::{Manager, State, WebviewUrl, WindowEvent};
+use tauri::{Manager, PhysicalSize, State, WebviewUrl, WindowEvent};
 
 /** 预览页只有完成 React 根组件挂载后才对主窗口和验收报告为可用。 */
 static GENERATION_PREVIEW_READY: AtomicBool = AtomicBool::new(false);
@@ -820,7 +820,7 @@ async fn desktop_toggle_generation_preview(app: tauri::AppHandle) -> Result<bool
     let window =
         tauri::WebviewWindowBuilder::new(&app, LABEL, WebviewUrl::App("index.html".into()))
             .title("DrawHime 生成预览")
-            // 初始内容区保持 1:1，最大边沿用原有 720 高度；用户仍可自由缩放窗口。
+            // 先沿用原有 720 高度创建隐藏窗口，随后按真实标题栏和边框补足外框宽度。
             .inner_size(720.0, 720.0)
             .min_inner_size(320.0, 420.0)
             .resizable(true)
@@ -834,6 +834,25 @@ async fn desktop_toggle_generation_preview(app: tauri::AppHandle) -> Result<bool
             .center()
             .build()
             .map_err(|error| format!("创建生成预览窗口失败：{error}"))?;
+    let inner_size = window
+        .inner_size()
+        .map_err(|error| format!("读取生成预览内容区尺寸失败：{error}"))?;
+    let outer_size = window
+        .outer_size()
+        .map_err(|error| format!("读取生成预览外框尺寸失败：{error}"))?;
+    // 原生标题栏会让 1:1 内容区呈现为竖长外框；保持当前外框高度并补宽，确保用户看到的初始窗口严格为正方形。
+    let horizontal_frame = outer_size.width.saturating_sub(inner_size.width);
+    let vertical_frame = outer_size.height.saturating_sub(inner_size.height);
+    let target_outer_side = outer_size.height;
+    window
+        .set_size(PhysicalSize::new(
+            target_outer_side.saturating_sub(horizontal_frame),
+            target_outer_side.saturating_sub(vertical_frame),
+        ))
+        .map_err(|error| format!("设置生成预览初始尺寸失败：{error}"))?;
+    window
+        .center()
+        .map_err(|error| format!("居中生成预览窗口失败：{error}"))?;
     window.on_window_event(|event| {
         if matches!(event, WindowEvent::Destroyed) {
             GENERATION_PREVIEW_READY.store(false, Ordering::Release);
