@@ -1,7 +1,7 @@
 /**
  * 本文件把独立训练集打标工具与分步骤 LoRA 训练流程拆分为两个桌面页面。
  */
-import type { DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopLocalModelView, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetView, DesktopTrainingJobCreateInput, DesktopTrainingJobView, TrainingTagTranslationView } from "@drawhime/contracts";
+import { resolveTrainingCycles, type DesktopCaptionJobCreateInput, type DesktopCaptionJobView, type DesktopLocalModelView, type DesktopTrainingDatasetCreateInput, type DesktopTrainingDatasetView, type DesktopTrainingJobCreateInput, type DesktopTrainingJobView, type TrainingTagTranslationView } from "@drawhime/contracts";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { AlertTriangle, ArrowLeft, ArrowRight, BookOpenCheck, Check, Copy, Download, FlaskConical, FolderPlus, Images, LoaderCircle, Plus, Save, Tags, Trash2, Upload, X } from "lucide-react";
@@ -271,13 +271,13 @@ function TrainingJobList({ jobs, busy, onCancel }: { jobs: DesktopTrainingJobVie
   return <div className="desktop-training-jobs">{jobs.length ? jobs.map((job) => <article key={job.id} className={`is-${job.status}`}><header><span><b>{desktopTrainingStatusLabel(job.status)}</b><strong>{job.title}</strong><small>{job.modelDisplayName} · {job.assetCount} 张 · Rank {job.parameters.rank}</small></span><em>{job.progress}%</em></header><i><u style={{ width: `${job.progress}%` }} /></i><footer><span>{job.status === "queued" ? `队列第 ${job.queuePosition} 位` : job.status === "running" ? `Epoch ${job.currentEpoch}/${job.totalEpochs}` : job.outputLoraId ? "LoRA 已登记到本地仓库" : job.error || "任务已结束"}</span>{["queued", "running"].includes(job.status) && <button disabled={busy} onClick={() => onCancel(job.id)}><X />取消</button>}</footer>{job.suggestion && <p><AlertTriangle />{job.suggestion.message}{job.suggestion.resolution ? ` 建议分辨率 ${job.suggestion.resolution}px。` : ""}{job.suggestion.rank ? ` 建议 Rank ${job.suggestion.rank}。` : ""}</p>}</article>) : <div className="empty-block">提交后，当前训练集的任务会显示在这里</div>}</div>;
 }
 
-/** 8 GiB 设备默认使用约 80 次 512px 图片遍历，兼顾半小时内完成与可用 LoRA 质量。 */
+/** 8 GiB 设备保留 512px 安全分辨率，但提高到至少 320 次遍历，避免角色 LoRA 完全欠拟合。 */
 function defaultDesktopTrainingDraft(dataset: DesktopTrainingDatasetView, modelId: string): DesktopTrainingJobCreateInput {
   const count = Math.max(5, dataset.assets.length);
-  const epochs = count >= 80 ? 1 : count >= 40 ? 2 : 4;
-  const repeats = Math.max(1, Math.round(80 / count / epochs));
-  return { datasetId: dataset.id, modelId, title: `${dataset.title} LoRA`, parameters: { rank: 8, alpha: 8, epochs, repeats, resolution: 512, learningRate: 0.0001, lrScheduler: "constant", warmupRatio: 0, gradientAccumulationSteps: 1, captionDropoutRate: 0, shuffleCaption: false, keepTokens: 1, seed: Math.floor(Math.random() * 2147483647) } };
+  const { epochs, repeats } = resolveTrainingCycles(count, 320);
+  return { datasetId: dataset.id, modelId, title: `${dataset.title} LoRA`, parameters: { rank: 16, alpha: 16, epochs, repeats, resolution: 512, learningRate: 0.0001, lrScheduler: "constant", warmupRatio: 0, gradientAccumulationSteps: 1, captionDropoutRate: 0, shuffleCaption: false, keepTokens: 1, seed: Math.floor(Math.random() * 2147483647) } };
 }
+
 
 function trainingTypeLabel(type: DesktopTrainingDatasetView["type"]): string { return { character: "角色", style: "画风", concept: "概念" }[type]; }
 function trainingStatusLabel(status: DesktopTrainingDatasetView["status"]): string { return { draft: "整理中", review_ready: "可确认", confirmed: "已确认" }[status]; }

@@ -4,6 +4,7 @@
  */
 import { z } from "zod";
 export * from "./training-trigger-words.js";
+export * from "./training-strength.js";
 
 /** 统一成功响应。 */
 export const successResponseSchema = <T extends z.ZodTypeAny>(data: T) =>
@@ -217,6 +218,18 @@ export const galleryPublicationRemovalViewSchema = z.object({
 });
 
 /** 推理任务创建请求。 */
+export const inferenceSamplingOverridesSchema = z.object({
+  steps: z.number().int().min(1).max(80),
+  cfg: z.number().min(0.1).max(20),
+  sampler: z.string().min(1).max(100),
+  scheduler: z.string().min(1).max(100),
+  samplingMaxEdge: z.number().int().min(512).max(2048),
+  samplingPixelBudget: z.number().int().min(262144).max(4194304),
+  aspectStepThreshold: z.number().min(1).max(4),
+  aspectAdjustedSteps: z.number().int().min(1).max(80),
+});
+
+/** 推理任务创建请求。 */
 export const inferenceJobCreateRequestSchema = z.object({
   idempotencyKey: z.string().min(8).max(191),
   modelVersionId: z.string().min(1),
@@ -229,6 +242,8 @@ export const inferenceJobCreateRequestSchema = z.object({
   height: z.number().int().min(64).max(8192),
   batchSize: z.number().int().min(1).max(16),
   seed: z.number().int().nonnegative().nullable(),
+  /** 高级用户可覆盖目录推荐值；API 会再次按当前模型允许项校验并固化。 */
+  samplingOverrides: inferenceSamplingOverridesSchema.nullable().optional(),
   /** 单任务最多四个 LoRA，且同一版本不得重复叠加。 */
   loraVersionIds: z.array(z.string().min(1)).max(4).refine((items) => new Set(items).size === items.length, "同一 LoRA 不能重复选择"),
   /** 用户按 LoRA 单独设置的叠加强度，键必须属于本次选择的版本 ID。 */
@@ -383,6 +398,8 @@ export const inferenceLoraViewSchema = z.object({
   description: z.string(),
   type: z.enum(["style", "character", "concept", "clothing", "pose", "other"]),
   modelFamily: z.string(),
+  /** 平台训练产物绑定精确底模；外部上传 LoRA 为 null 并继续按系列兼容。 */
+  baseModelVersionId: z.string().nullable(),
   fileName: z.string(),
   sha256: z.string().regex(/^[a-f0-9]{64}$/),
   triggerWords: z.array(z.string()),
@@ -481,13 +498,71 @@ export const modelLibraryUpdateRequestSchema = z.object({
   visible: z.boolean(),
 });
 
+/** 单个质量档固化的实际采样预算。 */
+export const modelGenerationPresetSchema = z.object({
+  steps: z.number().int().min(1).max(80),
+  aspectAdjustedSteps: z.number().int().min(1).max(80),
+  samplingMaxEdge: z.number().int().min(512).max(2048),
+  samplingPixelBudget: z.number().int().min(262144).max(4194304),
+});
+
+/** 底模目录驱动的推荐与高级生成配置，网页和桌面共用同一事实源。 */
+export const modelGenerationProfileSchema = z.object({
+  steps: z.number().int().min(1).max(80),
+  cfg: z.number().min(0.1).max(20),
+  sampler: z.string().min(1),
+  scheduler: z.string().min(1),
+  samplingMaxEdge: z.number().int().min(512).max(2048),
+  samplingPixelBudget: z.number().int().min(262144).max(4194304),
+  aspectStepThreshold: z.number().min(1).max(4),
+  maxEdge: z.number().int().min(512).max(2048),
+  qualityPrefix: z.string(),
+  defaultNegativePrompt: z.string(),
+  trainingSupported: z.boolean(),
+  availableSamplers: z.array(z.string().min(1)).min(1).max(32),
+  availableSchedulers: z.array(z.string().min(1)).min(1).max(32),
+  presets: z.object({ fast: modelGenerationPresetSchema, quality: modelGenerationPresetSchema, extreme: modelGenerationPresetSchema }),
+});
+
+/** Anima 底模依赖的共享组件由主站目录下发，客户端不得写死文件名或哈希。 */
+export const modelRuntimeComponentsSchema = z.object({
+  textEncoder: z.object({ fileName: z.string().min(1), sha256: z.string().regex(/^[a-f0-9]{64}$/) }),
+  vae: z.object({ fileName: z.string().min(1), sha256: z.string().regex(/^[a-f0-9]{64}$/) }),
+});
+
 /** 用户可浏览的底模仓库条目。 */
 export const modelLibraryEntryViewSchema = z.object({
-  id: z.string(), displayName: z.string(), description: z.string(), family: z.string(), familyName: z.string(), modelFileName: z.string(), runtimeFormat: z.string(), sourceUrl: z.string().nullable(), sourceLinks: z.array(z.object({ label: z.string(), url: z.string().url() })).max(8), usageGuide: z.string(), visible: z.boolean(), isAdmin: z.boolean(), priceCny: z.string(),
-  parameters: z.object({ steps: z.number(), cfg: z.number(), sampler: z.string(), scheduler: z.string(), samplingMaxEdge: z.number(), maxEdge: z.number() }),
+  id: z.string(), displayName: z.string(), description: z.string(), family: z.string(), familyName: z.string(), modelFileName: z.string(), resourceGroupId: z.string().min(1).nullable(), runtimeFormat: z.string(), sourceUrl: z.string().nullable(), sourceLinks: z.array(z.object({ label: z.string(), url: z.string().url() })).max(8), usageGuide: z.string(), visible: z.boolean(), isAdmin: z.boolean(), priceCny: z.string(),
+  /** 用户上传或已经登记到主站 data 盘的底模可通过该唯一主站端点安装。 */
+  download: z.object({ fileName: z.string().min(1), sha256: z.string().regex(/^[a-f0-9]{64}$/), byteSize: z.number().int().positive(), contentUrl: z.string().min(1) }).nullable(),
+  components: modelRuntimeComponentsSchema,
+  parameters: modelGenerationProfileSchema,
   examples: z.array(z.object({ id: z.string(), width: z.number().int().nullable(), height: z.number().int().nullable(), prompt: z.string().nullable(), contentUrl: z.string() })),
   referenceTasks: z.array(z.object({ id: z.string(), prompt: z.string(), imageUrl: z.string(), galleryItemId: z.string(), createdAt: z.string().datetime() })).max(12),
   createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
+});
+
+/** 用户创建 Anima 底模分片上传会话时提交的目录信息与推荐参数。 */
+export const modelUploadSessionCreateRequestSchema = z.object({
+  displayName: z.string().trim().min(1).max(191),
+  description: z.string().trim().min(1).max(10000),
+  fileName: z.string().trim().regex(/^[a-zA-Z0-9._-]+\.safetensors$/),
+  totalBytes: z.number().int().min(16).max(16 * 1024 * 1024 * 1024),
+  sourceUrls: z.array(z.string().url().max(1000)).max(8).default([]),
+  usageGuide: z.string().trim().min(1).max(20000),
+  parameters: modelGenerationProfileSchema,
+});
+
+/** Anima 底模分片上传的可恢复状态。 */
+export const modelUploadSessionViewSchema = z.object({
+  id: z.string().uuid(),
+  fileName: z.string(),
+  totalBytes: z.number().int().positive(),
+  receivedBytes: z.number().int().nonnegative(),
+  status: z.enum(["uploading", "processing", "completed", "failed"]),
+  modelVersionId: z.string().uuid().nullable(),
+  errorMessage: z.string().nullable(),
+  expiresAt: z.string().datetime(),
 });
 
 /** LoRA 分片上传会话创建请求。 */
@@ -701,7 +776,7 @@ export const desktopSettingsSchema = z.object({
   themeMode: z.enum(["system", "dark", "light"]),
   /** 桌面界面缩放使用受控离散比例，避免任意值破坏最小窗口布局。 */
   fontScale: z.number().min(1).max(1.3).multipleOf(0.05),
-  dependencySource: z.enum(["auto", "official", "mirror"]),
+  dependencySource: z.literal("mirror"),
   defaultPrivacy: desktopGalleryPrivacySchema,
   /** 登录账号后是否把新完成的本机图片自动同步到网页图库。 */
   autoUpload: z.boolean(),
@@ -748,10 +823,13 @@ export const desktopAiAnalyzeViewSchema = z.object({
   text: z.string().min(1),
 });
 
-/** 桌面端资源文件的官方或主站镜像来源。 */
+/** 桌面端资源文件唯一允许的主站镜像来源。 */
 export const desktopResourceSourceSchema = z.object({
-  kind: z.enum(["official", "mirror"]),
-  url: z.string().url(),
+  kind: z.literal("mirror"),
+  url: z.string().url().refine((value) => {
+    const url = new URL(value);
+    return url.protocol === "https:" && url.hostname === "www.xanime.ink";
+  }, "资源下载地址必须是绘图姬主站 HTTPS 地址"),
 });
 
 /** 桌面签名资源类型，应用更新与普通依赖共用该稳定枚举。 */
@@ -796,11 +874,8 @@ export const desktopResourceManifestItemSchema = z.object({
     mandatory: z.boolean(),
   }).nullable().optional(),
   required: z.boolean(),
-  sources: z.array(desktopResourceSourceSchema).min(1).max(8),
+  sources: z.array(desktopResourceSourceSchema).length(1, "每个资源必须且只能声明一个主站镜像"),
 }).superRefine((item, context) => {
-  if (new Set(item.sources.map((source) => source.url)).size !== item.sources.length) {
-    context.addIssue({ code: "custom", path: ["sources"], message: "同一资源的官方与镜像来源地址不得重复" });
-  }
   const isApplication = item.kind === "application";
   if (isApplication && (item.archive !== "raw" || !item.fileName.toLowerCase().endsWith(".exe") || !item.applicationUpdate)) {
     context.addIssue({ code: "custom", path: ["applicationUpdate"], message: "application 资源必须是带更新元数据的原始 NSIS EXE" });
@@ -867,7 +942,6 @@ export const desktopResourceDownloadViewSchema = z.object({
   totalBytes: z.number().int().positive(),
   bytesPerSecond: z.number().int().nonnegative(),
   etaSeconds: z.number().int().nonnegative().nullable(),
-  switchReason: z.string().nullable(),
   targetPath: z.string().nullable(),
   error: z.string().nullable(),
 });
@@ -900,6 +974,8 @@ export const desktopLocalModelViewSchema = z.object({
   family: z.string().min(1),
   workflowKind: z.enum(["checkpoint", "anima"]),
   modelFileName: z.string().min(1),
+  resourceGroupId: z.string().min(1).nullable(),
+  generationProfile: modelGenerationProfileSchema.nullable(),
   modelSha256: z.string().regex(/^[a-f0-9]{64}$/),
   byteSize: z.number().int().positive(),
   textEncoderFileName: z.string().nullable(),
@@ -926,6 +1002,8 @@ export const desktopLocalLoraViewSchema = z.object({
   type: z.enum(["style", "character", "concept", "clothing", "pose", "other"]),
   fileName: z.string().min(1),
   sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  /** 本机训练产物绑定提交时的精确底模；外部导入 LoRA 没有该限制。 */
+  baseModelSha256: z.string().regex(/^[a-f0-9]{64}$/).nullable(),
   byteSize: z.number().int().positive(),
   triggerWords: z.array(z.string().min(1)).max(50),
   available: z.boolean(),
@@ -972,10 +1050,16 @@ export const desktopWebsiteModelViewSchema = z.object({
   family: z.string(),
   familyName: z.string(),
   modelFileName: z.string(),
+  /** 在线仓库与签名资源清单之间的唯一关联键，客户端不得再按标题或文件名猜测。 */
+  resourceGroupId: z.string().min(1).nullable(),
+  /** 在线目录提供的唯一主站模型文件；所有仓库底模均不依赖签名资源组。 */
+  download: z.object({ fileName: z.string().min(1), sha256: z.string().regex(/^[a-f0-9]{64}$/), byteSize: z.number().int().positive(), contentUrl: z.string().min(1) }).nullable(),
+  /** 本地安装时必须复用且完整校验的 Anima 文本编码器与 VAE。 */
+  components: modelRuntimeComponentsSchema,
   runtimeFormat: z.string(),
   usageGuide: z.string(),
   sourceLinks: z.array(z.object({ label: z.string(), url: z.string().url() })).max(8),
-  parameters: z.object({ steps: z.number(), cfg: z.number(), sampler: z.string(), scheduler: z.string(), samplingMaxEdge: z.number(), maxEdge: z.number() }),
+  parameters: modelGenerationProfileSchema,
   coverPath: z.string().nullable(),
   /** 已逐张容错缓存的全部示例图片，详情页按原始顺序展示。 */
   examplePaths: z.array(z.string()),
@@ -984,6 +1068,16 @@ export const desktopWebsiteModelViewSchema = z.object({
 /** 网站 LoRA 断点下载、校验和安装进度。 */
 export const desktopWebsiteLoraInstallProgressSchema = z.object({
   loraId: z.string().uuid(),
+  status: z.enum(["downloading", "verifying", "installing", "installed", "failed"]),
+  downloadedBytes: z.number().int().nonnegative(),
+  totalBytes: z.number().int().positive(),
+  bytesPerSecond: z.number().int().nonnegative(),
+  error: z.string().nullable(),
+});
+
+/** 网站底模从主站断点下载、校验和安装的实时进度。 */
+export const desktopWebsiteModelInstallProgressSchema = z.object({
+  modelId: z.string(),
   status: z.enum(["downloading", "verifying", "installing", "installed", "failed"]),
   downloadedBytes: z.number().int().nonnegative(),
   totalBytes: z.number().int().positive(),
@@ -1433,6 +1527,7 @@ export type DesktopGalleryUploadView = z.infer<typeof desktopGalleryUploadViewSc
 export type DesktopWebsiteLoraView = z.infer<typeof desktopWebsiteLoraViewSchema>;
 export type DesktopWebsiteLoraInstallProgress = z.infer<typeof desktopWebsiteLoraInstallProgressSchema>;
 export type DesktopWebsiteModelView = z.infer<typeof desktopWebsiteModelViewSchema>;
+export type DesktopWebsiteModelInstallProgress = z.infer<typeof desktopWebsiteModelInstallProgressSchema>;
 export type DesktopSoftwareUpdateView = z.infer<typeof desktopSoftwareUpdateViewSchema>;
 export type DesktopOfflineUpdateImportInput = z.infer<typeof desktopOfflineUpdateImportInputSchema>;
 export type MainSessionExchangeRequest = z.infer<typeof mainSessionExchangeRequestSchema>;
@@ -1444,6 +1539,7 @@ export type GalleryPublicationCreateRequest = z.infer<typeof galleryPublicationC
 export type GalleryPublicationView = z.infer<typeof galleryPublicationViewSchema>;
 export type GalleryPublicationRemovalView = z.infer<typeof galleryPublicationRemovalViewSchema>;
 export type InferenceJobCreateRequest = z.infer<typeof inferenceJobCreateRequestSchema>;
+export type InferenceSamplingOverrides = z.infer<typeof inferenceSamplingOverridesSchema>;
 export type JobQueueEstimateView = z.infer<typeof jobQueueEstimateViewSchema>;
 export type InferenceJobView = z.infer<typeof inferenceJobViewSchema>;
 export type InferenceModelView = z.infer<typeof inferenceModelViewSchema>;
@@ -1457,6 +1553,10 @@ export type LoraLibraryEntryView = z.infer<typeof loraLibraryEntryViewSchema>;
 export type ModelLibraryCreateRequest = z.infer<typeof modelLibraryCreateRequestSchema>;
 export type ModelLibraryUpdateRequest = z.infer<typeof modelLibraryUpdateRequestSchema>;
 export type ModelLibraryEntryView = z.infer<typeof modelLibraryEntryViewSchema>;
+export type ModelGenerationProfile = z.infer<typeof modelGenerationProfileSchema>;
+export type ModelRuntimeComponents = z.infer<typeof modelRuntimeComponentsSchema>;
+export type ModelUploadSessionCreateRequest = z.infer<typeof modelUploadSessionCreateRequestSchema>;
+export type ModelUploadSessionView = z.infer<typeof modelUploadSessionViewSchema>;
 export type LoraUploadSessionCreateRequest = z.infer<typeof loraUploadSessionCreateRequestSchema>;
 export type LoraUploadSessionView = z.infer<typeof loraUploadSessionViewSchema>;
 export type InferenceJobCancelRequest = z.infer<typeof inferenceJobCancelRequestSchema>;

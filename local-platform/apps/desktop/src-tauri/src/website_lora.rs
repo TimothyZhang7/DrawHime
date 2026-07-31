@@ -1,19 +1,19 @@
 //! 本模块实现网站公开与本人私有 LoRA 的设备会话鉴权、断点下载和整体哈希校验。
 
 use crate::auth::{self, DesktopSessionError};
-use crate::{models::DesktopWebsiteLoraInstallProgress, network::online_client_builder, website_media::{self, WebsiteImageRef}};
+use crate::{models::DesktopWebsiteLoraInstallProgress, network::online_client_builder, website_catalog_cache, website_media::{self, WebsiteImageRef}};
 use chrono::Utc;
 use reqwest::{blocking::{Client, Response}, StatusCode};
-use serde::{de::DeserializeOwned, Deserialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{collections::HashSet, fs::{self, File, OpenOptions}, io::{Read, Seek, SeekFrom, Write}, path::{Path, PathBuf}, time::{Duration, Instant}};
 use tauri::{AppHandle, Emitter};
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct WebsiteLoraVersion { id: String, file_name: String, sha256: String, byte_size: u64 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct WebsiteLoraEntry {
     id: String,
@@ -31,7 +31,7 @@ struct WebsiteLoraEntry {
     examples: Vec<WebsiteImageRef>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct WebsiteLoraList { entries: Vec<WebsiteLoraEntry> }
 
 #[derive(Debug, Deserialize)]
@@ -42,11 +42,31 @@ pub struct WebsiteLoraDownload { pub view: crate::models::DesktopWebsiteLoraView
 
 /** 读取当前设备账号可见的网站 LoRA，并按本机内容哈希标记安装状态。 */
 pub fn load_catalog(app_data_dir: &Path, installed_hashes: &HashSet<String>, force_refresh: bool) -> Result<Vec<crate::models::DesktopWebsiteLoraView>, String> {
-    let session = authenticated_session()?;
+    let session = match auth::authenticated_session() {
+        Ok(Some(session)) => Some(session),
+        Ok(None) => return Err("请先连接绘图姬账号".into()),
+        Err(DesktopSessionError::Network) if auth::has_stored_session()? => None,
+        Err(DesktopSessionError::Network) => return Err("账号服务当前不可达".into()),
+        Err(DesktopSessionError::Service(message)) => return Err(message),
+    };
+    let Some(session) = session else { return cached_catalog(app_data_dir, installed_hashes); };
     let client = network_client()?;
-    let payload: WebsiteLoraList = parse_json(client.get(auth::api_url("/v1/lora-library")).bearer_auth(&session.token).send())?;
+    let payload: WebsiteLoraList = match parse_json(client.get(auth::api_url("/v1/lora-library")).bearer_auth(&session.token).send()) {
+        Ok(payload) => payload,
+        Err(online_error) => return cached_catalog(app_data_dir, installed_hashes).map_err(|cache_error| format!("{online_error}；{cache_error}")),
+    };
+    if let Err(error) = website_catalog_cache::store(app_data_dir, "loras", &payload) { eprintln!("{error}"); }
     Ok(payload.entries.into_iter().filter_map(|entry| {
         let example_paths = website_media::cache_images(&client, &session.token, app_data_dir, "loras", &entry.examples, force_refresh);
+        to_view(entry, installed_hashes, example_paths)
+    }).collect())
+}
+
+/** 网络不可用时读取最近一次成功 LoRA 目录，并按当前本机哈希重新计算安装状态。 */
+fn cached_catalog(app_data_dir: &Path, installed_hashes: &HashSet<String>) -> Result<Vec<crate::models::DesktopWebsiteLoraView>, String> {
+    let payload: WebsiteLoraList = website_catalog_cache::load(app_data_dir, "loras")?;
+    Ok(payload.entries.into_iter().filter_map(|entry| {
+        let example_paths = website_media::cached_image_paths(app_data_dir, "loras", &entry.examples);
         to_view(entry, installed_hashes, example_paths)
     }).collect())
 }

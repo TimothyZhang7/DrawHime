@@ -1,14 +1,12 @@
 /**
  * 本文件实现桌面底模与 LoRA 仓库的合并卡片、详情、下载状态和本机导入界面。
  */
-import type { DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopWebsiteLoraInstallProgress, DesktopWebsiteLoraView, DesktopWebsiteModelView } from "@drawhime/contracts";
+import type { DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopWebsiteLoraInstallProgress, DesktopWebsiteLoraView, DesktopWebsiteModelInstallProgress, DesktopWebsiteModelView } from "@drawhime/contracts";
 import { ArrowLeft, CheckCircle2, ChevronRight, Copy, Database, Download, FolderCog, HardDrive, Image, Layers3, LoaderCircle, PackageOpen, Plus, RefreshCw, Search, ShieldCheck, X } from "lucide-react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useMemo, useState, type ReactNode } from "react";
 import { importDesktopLocalLora, importDesktopLocalModel } from "./desktop-api";
-
-type ResourceItem = DesktopResourceCatalogView["resources"][number];
 
 /** 以首图本机路径索引同一仓库条目的全部示例图，现有卡片接口无需暴露远端媒体地址。 */
 const repositoryExamplePaths = new Map<string, string[]>();
@@ -23,8 +21,6 @@ type ModelRepositoryEntry = {
   coverPath: string | null;
   local: DesktopLocalModelView | null;
   website: DesktopWebsiteModelView | null;
-  groupId: string | null;
-  resources: ResourceItem[];
 };
 
 type LoraRepositoryEntry = {
@@ -38,27 +34,33 @@ type LoraRepositoryEntry = {
   website: DesktopWebsiteLoraView | null;
 };
 
-/** 合并主站底模、签名安装资源和本机登记记录，避免同一模型重复展示。 */
-export function ModelRepositoryPage({ models, websiteModels, jobs, catalog, downloadProgress, installProgress, accountConnected, modelRoot, busyGroupId, onRefresh, onInstallGroup, onImported, onOpenSettings, onError }: { models: DesktopLocalModelView[]; websiteModels: DesktopWebsiteModelView[]; jobs: DesktopLocalJobView[]; catalog: DesktopResourceCatalogView | null; downloadProgress: Record<string, DesktopResourceDownloadView>; installProgress: Record<string, DesktopResourceInstallView>; accountConnected: boolean; modelRoot: string; busyGroupId: string | null; onRefresh: () => void; onInstallGroup: (groupId: string, resourceIds: string[]) => void; onImported: (model: DesktopLocalModelView) => void; onOpenSettings: () => void; onError: (message: string) => void }) {
-  const entries = useMemo(() => mergeModelEntries(models, websiteModels, catalog), [models, websiteModels, catalog]);
+/** 合并主站在线目录与本机登记记录；签名依赖清单不参与仓库外显和安装。 */
+export function ModelRepositoryPage({ models, websiteModels, jobs, websiteProgress, accountConnected, modelRoot, onRefresh, onInstallWebsite, onImported, onOpenSettings, onError }: { models: DesktopLocalModelView[]; websiteModels: DesktopWebsiteModelView[]; jobs: DesktopLocalJobView[]; websiteProgress: Record<string, DesktopWebsiteModelInstallProgress>; accountConnected: boolean; modelRoot: string; onRefresh: () => void; onInstallWebsite: (modelId: string) => void; onImported: (model: DesktopLocalModelView) => void; onOpenSettings: () => void; onError: (message: string) => void }) {
+  const entries = useMemo(() => mergeModelEntries(models, websiteModels), [models, websiteModels]);
   const [query, setQuery] = useState("");
   const [localOnly, setLocalOnly] = useState(false);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const selected = entries.find((entry) => entry.key === selectedKey) || null;
   const filtered = entries.filter((entry) => (!localOnly || Boolean(entry.local?.available)) && searchable(`${entry.displayName} ${entry.description} ${entry.familyName} ${entry.fileName}`, query));
-  if (selected) return <ModelDetail entry={selected} jobs={jobs} modelRoot={modelRoot} busy={busyGroupId === selected.groupId} progress={modelGroupProgress(selected.resources, downloadProgress, installProgress)} onBack={() => setSelectedKey(null)} onInstall={() => selected.groupId && onInstallGroup(selected.groupId, selected.resources.map((resource) => resource.id))} onOpenSettings={onOpenSettings} />;
+  if (selected) {
+    const directProgress = selected.website ? websiteProgress[selected.website.id] : undefined;
+    const progress = websiteModelProgress(directProgress);
+    const busy = Boolean(directProgress && ["downloading", "verifying", "installing"].includes(directProgress.status));
+    return <ModelDetail entry={selected} jobs={jobs} modelRoot={modelRoot} busy={busy} progress={progress} onBack={() => setSelectedKey(null)} onInstall={() => selected.website && onInstallWebsite(selected.website.id)} onOpenSettings={onOpenSettings} />;
+  }
   return <div className="desktop-page repository-page">
     <RepositoryToolbar title="底模仓库" count={filtered.length} query={query} localOnly={localOnly} accountConnected={accountConnected} onQuery={setQuery} onLocalOnly={setLocalOnly} onRefresh={onRefresh} onImport={() => setImportOpen(true)} />
     {!accountConnected && <RepositoryHint text="连接绘图姬账号后会同步网页底模的封面、说明和推荐参数；已签名安装资源与本地模型仍可正常管理。" />}
     {filtered.length ? <section className="repository-grid">{filtered.map((entry) => {
-      const progress = modelGroupProgress(entry.resources, downloadProgress, installProgress);
-      const installable = Boolean(entry.groupId && entry.resources.length);
+      const directProgress = entry.website ? websiteProgress[entry.website.id] : undefined;
+      const progress = websiteModelProgress(directProgress);
+      const directInstallable = Boolean(entry.website?.download);
+      const directBusy = Boolean(directProgress && ["downloading", "verifying", "installing"].includes(directProgress.status));
       const local = Boolean(entry.local?.available);
-      const byteSize = entry.resources.length ? entry.resources.reduce((total, resource) => total + resource.byteSize, 0) : entry.local?.byteSize || 0;
-      const missingBytes = entry.resources.filter((resource) => !resource.installed).reduce((total, resource) => total + resource.byteSize, 0);
-      const subtitle = local ? `${entry.familyName} · ${formatBytes(byteSize)}` : installable ? `${entry.familyName} · 需下载 ${formatBytes(missingBytes)}` : `${entry.familyName} · ${formatBytes(byteSize)}`;
-      return <RepositoryCard key={entry.key} title={entry.displayName} subtitle={subtitle} description={entry.description} coverPath={entry.coverPath} fallback="MODEL" secondaryTag={entry.website ? "主站" : entry.groupId ? "签名资源" : entry.familyName} onOpen={() => setSelectedKey(entry.key)} action={local ? { kind: "local", label: "已安装", disabled: true, onClick: () => undefined } : installable ? { kind: "download", label: busyGroupId === entry.groupId ? progress.label : "下载并安装", disabled: Boolean(busyGroupId), loading: busyGroupId === entry.groupId, onClick: () => onInstallGroup(entry.groupId!, entry.resources.map((resource) => resource.id)) } : { kind: "view", label: "查看详情", disabled: false, onClick: () => setSelectedKey(entry.key) }} progress={progress.percent} />;
+      const byteSize = entry.website?.download?.byteSize || entry.local?.byteSize || 0;
+      const subtitle = local ? `${entry.familyName} · ${formatBytes(byteSize)}` : directInstallable ? `${entry.familyName} · 需下载 ${formatBytes(byteSize)}` : `${entry.familyName} · ${formatBytes(byteSize)}`;
+      return <RepositoryCard key={entry.key} title={entry.displayName} subtitle={subtitle} description={entry.description} coverPath={entry.coverPath} fallback="MODEL" secondaryTag={entry.website ? "主站" : entry.familyName} onOpen={() => setSelectedKey(entry.key)} action={local ? { kind: "local", label: "已安装", disabled: true, onClick: () => undefined } : directInstallable ? { kind: "download", label: directBusy ? progress.label : "下载并安装", disabled: directBusy, loading: directBusy, onClick: () => onInstallWebsite(entry.website!.id) } : { kind: "view", label: "查看详情", disabled: false, onClick: () => setSelectedKey(entry.key) }} progress={progress.percent} />;
     })}</section> : <RepositoryEmpty text={query || localOnly ? "没有符合当前筛选条件的底模" : "当前仓库还没有可展示的底模"} />}
     {importOpen && <ModelImportDialog onClose={() => setImportOpen(false)} onImported={(model) => { onImported(model); setImportOpen(false); }} onError={onError} />}
   </div>;
@@ -101,10 +103,11 @@ function ModelDetail({ entry, jobs, modelRoot, busy, progress, onBack, onInstall
   const local = Boolean(entry.local?.available);
   const website = entry.website;
   const runtimeFormat = website?.runtimeFormat || entry.local?.workflowKind || "Anima";
-  const missingBytes = entry.resources.filter((resource) => !resource.installed).reduce((total, resource) => total + resource.byteSize, 0);
+  const missingBytes = website?.download?.byteSize || 0;
+  const installable = Boolean(website?.download);
   const relatedJobs = jobs.filter((job) => entry.local ? job.modelId === entry.local.id : job.modelDisplayName === entry.displayName);
   const examples = website?.examplePaths.length ? website.examplePaths : relatedJobs.flatMap((job) => job.artifact ? [job.artifact.path] : []).slice(0, 12);
-  return <div className="desktop-page repository-detail"><button className="repository-back" onClick={onBack}><ArrowLeft />返回底模仓库</button><section className="repository-detail-hero"><RepositoryCover path={entry.coverPath} fallback="MODEL" /><div className="repository-detail-summary"><div className="repository-detail-tags">{local && <b>已安装</b>}<i>{entry.familyName}</i>{runtimeFormat.toLocaleLowerCase() !== entry.familyName.toLocaleLowerCase() && <i>{runtimeFormat}</i>}</div><h1>{entry.displayName}</h1><p>{entry.description}</p><div className="repository-detail-actions">{local ? <button disabled><CheckCircle2 />已安装，可直接生成</button> : entry.groupId ? <button className="primary" disabled={busy} onClick={onInstall}>{busy ? <LoaderCircle className="spin" /> : <Download />}{busy ? progress.label : `下载并安装 · ${formatBytes(missingBytes)}`}</button> : <button onClick={onOpenSettings}><FolderCog />设置模型目录</button>}</div>{progress.percent !== null && <div className="repository-detail-progress"><i style={{ width: `${progress.percent}%` }} /><span>{progress.label} · {progress.percent}%</span></div>}</div></section><section className="repository-detail-grid"><article><header><ShieldCheck /><strong>模型信息</strong></header><dl><InfoRow label="模型系列" value={entry.familyName} /><InfoRow label="文件名称" value={entry.fileName} /><InfoRow label="本机状态" value={local ? "文件校验通过" : entry.groupId ? "可从签名资源安装" : "仅提供仓库信息"} /><InfoRow label="待下载" value={local ? "无需下载" : entry.groupId ? formatBytes(missingBytes) : "未提供安装资源"} /><InfoRow label="存储目录" value={modelRoot} /></dl></article><article><header><HardDrive /><strong>推荐参数</strong></header><dl><InfoRow label="步数" value={String(website?.parameters.steps ?? "-")} /><InfoRow label="CFG" value={String(website?.parameters.cfg ?? "-")} /><InfoRow label="采样器" value={website?.parameters.sampler || "-"} /><InfoRow label="调度器" value={website?.parameters.scheduler || "-"} /><InfoRow label="最大边长" value={website?.parameters.maxEdge ? `${website.parameters.maxEdge}px` : "-"} /></dl></article></section><RepositoryExamples paths={examples} title="模型示例" /><RelatedJobs jobs={relatedJobs} title="使用该模型的任务" />{website?.usageGuide && <section className="repository-detail-copy"><h3>使用说明</h3><p>{website.usageGuide}</p></section>}{website?.sourceLinks.length ? <section className="repository-detail-copy"><h3>模型来源</h3><div className="repository-source-list">{website.sourceLinks.map((source) => <button key={source.url} onClick={() => void navigator.clipboard.writeText(source.url)}><Copy />复制 {source.label}</button>)}</div></section> : null}</div>;
+  return <div className="desktop-page repository-detail"><button className="repository-back" onClick={onBack}><ArrowLeft />返回底模仓库</button><section className="repository-detail-hero"><RepositoryCover path={entry.coverPath} fallback="MODEL" /><div className="repository-detail-summary"><div className="repository-detail-tags">{local && <b>已安装</b>}<i>{entry.familyName}</i>{runtimeFormat.toLocaleLowerCase() !== entry.familyName.toLocaleLowerCase() && <i>{runtimeFormat}</i>}</div><h1>{entry.displayName}</h1><p>{entry.description}</p><div className="repository-detail-actions">{local ? <button disabled><CheckCircle2 />已安装，可直接生成</button> : installable ? <button className="primary" disabled={busy} onClick={onInstall}>{busy ? <LoaderCircle className="spin" /> : <Download />}{busy ? progress.label : `下载并安装 · ${formatBytes(missingBytes)}`}</button> : <button onClick={onOpenSettings}><FolderCog />设置模型目录</button>}</div>{progress.percent !== null && <div className="repository-detail-progress"><i style={{ width: `${progress.percent}%` }} /><span>{progress.label} · {progress.percent}%</span></div>}</div></section><section className="repository-detail-grid"><article><header><ShieldCheck /><strong>模型信息</strong></header><dl><InfoRow label="模型系列" value={entry.familyName} /><InfoRow label="文件名称" value={entry.fileName} /><InfoRow label="本机状态" value={local ? "文件校验通过" : website?.download ? "可从主站安装" : "仅提供仓库信息"} /><InfoRow label="待下载" value={local ? "无需下载" : installable ? formatBytes(missingBytes) : "未提供安装资源"} /><InfoRow label="存储目录" value={modelRoot} /></dl></article><article><header><HardDrive /><strong>推荐参数</strong></header><dl><InfoRow label="步数" value={String(website?.parameters.steps ?? "-")} /><InfoRow label="CFG" value={String(website?.parameters.cfg ?? "-")} /><InfoRow label="采样器" value={website?.parameters.sampler || "-"} /><InfoRow label="调度器" value={website?.parameters.scheduler || "-"} /><InfoRow label="最大边长" value={website?.parameters.maxEdge ? `${website.parameters.maxEdge}px` : "-"} /></dl></article></section><RepositoryExamples paths={examples} title="模型示例" /><RelatedJobs jobs={relatedJobs} title="使用该模型的任务" />{website?.usageGuide && <section className="repository-detail-copy"><h3>使用说明</h3><p>{website.usageGuide}</p></section>}{website?.sourceLinks.length ? <section className="repository-detail-copy"><h3>模型来源</h3><div className="repository-source-list">{website.sourceLinks.map((source) => <button key={source.url} onClick={() => void navigator.clipboard.writeText(source.url)}><Copy />复制 {source.label}</button>)}</div></section> : null}</div>;
 }
 
 function LoraDetail({ entry, jobs, modelRoot, progress, onBack, onInstall }: { entry: LoraRepositoryEntry; jobs: DesktopLocalJobView[]; modelRoot: string; progress?: DesktopWebsiteLoraInstallProgress; onBack: () => void; onInstall: () => void }) {
@@ -154,22 +157,18 @@ function RepositoryDialog({ title, description, onClose, children }: { title: st
 function FileField({ label, value, onPick }: { label: string; value: string; onPick: () => void }) { return <label className="repository-file-field wide"><span>{label}</span><div><input readOnly value={value} placeholder="选择 .safetensors 文件" /><button onClick={onPick}>选择文件</button></div></label>; }
 function DialogActions({ busy, ready, onClose, onSubmit }: { busy: boolean; ready: boolean; onClose: () => void; onSubmit: () => void }) { return <footer className="repository-dialog-actions"><button onClick={onClose}>取消</button><button className="primary" disabled={!ready || busy} onClick={onSubmit}>{busy ? <LoaderCircle className="spin" /> : <Download />}{busy ? "正在校验并导入" : "确认导入"}</button></footer>; }
 
-function mergeModelEntries(models: DesktopLocalModelView[], websiteModels: DesktopWebsiteModelView[], catalog: DesktopResourceCatalogView | null): ModelRepositoryEntry[] {
+function mergeModelEntries(models: DesktopLocalModelView[], websiteModels: DesktopWebsiteModelView[]): ModelRepositoryEntry[] {
   // 本机缓存路径在列表和详情页之间稳定复用，坏图已由 Rust 核心逐张跳过。
   for (const website of websiteModels) if (website.coverPath) repositoryExamplePaths.set(website.coverPath, website.examplePaths.length ? website.examplePaths : [website.coverPath]);
-  const groups = new Map<string, ResourceItem[]>();
-  for (const resource of catalog?.resources || []) { const groupId = resource.modelRegistration?.groupId; if (groupId) groups.set(groupId, [...(groups.get(groupId) || []), resource]); }
   const usedLocal = new Set<string>();
-  const usedGroups = new Set<string>();
   const entries: ModelRepositoryEntry[] = websiteModels.map((website) => {
-    const local = models.find((item) => item.modelFileName.toLowerCase() === website.modelFileName.toLowerCase() || item.displayName.toLowerCase() === website.displayName.toLowerCase()) || null;
+    // 底模只按资源组或内容哈希绑定，禁止按可变标题和文件名猜测安装状态。
+    const local = models.find((item) => (website.resourceGroupId && item.resourceGroupId === website.resourceGroupId) || (website.download && item.modelSha256.toLowerCase() === website.download.sha256.toLowerCase())) || null;
     if (local) usedLocal.add(local.id);
-    const group = [...groups.entries()].find(([, resources]) => resources.some((resource) => resource.modelRegistration?.role === "primary" && (resource.fileName.toLowerCase() === website.modelFileName.toLowerCase() || resource.modelRegistration.displayName.toLowerCase() === website.displayName.toLowerCase()))) || null;
-    if (group) usedGroups.add(group[0]);
-    return { key: `web:${website.id}`, displayName: website.displayName, description: website.description, family: website.family, familyName: website.familyName, fileName: website.modelFileName, coverPath: website.coverPath, local, website, groupId: group?.[0] || null, resources: group?.[1] || [] };
+    return { key: `web:${website.id}`, displayName: website.displayName, description: website.description, family: website.family, familyName: website.familyName, fileName: website.modelFileName, coverPath: website.coverPath, local, website };
   });
-  for (const [groupId, resources] of groups) { if (usedGroups.has(groupId)) continue; const registration = resources[0]?.modelRegistration; if (!registration) continue; const local = models.find((item) => item.displayName.toLowerCase() === registration.displayName.toLowerCase()) || null; if (local) usedLocal.add(local.id); entries.push({ key: `group:${groupId}`, displayName: registration.displayName, description: "经过签名清单验证的底模资源，可直接下载并安装到当前模型目录。", family: registration.family, familyName: registration.family, fileName: resources.find((resource) => resource.modelRegistration?.role === "primary")?.fileName || "", coverPath: null, local, website: null, groupId, resources }); }
-  for (const local of models) { if (usedLocal.has(local.id)) continue; entries.push({ key: `local:${local.id}`, displayName: local.displayName, description: local.available ? "本机导入并完成文件校验的底模。" : "登记文件缺失或已经变化，请重新导入。", family: local.family, familyName: local.family, fileName: local.modelFileName, coverPath: null, local, website: null, groupId: null, resources: [] }); }
+  // 只有在线目录和用户本机导入记录可以外显，签名依赖清单不会形成第二套仓库。
+  for (const local of models) { if (usedLocal.has(local.id)) continue; entries.push({ key: `local:${local.id}`, displayName: local.displayName, description: local.available ? "本机导入并完成文件校验的底模。" : "登记文件缺失或已经变化，请重新导入。", family: local.family, familyName: local.family, fileName: local.modelFileName, coverPath: null, local, website: null }); }
   return entries.sort((left, right) => Number(Boolean(right.local?.available)) - Number(Boolean(left.local?.available)) || left.displayName.localeCompare(right.displayName, "zh-CN"));
 }
 
@@ -182,15 +181,12 @@ function mergeLoraEntries(loras: DesktopLocalLoraView[], websiteLoras: DesktopWe
   return entries.sort((left, right) => Number(Boolean(right.local?.available)) - Number(Boolean(left.local?.available)) || left.title.localeCompare(right.title, "zh-CN"));
 }
 
-function modelGroupProgress(resources: ResourceItem[], downloads: Record<string, DesktopResourceDownloadView>, installs: Record<string, DesktopResourceInstallView>): { percent: number | null; label: string } {
-  if (!resources.length) return { percent: null, label: "等待下载" };
-  const totalBytes = resources.reduce((total, resource) => total + resource.byteSize, 0);
-  const installedBytes = resources.filter((resource) => resource.installed).reduce((total, resource) => total + resource.byteSize, 0);
-  const installing = resources.find((resource) => ["verifying", "installing", "switching"].includes(installs[resource.id]?.status));
-  if (installing) return { percent: Math.round((installedBytes + installing.byteSize * installs[installing.id]!.progress / 100) / totalBytes * 100), label: "正在安装" };
-  const downloading = resources.find((resource) => ["queued", "downloading", "verifying"].includes(downloads[resource.id]?.status));
-  if (downloading) { const value = downloads[downloading.id]!; return { percent: Math.round((installedBytes + value.downloadedBytes) / totalBytes * 100), label: value.status === "verifying" ? "正在校验" : "正在下载" }; }
-  return { percent: installedBytes ? Math.round(installedBytes / totalBytes * 100) : null, label: installedBytes === totalBytes ? "安装完成" : `已复用 ${formatBytes(installedBytes)}` };
+/** 所有仓库底模均使用主站目录下载事件计算进度，不再依赖签名资源组。 */
+function websiteModelProgress(progress?: DesktopWebsiteModelInstallProgress): { percent: number | null; label: string } {
+  if (!progress) return { percent: null, label: "等待下载" };
+  const percent = Math.min(100, Math.round(progress.downloadedBytes / Math.max(1, progress.totalBytes) * 100));
+  const label = { downloading: "正在下载", verifying: "正在校验", installing: "正在安装", installed: "安装完成", failed: "安装失败" }[progress.status];
+  return { percent, label };
 }
 
 function searchable(value: string, query: string): boolean { return !query.trim() || value.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()); }

@@ -178,7 +178,7 @@ mod tests {
 
     #[test]
     fn environment_report_always_explains_unavailable_capabilities() {
-        let settings = DesktopSettings { theme_mode: "system".into(), font_scale: 1.1, dependency_source: "auto".into(), default_privacy: "private".into(), auto_upload: true, model_root: "models".into(), output_root: "outputs".into(), runtime_root: "runtime-not-installed".into(), upload_concurrency: 2, wifi_only: false, bandwidth_limit_kib: None };
+        let settings = DesktopSettings { theme_mode: "system".into(), font_scale: 1.1, default_privacy: "private".into(), auto_upload: true, model_root: "models".into(), output_root: "outputs".into(), runtime_root: "runtime-not-installed".into(), upload_concurrency: 2, wifi_only: false, bandwidth_limit_kib: None };
         let report = inspect_environment(&settings);
         assert!(!report.checked_at.is_empty());
         assert!(report.capabilities.model_management);

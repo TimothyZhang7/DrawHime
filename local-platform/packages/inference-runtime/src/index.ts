@@ -9,9 +9,8 @@ const HIGHRES_LORA = "anima-highres-aesthetic-boost.safetensors";
 const HIGHRES_STRENGTH = 0.8;
 const QUALITY_PREFIX = "masterpiece, best quality, score_7";
 const DEFAULT_NEGATIVE = "worst quality, low quality, score_1, score_2, score_3, artist name, blurry, distorted, bad anatomy, malformed hands, extra fingers";
-const BASE_MODELS = new Set(["anima-base-v1.0.safetensors", "anima_basev10.safetensors"]);
 const SUPPORTED_SAMPLERS = new Set(["er_sde", "euler", "euler_ancestral"]);
-const SUPPORTED_SCHEDULERS = new Set(["simple", "normal"]);
+const SUPPORTED_SCHEDULERS = new Set(["simple", "normal", "beta"]);
 
 /** Anima 生成请求。 */
 export interface AnimaGenerationInput {
@@ -116,10 +115,8 @@ export async function generateAnimaImage(input: AnimaGenerationInput): Promise<A
 
 /** 构建支持可选系统 LoRA 与用户 LoRA 串联的 Anima 生产工作流。 */
 export function buildAnimaWorkflow(input: AnimaGenerationInput): Record<string, unknown> {
-  const normalizedModel = input.modelFileName.toLowerCase();
-  const isBaseModel = BASE_MODELS.has(normalizedModel);
-  const isPremergedTurbo = normalizedModel.includes("turbo");
-  const systemTurboLoraEnabled = isBaseModel && input.systemTurboLoraEnabled !== false;
+  // 系统 LoRA 是否加载完全由模型目录配置决定，禁止再按文件名推断底模能力。
+  const systemTurboLoraEnabled = input.systemTurboLoraEnabled === true;
   const modelInput: [string, number] = systemTurboLoraEnabled ? ["4", 0] : ["1", 0];
   const clipInput: [string, number] = systemTurboLoraEnabled ? ["4", 1] : ["2", 0];
   const systemHighresLoraEnabled = input.systemHighresLoraEnabled !== false;
@@ -151,7 +148,7 @@ export function buildAnimaWorkflow(input: AnimaGenerationInput): Record<string, 
   }
   prompt["6"] = { class_type: "CLIPTextEncode", inputs: { text: positivePrompt, clip: activeClipInput } };
   prompt["7"] = { class_type: "CLIPTextEncode", inputs: { text: negativePrompt, clip: activeClipInput } };
-  prompt["9"] = { class_type: "KSampler", inputs: { model: activeModelInput, seed: normalizeSeed(input.seed), steps: normalizeSteps(input.steps, isPremergedTurbo ? 10 : 8), cfg: normalizeCfg(input.cfg), sampler_name: normalizeSampler(input.samplerName), scheduler: normalizeScheduler(input.scheduler), positive: ["6", 0], negative: ["7", 0], latent_image: ["8", 0], denoise: 1 } };
+  prompt["9"] = { class_type: "KSampler", inputs: { model: activeModelInput, seed: normalizeSeed(input.seed), steps: normalizeSteps(input.steps, 8), cfg: normalizeCfg(input.cfg), sampler_name: normalizeSampler(input.samplerName), scheduler: normalizeScheduler(input.scheduler), positive: ["6", 0], negative: ["7", 0], latent_image: ["8", 0], denoise: 1 } };
   return prompt;
 }
 

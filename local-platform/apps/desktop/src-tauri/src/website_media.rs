@@ -2,13 +2,13 @@
 
 use crate::auth;
 use reqwest::blocking::Client;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{fs::{self, File}, io::{Read, Write}, path::{Path, PathBuf}};
 
 const MAXIMUM_COVER_BYTES: u64 = 12 * 1024 * 1024;
 
 /** 网站仓库条目返回的受保护示例图片引用。 */
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WebsiteImageRef { pub id: String, pub content_url: String }
 
@@ -27,6 +27,18 @@ pub fn cache_images(client: &Client, token: &str, app_data_dir: &Path, namespace
         paths.extend(resolved.into_iter().flatten().map(|path| path.to_string_lossy().into_owned()));
     }
     paths
+}
+
+/** 离线目录只返回已经完整落盘的示例图，缺失图片不会阻断其余仓库条目。 */
+pub fn cached_image_paths(app_data_dir: &Path, namespace: &str, images: &[WebsiteImageRef]) -> Vec<String> {
+    images.iter().filter_map(|image| {
+        let safe_id: String = image.id.chars().filter(|value| value.is_ascii_alphanumeric() || *value == '-').collect();
+        if safe_id.is_empty() { return None; }
+        ["webp", "png", "jpg"].into_iter()
+            .map(|extension| app_data_dir.join("catalog-covers").join(namespace).join(format!("{safe_id}.{extension}")))
+            .find(|path| path.metadata().is_ok_and(|metadata| metadata.is_file() && metadata.len() > 0))
+            .map(|path| path.to_string_lossy().into_owned())
+    }).collect()
 }
 
 fn cache_cover_inner(client: &Client, token: &str, app_data_dir: &Path, namespace: &str, image: &WebsiteImageRef, force_refresh: bool) -> Result<PathBuf, String> {

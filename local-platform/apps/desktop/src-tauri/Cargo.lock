@@ -939,7 +939,7 @@ dependencies = [
 
 [[package]]
 name = "drawhime-desktop"
-version = "0.1.23"
+version = "0.1.24"
 dependencies = [
  "base64 0.22.1",
  "chrono",

@@ -255,7 +255,7 @@ def run_training(job_id: str, payload: dict[str, Any]) -> None:
                 if current_state.get("status") == "cancelled":
                     return
                 blocks_to_swap = next((int(item.split("=", 1)[1]) for item in command if item.startswith("--blocks_to_swap=")), 18)
-                current_state.update({"status": "running", "progress": 2, "currentEpoch": 0, "metrics": {"command": command, "runtimeProfile": "anima-p40-fast-v1", "blocksToSwap": blocks_to_swap, "memoryCacheEnabled": True, "textEncoderCacheEnabled": not payload["parameters"]["shuffleCaption"]}, "errorMessage": None})
+                current_state.update({"status": "running", "progress": 2, "currentEpoch": 0, "metrics": {"command": command, "runtimeProfile": "anima-p40-stable-v2", "blocksToSwap": blocks_to_swap, "memoryCacheEnabled": True, "textEncoderCacheEnabled": not payload["parameters"]["shuffleCaption"]}, "errorMessage": None})
                 process = subprocess.Popen(command, cwd=SD_SCRIPTS, env=environment, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, start_new_session=True)
                 processes[job_id] = process
                 current_state["pid"] = process.pid

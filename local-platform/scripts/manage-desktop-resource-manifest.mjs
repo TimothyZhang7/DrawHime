@@ -77,7 +77,12 @@ async function normalizeManifest(options) {
   if (!Array.isArray(raw.resources)) throw new Error("资源清单缺少 resources 数组");
   const resources = raw.resources.map((resource) => {
     if (!Array.isArray(resource.sources)) return resource;
-    return { ...resource, sources: resource.sources.filter((source) => source.kind === "mirror") };
+    const source = resource.sources.find((candidate) => {
+      try { const url = new URL(candidate.url); return candidate.kind === "mirror" && url.protocol === "https:" && url.hostname === "www.xanime.ink"; }
+      catch { return false; }
+    });
+    if (!source) throw new Error(`资源 ${resource.id || "未知"} 没有可保留的主站镜像`);
+    return { ...resource, sources: [source] };
   });
   const minimumExpiry = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
   const currentExpiry = new Date(raw.expiresAt);
@@ -89,13 +94,14 @@ async function normalizeManifest(options) {
   process.stdout.write(`已规范化资源清单：${outputPath}\n`);
 }
 
-/** 在现有签名载荷基础上幂等补齐可选 Anima 底模及其共享文本编码器和 VAE。 */
+/** 签名依赖清单只保留初始化必需的 Anima Base；其他底模由在线仓库目录分发。 */
 async function addAnimaModels(options) {
   const payloadPath = requiredPath(options, "payload");
   const outputPath = requiredPath(options, "output");
   const raw = JSON.parse(await readFile(payloadPath, "utf8"));
   if (!Array.isArray(raw.resources)) throw new Error("资源清单缺少 resources 数组");
-  const groups = animaModelDefinitions().map((model) => model.groupId);
+  const groups = animaModelGroupIds();
+  // 无论输入清单来自哪个历史版本，都先移除全部仓库底模资源组，再只加入初始化底模。
   const retained = raw.resources.filter((resource) => !groups.includes(resource.modelRegistration?.groupId));
   const resources = [...retained, ...animaModelDefinitions().flatMap(buildAnimaModelResources)];
   const minimumExpiry = new Date(Date.now() + 180 * 24 * 60 * 60 * 1000);
@@ -105,17 +111,25 @@ async function addAnimaModels(options) {
   if (!parsed.success) throw new Error(`补齐 Anima 模型后的资源清单未通过契约校验：${parsed.error.issues[0]?.message || "未知字段错误"}`);
   await mkdir(dirname(outputPath), { recursive: true });
   await writeFile(outputPath, `${JSON.stringify(parsed.data, null, 2)}\n`, "utf8");
-  process.stdout.write(`已补齐桌面 Anima 底模：${animaModelDefinitions().length} 个模型组合 · ${parsed.data.resources.length} 项资源\n`);
+  process.stdout.write(`已收缩桌面初始化底模：${animaModelDefinitions().length} 个模型组合 · ${parsed.data.resources.length} 项资源\n`);
 }
 
-/** 返回已完成文件大小与 SHA-256 校验、由主站镜像分发的桌面 Anima 底模定义。 */
+/** 返回所有曾进入签名清单的底模组，用于确定性移除旧的可选仓库资源。 */
+function animaModelGroupIds() {
+  return [
+    "model.anima-base-v10",
+    "model.wai-anima-v10",
+    "model.anime-bulldozer-anima",
+    "model.miaomiao-realskin-anima11",
+    "model.miaomiao-3d-harem-anima-lh3d10",
+    "model.miaomiao-harem-anima8step10",
+  ];
+}
+
+/** 返回已完成大小和 SHA-256 校验、由主站镜像分发的初始化底模定义。 */
 function animaModelDefinitions() {
   return [
-    { groupId: "model.anima-base-v10", id: "anima-base-v10", displayName: "Anima Base v1.0", version: "anima-base-v1.0", fileName: "anima-base-v1.0.safetensors", byteSize: 4_182_218_328, sha256: "bd43b7cffe1ed1153d9c41e7beb2f18cb1273eafbaa3af3edd6a173dc90a006e" },
-    { groupId: "model.anime-bulldozer-anima", id: "anime-bulldozer-anima", displayName: "Anime Bulldozer Anima", version: "civitai-3047288", fileName: "animeBulldozer_anima.safetensors", byteSize: 4_182_218_504, sha256: "8e279f111ed7e7ea214ea61850e002f700cce55a8cd027675796773089b3c739" },
-    { groupId: "model.miaomiao-realskin-anima11", id: "miaomiao-realskin-anima11", displayName: "MiaoMiao RealSkin Anima 1.1", version: "civitai-3071702", fileName: "miaomiaoRealskin_anima11.safetensors", byteSize: 4_182_218_328, sha256: "d33247d48a9c15a872aef963940fc87362f925e3e087365810ad747042fcc454" },
-    { groupId: "model.miaomiao-3d-harem-anima-lh3d10", id: "miaomiao-3d-harem-anima-lh3d10", displayName: "MiaoMiao 3D Harem Anima LH3D 1.0", version: "civitai-3074791", fileName: "miaomiao3DHarem_animaLH3D10.safetensors", byteSize: 4_182_218_328, sha256: "0707cbe8deed6c858a6ba8dfbcfe2006e3a4fd44c099aafd048400fdec1866dd" },
-    { groupId: "model.miaomiao-harem-anima8step10", id: "miaomiao-harem-anima8step10", displayName: "MiaoMiao Harem Anima 8-Step 1.0", version: "civitai-3125933", fileName: "miaomiaoHarem_anima8Step10.safetensors", byteSize: 4_182_218_328, sha256: "10760718321f82577f648893416655fb979a8026cdd8977fd74a9ac998e1314a" },
+    { groupId: "model.anima-base-v10", id: "anima-base-v10", displayName: "Anima Base v1.0", version: "anima-base-v1.0", fileName: "anima-base-v1.0.safetensors", byteSize: 4_182_218_328, sha256: "bd43b7cffe1ed1153d9c41e7beb2f18cb1273eafbaa3af3edd6a173dc90a006e", required: true },
   ];
 }
 
@@ -133,8 +147,8 @@ function buildAnimaModelResources(model) {
       byteSize: component.byteSize, installedSize: component.byteSize, sha256: component.sha256, archive: "raw", rootDirectory: null,
       installDirectory: component.installDirectory,
       modelRegistration: { groupId: model.groupId, displayName: model.displayName, family: "anima", workflowKind: "anima", role: component.role },
-      required: false,
-      // 所有可选底模与共享组件只从主站镜像下载，避免第三方域名、限流和地区连通性差异。
+      required: model.required === true,
+      // 初始化底模与共享组件只从主站镜像下载，其他底模不进入客户端依赖清单。
       sources: [{ kind: "mirror", url: `https://www.xanime.ink/local-model-api/v1/desktop/resources/${id}/content` }],
     };
   });

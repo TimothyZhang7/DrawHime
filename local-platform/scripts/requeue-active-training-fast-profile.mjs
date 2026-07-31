@@ -2,10 +2,11 @@
  * 本脚本把生产中的活动 LoRA 训练安全迁移到半小时快速参数，并为每个原身份重新建立独立计费预留。
  */
 import { PrismaClient } from "@prisma/client";
+import { resolveTrainingCycles } from "@drawhime/contracts";
 
 const database = new PrismaClient();
 const applyChanges = process.argv.includes("--apply");
-const profileVersion = 1;
+const profileVersion = 2;
 const activeStatuses = ["RESERVING", "READY", "RUNNING", "EVALUATING"];
 
 try {
@@ -25,7 +26,7 @@ try {
   if (!applyChanges) process.exit(0);
 
   for (const job of candidates) await migrateJob(job);
-  console.log(JSON.stringify({ migratedCount: candidates.length, profile: "anima-p40-fast-v1" }));
+  console.log(JSON.stringify({ migratedCount: candidates.length, profile: "anima-p40-stable-v2" }));
 } finally {
   await database.$disconnect();
 }
@@ -93,11 +94,10 @@ async function migrateJob(job) {
   ]);
 }
 
-/** 根据图片数控制总图片遍历量，保留用户选择的 Rank、Alpha、种子、触发词和模型价格版本。 */
+/** 根据图片数把总遍历量提高到至少 320，保留用户归属、触发词、底模和计费版本。 */
 function createFastParameters(parameters, assetCount, sourceJobId, modelDefaultsValue) {
   const modelDefaults = readObject(modelDefaultsValue);
-  const epochs = assetCount >= 80 ? 1 : assetCount >= 40 ? 2 : 4;
-  const repeats = Math.max(1, Math.round(160 / Math.max(5, assetCount) / epochs));
+  const { epochs, repeats } = resolveTrainingCycles(Math.max(5, assetCount), 320);
   const rank = Number(parameters.rank);
   const imagePasses = assetCount * epochs * repeats;
   const workload = imagePasses * Math.pow(768 / 1024, 2) * (0.75 + rank / 64);
@@ -119,7 +119,7 @@ function createFastParameters(parameters, assetCount, sourceJobId, modelDefaults
     pricingUnits,
     estimatedPriceCny: (unitPrice * pricingUnits).toFixed(2),
     fastProfileVersion: profileVersion,
-    runtimeProfile: "anima-p40-fast-v1",
+    runtimeProfile: "anima-p40-stable-v2",
     targetImagePasses: imagePasses,
     requeuedFromJobId: sourceJobId,
   };

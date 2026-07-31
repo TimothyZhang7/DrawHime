@@ -61,14 +61,9 @@ pnpm --filter @drawhime/desktop run tauri:dev
 
 ## 模型
 
-仓库登记 Anima Base、Anime Bulldozer、MiaoMiao RealSkin、MiaoMiao 3D Harem、MiaoMiao Harem 8-Step 与 WAI Anima 的工作流预设，但不分发模型权重。使用者需要遵守各模型来源页面的许可条款，自行下载文件并校验目录中登记的 SHA-256。
+底模与 LoRA 仓库由 API 在线目录统一维护，桌面客户端不内置仓库条目。客户端只从主站 `/data` 对应的受控 Range 端点下载文件，并在本机复核目录声明的大小和 SHA-256；断网时只读最近一次成功的目录与封面缓存，不连接模型来源站点或 GPU Runtime。
 
-生产底模同步脚本从私有 `CIVITAI_API_TOKEN` 或 `CIVITAI_API_TOKEN_FILE` 读取登录令牌，并执行断点续传、原子替换和哈希校验；个别已登记模型也可使用与 Civitai 官方 SHA-256 完全一致的公开镜像：
-
-```powershell
-pnpm run sync:anima-models
-pnpm run sync:anima-models -- --check
-```
+当前仓库只接受经过结构校验的 Anima 完整底模。登录用户可在网页分片上传底模，临时分片和正式文件都写入主站 `DESKTOP_RESOURCE_STORAGE_ROOT`；生产环境强制该目录位于 `/data`。来源链接只用于许可与作者页面展示，不参与客户端下载。
 
 ## 部署
 

@@ -1,5 +1,5 @@
 /**
- * 本文件从固定官方来源下载并校验 WD14 与 ONNX Runtime，构建可进入签名资源清单的 Windows Captioner ZIP。
+ * 本文件在隔离运维环境获取固定上游版本并完成校验，产物发布到主站 data 盘后才能进入客户端签名清单。
  */
 import { createHash } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";

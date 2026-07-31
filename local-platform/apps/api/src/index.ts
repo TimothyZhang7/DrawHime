@@ -32,6 +32,7 @@ import { createHash, randomBytes } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import { registerLoraLibraryRoutes } from "./lora-library.js";
 import { registerModelLibraryRoutes } from "./model-library.js";
+import { registerModelUploadRoutes } from "./model-upload.js";
 import { findLoraSelectionConflict } from "./lora-selection.js";
 import { registerAdminRuntimeRoutes } from "./admin-runtime.js";
 import { registerBotRoutes } from "./bot-routes.js";
@@ -103,6 +104,7 @@ startService({
     registerDesktopGalleryRoutes(router, findLocalSessionRecord);
     registerLoraLibraryRoutes(router, findLocalSessionRecord);
     registerModelLibraryRoutes(router, findLocalSessionRecord);
+    registerModelUploadRoutes(router, findLocalSessionRecord);
     registerAdminRuntimeRoutes(router, findLocalSessionRecord);
     registerBotRoutes(router, { listModels: listInferenceModels, createJob: createInferenceJob, handleError: sendInferenceError });
     registerTrainingRoutes(router, findLocalSessionRecord);
@@ -523,9 +525,11 @@ async function createInferenceJob(identity: { id: string; subject: string }, inp
   const selectedLoras = input.loraVersionIds.length > 0 ? await database.loraVersion.findMany({
     // 私有 LoRA 只允许作者提交；公开 LoRA 才能被其他用户用于生成，并固化类型和触发词快照供 Worker 实际注入。
     where: { id: { in: input.loraVersionIds }, status: "ACTIVE", loraEntry: { status: "ACTIVE", modelFamilyId: workflow.modelVersion.familyId, OR: [{ isPrivate: false }, { ownerIdentityId: identity.id }] } },
-    include: { loraEntry: { select: { title: true, type: true, triggerWords: true } } },
+    include: { loraEntry: { select: { title: true, type: true, triggerWords: true } }, trainingOutputs: { where: { status: "SUCCEEDED" }, orderBy: { completedAt: "desc" }, take: 1, select: { baseModelVersionId: true } } },
   }) : [];
   if (selectedLoras.length !== input.loraVersionIds.length) throw new ApiOperationError(400, "lora_version_invalid", "所选 LoRA 不存在、已停用或与主模型系列不匹配");
+  const incompatibleTrainedLora = selectedLoras.find((lora) => lora.trainingOutputs[0] && lora.trainingOutputs[0].baseModelVersionId !== workflow.modelVersionId);
+  if (incompatibleTrainedLora) throw new ApiOperationError(400, "trained_lora_base_model_mismatch", "训练生成的 LoRA 只能与训练时的精确底模组合使用");
   const defaults = readObject(workflow.modelVersion.defaultParameters);
   // 内容哈希是实际 GPU 文件身份；不同版本 ID 指向同一内容，或与底模内置 LoRA 相同，都只能加载一次。
   const loraConflict = findLoraSelectionConflict(selectedLoras.map((lora) => lora.sha256), defaults.systemLoraSha256);
@@ -546,6 +550,7 @@ async function createInferenceJob(identity: { id: string; subject: string }, inp
   });
   // 任务参数必须固化归一后的真实强度，Bot 等未显式传值的调用不能只在展示快照里保存默认强度。
   const normalizedLoraStrengths = Object.fromEntries(loraSelections.map((selection) => [selection.loraVersionId, selection.strength]));
+  const samplingOverrides = normalizeSamplingOverrides(input.samplingOverrides, defaults);
   if (input.promptEnhancement && defaults.promptEnhancementEnabled !== true) throw new ApiOperationError(400, "prompt_enhancement_disabled", "当前模型未开放 AI 提示增强");
   const productCode = String(defaults.productCode || "");
   const pricingVersion = Number(defaults.pricingVersion || 0);
@@ -578,7 +583,7 @@ async function createInferenceJob(identity: { id: string; subject: string }, inp
         effectivePrompt: input.promptEnhancement ? null : input.prompt,
         // 正负提示词使用独立数据库字段，空白负面提示词归一为空，禁止混入正面提示词参数。
         negativePrompt: input.negativePrompt?.trim() || null,
-        parameters: { width: input.width, height: input.height, batchSize: input.batchSize, seed: input.seed, loraVersionIds: input.loraVersionIds, loraStrengths: normalizedLoraStrengths, loraSelections, sourceArtifactIds: input.sourceArtifactIds, promptEnhancement: input.promptEnhancement, publishToGallery: input.publishToGallery, isPrivate: input.isPrivate, productCode, pricingVersion, submissionCooldownSeconds },
+        parameters: { width: input.width, height: input.height, batchSize: input.batchSize, seed: input.seed, samplingOverrides, loraVersionIds: input.loraVersionIds, loraStrengths: normalizedLoraStrengths, loraSelections, sourceArtifactIds: input.sourceArtifactIds, promptEnhancement: input.promptEnhancement, publishToGallery: input.publishToGallery, isPrivate: input.isPrivate, productCode, pricingVersion, submissionCooldownSeconds },
         stages: input.promptEnhancement ? { create: { sequence: 1, stageType: "PROMPT_ENHANCEMENT", status: "PENDING", inputJson: { format: "anima", promptLength: input.prompt.length } } } : undefined,
       },
     });
@@ -599,6 +604,23 @@ function normalizeLoraStrength(value: unknown, type: string): number {
   return ({ character: 1, style: 0.85, concept: 0.8, clothing: 0.85, pose: 0.7, other: 0.8 } as Record<string, number>)[type] ?? 0.8;
 }
 
+/** 校验高级采样覆盖值必须属于当前模型目录声明的选项，任务快照不接受客户端自创节点参数。 */
+function normalizeSamplingOverrides(input: InferenceJobCreateRequest["samplingOverrides"], defaults: Record<string, unknown>) {
+  if (!input) return null;
+  const allowedSamplers = readStringOptions(defaults.availableSamplers, String(defaults.sampler || ""));
+  const allowedSchedulers = readStringOptions(defaults.availableSchedulers, String(defaults.scheduler || ""));
+  if (!allowedSamplers.includes(input.sampler)) throw new ApiOperationError(400, "sampling_sampler_invalid", "当前模型不支持所选采样器");
+  if (!allowedSchedulers.includes(input.scheduler)) throw new ApiOperationError(400, "sampling_scheduler_invalid", "当前模型不支持所选调度器");
+  if (input.aspectAdjustedSteps > input.steps) throw new ApiOperationError(400, "sampling_steps_invalid", "极端画幅步数不能高于基础步数");
+  return { ...input };
+}
+
+/** 从模型配置读取允许项并去重，至少包含当前推荐值。 */
+function readStringOptions(value: unknown, fallback: string): string[] {
+  const configured = Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim()) : [];
+  return [...new Set([...configured, fallback].filter(Boolean))];
+}
+
 /** 从 LoRA 条目 JSON 中读取受控触发词快照，避免非字符串内容进入提示词。 */
 function readTriggerWords(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim()).slice(0, 32) : [];
@@ -608,7 +630,7 @@ function readTriggerWords(value: unknown): string[] {
 async function listInferenceLoras(viewerIdentityId: string, family?: string): Promise<InferenceLoraView[]> {
   const rows = await database.loraEntry.findMany({
     where: { deletedAt: null, status: "ACTIVE", OR: [{ isPrivate: false }, { ownerIdentityId: viewerIdentityId }], modelFamily: family ? { slug: family, status: "ACTIVE" } : { status: "ACTIVE" }, versions: { some: { status: "ACTIVE" } } },
-    include: { modelFamily: true, versions: { where: { status: "ACTIVE" }, orderBy: { createdAt: "desc" }, take: 1 } },
+    include: { modelFamily: true, versions: { where: { status: "ACTIVE" }, orderBy: { createdAt: "desc" }, take: 1, include: { trainingOutputs: { where: { status: "SUCCEEDED" }, orderBy: { completedAt: "desc" }, take: 1, select: { baseModelVersionId: true } } } } },
     orderBy: { createdAt: "desc" },
   });
   return rows.flatMap((entry) => entry.versions[0] ? [{
@@ -617,6 +639,7 @@ async function listInferenceLoras(viewerIdentityId: string, family?: string): Pr
     description: entry.description,
     type: entry.type.toLowerCase() as InferenceLoraView["type"],
     modelFamily: entry.modelFamily.slug,
+    baseModelVersionId: entry.versions[0].trainingOutputs[0]?.baseModelVersionId ?? null,
     fileName: entry.versions[0].fileName,
     sha256: entry.versions[0].sha256,
     triggerWords: Array.isArray(entry.triggerWords) ? entry.triggerWords.filter((value): value is string => typeof value === "string") : [],

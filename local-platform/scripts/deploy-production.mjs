@@ -176,10 +176,12 @@ function serviceOnlyProductionScript(serviceTarget, definition) {
     ? "pnpm run db:generate\npnpm run db:migrate:deploy"
     : "";
   const postBuildCommands = definition.prisma ? "pnpm run bootstrap:tag-translations\npnpm run bootstrap:anima" : "";
-  // 调度器增量发布必须同步负载互斥配置，避免只部署服务时继续沿用会饿死训练的旧值。
-  const schedulerEnvironmentCommands = serviceTarget === "scheduler"
-    ? "if grep -q '^GPU_WORKLOADS_SHARE_DEVICE=' .env; then sed -i 's/^GPU_WORKLOADS_SHARE_DEVICE=.*/GPU_WORKLOADS_SHARE_DEVICE=true/' .env; else echo 'GPU_WORKLOADS_SHARE_DEVICE=true' >> .env; fi"
-    : "";
+  // 调度器增量发布必须同步双卡租约配置，避免旧互斥值继续阻塞生图任务。
+  const serviceEnvironmentCommands = serviceTarget === "scheduler"
+    ? "if grep -q '^GPU_WORKLOADS_SHARE_DEVICE=' .env; then sed -i 's/^GPU_WORKLOADS_SHARE_DEVICE=.*/GPU_WORKLOADS_SHARE_DEVICE=false/' .env; else echo 'GPU_WORKLOADS_SHARE_DEVICE=false' >> .env; fi\nif grep -q '^INFERENCE_GPU_DEVICE_KEY=' .env; then sed -i 's/^INFERENCE_GPU_DEVICE_KEY=.*/INFERENCE_GPU_DEVICE_KEY=cuda:0/' .env; else echo 'INFERENCE_GPU_DEVICE_KEY=cuda:0' >> .env; fi\nif grep -q '^TRAINING_GPU_DEVICE_KEY=' .env; then sed -i 's/^TRAINING_GPU_DEVICE_KEY=.*/TRAINING_GPU_DEVICE_KEY=cuda:1/' .env; else echo 'TRAINING_GPU_DEVICE_KEY=cuda:1' >> .env; fi"
+    : serviceTarget === "api"
+      ? "if grep -q '^DESKTOP_RESOURCE_STORAGE_ROOT=' .env; then sed -i 's#^DESKTOP_RESOURCE_STORAGE_ROOT=.*#DESKTOP_RESOURCE_STORAGE_ROOT=/data/local-platform/desktop-resources#' .env; else echo 'DESKTOP_RESOURCE_STORAGE_ROOT=/data/local-platform/desktop-resources' >> .env; fi\nif grep -q '^LORA_UPLOAD_TEMP_DIR=' .env; then sed -i 's#^LORA_UPLOAD_TEMP_DIR=.*#LORA_UPLOAD_TEMP_DIR=/data/local-platform/lora-uploads#' .env; else echo 'LORA_UPLOAD_TEMP_DIR=/data/local-platform/lora-uploads' >> .env; fi\nmkdir -p /data/local-platform/desktop-resources /data/local-platform/lora-uploads"
+      : "";
   return `set -euo pipefail
 ROOT=/local-platform
 TMP=/tmp/drawhime-local-${serviceTarget}-${stamp}
@@ -195,7 +197,7 @@ ${definition.prisma ? 'rm -rf "$ROOT/prisma"\ncp -a "$TMP/prisma" "$ROOT/prisma"
 ${definition.prisma ? 'mkdir -p "$ROOT/scripts"\ncp -a "$TMP/scripts/bootstrap-anima-catalog.mjs" "$ROOT/scripts/bootstrap-anima-catalog.mjs"' : ""}
 for item in package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json .npmrc; do cp -a "$TMP/$item" "$ROOT/$item"; done
 cd "$ROOT"
-${schedulerEnvironmentCommands}
+${serviceEnvironmentCommands}
 # 单服务重启前重新导入私有环境文件，确保本次配置变更真实进入 PM2 进程环境。
 set -a
 . ./.env
@@ -299,16 +301,22 @@ LOCAL_INFERENCE_WORKER_BASE_URL=http://127.0.0.1:7111
 LOCAL_TRAINING_WORKER_BASE_URL=http://127.0.0.1:7112
 LOCAL_ARTIFACT_SERVICE_BASE_URL=http://127.0.0.1:7113
 GPU_AGENT_TOKEN=$GPU_TOKEN
-GPU_WORKLOADS_SHARE_DEVICE=true
+GPU_WORKLOADS_SHARE_DEVICE=false
+INFERENCE_GPU_DEVICE_KEY=cuda:0
+TRAINING_GPU_DEVICE_KEY=cuda:1
 TRAINING_RUNTIME_TOKEN=$TRAINING_TOKEN
 TRAINING_RUNTIME_BASE_URL=${trainingRuntimeBaseUrl}
 LOCAL_PUBLIC_API_BASE_URL=https://www.xanime.ink/local-model-api
+DESKTOP_RESOURCE_STORAGE_ROOT=/data/local-platform/desktop-resources
+LORA_UPLOAD_TEMP_DIR=/data/local-platform/lora-uploads
 EOF
 fi
 # 已存在的生产私有环境文件只幂等补齐真实 ComfyUI 地址，不覆盖任何既有凭证。
 grep -q '^COMFYUI_BASE_URL=' .env || echo 'COMFYUI_BASE_URL=${comfyUiBaseUrl}' >> .env
-# 当前生产 ComfyUI 与训练 Runtime 共用物理 GPU 1，必须让调度器从租约层阻止新推理继续挤占训练。
-if grep -q '^GPU_WORKLOADS_SHARE_DEVICE=' .env; then sed -i 's/^GPU_WORKLOADS_SHARE_DEVICE=.*/GPU_WORKLOADS_SHARE_DEVICE=true/' .env; else echo 'GPU_WORKLOADS_SHARE_DEVICE=true' >> .env; fi
+# 双卡生产环境中推理固定 GPU 0、训练固定 GPU 1，调度器不再以跨工作负载互斥阻塞生图。
+if grep -q '^GPU_WORKLOADS_SHARE_DEVICE=' .env; then sed -i 's/^GPU_WORKLOADS_SHARE_DEVICE=.*/GPU_WORKLOADS_SHARE_DEVICE=false/' .env; else echo 'GPU_WORKLOADS_SHARE_DEVICE=false' >> .env; fi
+if grep -q '^INFERENCE_GPU_DEVICE_KEY=' .env; then sed -i 's/^INFERENCE_GPU_DEVICE_KEY=.*/INFERENCE_GPU_DEVICE_KEY=cuda:0/' .env; else echo 'INFERENCE_GPU_DEVICE_KEY=cuda:0' >> .env; fi
+if grep -q '^TRAINING_GPU_DEVICE_KEY=' .env; then sed -i 's/^TRAINING_GPU_DEVICE_KEY=.*/TRAINING_GPU_DEVICE_KEY=cuda:1/' .env; else echo 'TRAINING_GPU_DEVICE_KEY=cuda:1' >> .env; fi
 # 既有生产环境幂等补齐训练链路配置，随机令牌只写入私有环境文件。
 grep -q '^TRAINING_RUNTIME_TOKEN=' .env || echo "TRAINING_RUNTIME_TOKEN=$(openssl rand -hex 32)" >> .env
 grep -q '^TRAINING_RUNTIME_BASE_URL=' .env || echo 'TRAINING_RUNTIME_BASE_URL=${trainingRuntimeBaseUrl}' >> .env
@@ -317,6 +325,10 @@ grep -q '^TRAINING_RUNTIME_BASE_URL=' .env || echo 'TRAINING_RUNTIME_BASE_URL=${
 if grep -q '^TRAINING_OUTPUT_CHUNK_BYTES=65536$' .env; then sed -i 's/^TRAINING_OUTPUT_CHUNK_BYTES=65536$/TRAINING_OUTPUT_CHUNK_BYTES=1048576/' .env; else grep -q '^TRAINING_OUTPUT_CHUNK_BYTES=' .env || echo 'TRAINING_OUTPUT_CHUNK_BYTES=1048576' >> .env; fi
 grep -q '^TRAINING_OUTPUT_CONCURRENCY=' .env || echo 'TRAINING_OUTPUT_CONCURRENCY=8' >> .env
 grep -q '^LOCAL_PUBLIC_API_BASE_URL=' .env || echo 'LOCAL_PUBLIC_API_BASE_URL=https://www.xanime.ink/local-model-api' >> .env
+# LoRA 分片上传和校验文件必须落 data 盘，禁止回退 API 工作目录或系统 /tmp。
+if grep -q '^DESKTOP_RESOURCE_STORAGE_ROOT=' .env; then sed -i 's#^DESKTOP_RESOURCE_STORAGE_ROOT=.*#DESKTOP_RESOURCE_STORAGE_ROOT=/data/local-platform/desktop-resources#' .env; else echo 'DESKTOP_RESOURCE_STORAGE_ROOT=/data/local-platform/desktop-resources' >> .env; fi
+if grep -q '^LORA_UPLOAD_TEMP_DIR=' .env; then sed -i 's#^LORA_UPLOAD_TEMP_DIR=.*#LORA_UPLOAD_TEMP_DIR=/data/local-platform/lora-uploads#' .env; else echo 'LORA_UPLOAD_TEMP_DIR=/data/local-platform/lora-uploads' >> .env; fi
+mkdir -p /data/local-platform/desktop-resources /data/local-platform/lora-uploads
 # LoRA 同步端点沿用当前 ComfyUI 已配置的服务 token；只从本机 PM2 进程环境读取并写入独立私有环境文件。
 if ! grep -q '^COMFYUI_SERVICE_TOKEN=' .env; then
   MAIN_WORKER_PID=$(pm2 pid v3-worker 2>/dev/null || true)

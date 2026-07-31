@@ -2,11 +2,9 @@
  * 本文件实现独立 LoRA 仓库的条目管理、真实文件上传、示例图与隐私控制接口。
  */
 import { createHash, randomUUID } from "node:crypto";
-import { createReadStream, createWriteStream } from "node:fs";
+import { createReadStream } from "node:fs";
 import { appendFile, mkdir, open, rm, stat, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-import { pipeline } from "node:stream/promises";
+import { isAbsolute, join, posix, resolve } from "node:path";
 import type { IncomingMessage } from "node:http";
 import type { ExternalIdentity, Prisma } from "@prisma/client";
 import { loraLibraryCreateRequestSchema, loraLibraryUpdateRequestSchema, loraUploadSessionCreateRequestSchema, type LoraLibraryEntryView, type LoraUploadSessionView } from "@drawhime/contracts";
@@ -17,7 +15,6 @@ import sharp from "sharp";
 const maximumLoraBytes = 512 * 1024 * 1024;
 const maximumExampleBytes = 12 * 1024 * 1024;
 const loraChunkBytes = 4 * 1024 * 1024;
-const uploadDirectory = process.env.LORA_UPLOAD_TEMP_DIR?.trim() || resolve(process.cwd(), "local", "lora-uploads");
 const uploadLocks = new Map<string, Promise<void>>();
 
 type SessionRecord = { externalIdentity: ExternalIdentity };
@@ -139,7 +136,7 @@ export function registerLoraLibraryRoutes(router: ServiceRouter, findSession: Fi
       const entry = await findOwnedEntry(params.id, session.externalIdentity.id);
       const input = loraUploadSessionCreateRequestSchema.parse(await readJsonBody<unknown>(request));
       if (!input.fileName.toLowerCase().endsWith(".safetensors")) throw new LoraLibraryError(400, "lora_file_type_invalid", "LoRA 模型文件必须使用 .safetensors 格式");
-      await mkdir(uploadDirectory, { recursive: true });
+      await mkdir(loraUploadDirectory(), { recursive: true });
       temporaryFileName = `${randomUUID()}.upload`;
       await writeFile(uploadPath(temporaryFileName), Buffer.alloc(0), { flag: "wx" });
       const upload = await database.loraUploadSession.create({
@@ -219,44 +216,6 @@ export function registerLoraLibraryRoutes(router: ServiceRouter, findSession: Fi
       });
       sendSuccess(response, { cancelled: true });
     } catch (error) { sendLibraryError(response, error); }
-  });
-
-  router.register("PUT", "/v1/lora-library/:id/file", async ({ request, response, params }) => {
-    const session = await findSession(readBearerToken(request));
-    if (!session) return sendError(response, 401, "local_session_invalid", "本地模型平台登录状态已失效");
-    let temporaryPath = "";
-    try {
-      const entry = await findOwnedEntry(params.id, session.externalIdentity.id);
-      const originalFileName = decodeFileName(request.headers["x-file-name"]);
-      if (!originalFileName.toLowerCase().endsWith(".safetensors")) throw new LoraLibraryError(400, "lora_file_type_invalid", "LoRA 模型文件必须使用 .safetensors 格式");
-      const streamed = await streamRequestToFile(request, maximumLoraBytes);
-      temporaryPath = streamed.path;
-      await validateSafetensors(streamed.path, streamed.byteSize);
-      const gpuFileName = `drawhime_lora_${streamed.sha256}.safetensors`;
-      const objectKey = `loras/user/${entry.ownerIdentityId}/${entry.id}/${streamed.sha256}.safetensors`;
-      await putObjectFile(objectKey, streamed.path, "application/octet-stream", streamed.byteSize);
-      const version = `${Date.now()}`;
-      await database.$transaction([
-        database.loraVersion.updateMany({ where: { loraEntryId: entry.id, status: "ACTIVE" }, data: { status: "ARCHIVED" } }),
-        database.loraVersion.create({
-          data: {
-            loraEntryId: entry.id,
-            version,
-            objectKey,
-            fileName: gpuFileName,
-            sha256: streamed.sha256,
-            byteSize: BigInt(streamed.byteSize),
-            status: "ACTIVE",
-            metadata: { source: "user-upload", originalFileName },
-          },
-        }),
-      ]);
-      sendSuccess(response, await getEntryView(entry.id, session.externalIdentity.id));
-    } catch (error) {
-      sendLibraryError(response, error);
-    } finally {
-      if (temporaryPath) await rm(temporaryPath, { force: true });
-    }
   });
 
   router.post("/v1/lora-library/:id/examples", async ({ request, response, params }) => {
@@ -520,28 +479,6 @@ async function findOwnedEntry(id: string, ownerIdentityId: string) {
   return entry;
 }
 
-/** 流式接收 LoRA 到受控临时文件，同时计算真实字节数和 SHA-256。 */
-async function streamRequestToFile(request: IncomingMessage, maximumBytes: number): Promise<{ path: string; byteSize: number; sha256: string }> {
-  const declared = Number(request.headers["content-length"] ?? 0);
-  if (!Number.isSafeInteger(declared) || declared <= 0 || declared > maximumBytes) throw new LoraLibraryError(413, "lora_file_size_invalid", "LoRA 文件大小必须在 1B 到 512MB 之间");
-  const path = join(tmpdir(), `drawhime-lora-${randomUUID()}.upload`);
-  const hash = createHash("sha256");
-  let byteSize = 0;
-  request.on("data", (chunk: Buffer) => {
-    byteSize += chunk.length;
-    hash.update(chunk);
-    if (byteSize > maximumBytes || byteSize > declared) request.destroy(new Error("LoRA 文件超过声明大小"));
-  });
-  try {
-    await pipeline(request, createWriteStream(path, { flags: "wx" }));
-    if (byteSize !== declared) throw new Error("LoRA 文件接收不完整");
-    return { path, byteSize, sha256: hash.digest("hex") };
-  } catch (error) {
-    await rm(path, { force: true });
-    throw error;
-  }
-}
-
 /** 校验 safetensors 固定头和 JSON 元数据，避免任意二进制进入模型仓库。 */
 async function validateSafetensors(path: string, byteSize: number): Promise<void> {
   const file = await open(path, "r");
@@ -622,7 +559,26 @@ async function hashFile(path: string): Promise<string> {
 /** 只接受数据库生成的 UUID 临时文件名，避免路径穿越。 */
 function uploadPath(temporaryFileName: string): string {
   if (!/^[0-9a-f-]{36}\.upload$/i.test(temporaryFileName)) throw new LoraLibraryError(500, "lora_upload_path_invalid", "LoRA 上传临时文件名不正确");
-  return join(uploadDirectory, temporaryFileName);
+  return join(loraUploadDirectory(), temporaryFileName);
+}
+
+/** 生产 LoRA 上传临时文件必须进入 data 盘，Windows 开发环境保留仓库内受控目录。 */
+function loraUploadDirectory(): string {
+  return resolveLoraUploadDirectory(process.env.LORA_UPLOAD_TEMP_DIR, process.platform);
+}
+
+/** 解析 LoRA 临时目录；非 Windows 运行环境强制使用 data 盘绝对路径。 */
+export function resolveLoraUploadDirectory(configured: string | undefined, platform: NodeJS.Platform): string {
+  const value = configured?.trim() || (platform === "win32" ? resolve(process.cwd(), "local", "lora-uploads") : "");
+  if (!value) throw new LoraLibraryError(503, "lora_upload_storage_unconfigured", "LoRA 上传临时目录尚未配置");
+  if (platform === "win32") {
+    if (!isAbsolute(value)) throw new LoraLibraryError(503, "lora_upload_storage_unconfigured", "LoRA 上传临时目录尚未配置");
+    return resolve(value);
+  }
+  if (!posix.isAbsolute(value)) throw new LoraLibraryError(503, "lora_upload_storage_unconfigured", "LoRA 上传临时目录尚未配置");
+  const directory = posix.resolve(value);
+  if (directory !== "/data" && !directory.startsWith("/data/")) throw new LoraLibraryError(503, "lora_upload_storage_not_data", "LoRA 上传临时目录必须位于 data 盘");
+  return directory;
 }
 
 /** 读取受限示例图请求体。 */

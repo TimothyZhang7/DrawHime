@@ -36,9 +36,9 @@
 | `desktop_poll_authorization` | desktop webview | desktop core | 按服务端间隔轮询，授权完成后写入 Windows Credential Manager 并只返回脱敏账号视图 |
 | `desktop_sign_out` | desktop webview | desktop core | 尽力撤销服务端会话后删除 Windows Credential Manager 凭据；网络异常不阻止本机退出 |
 | `GET /v1/desktop/resources/manifest` | desktop core | api/CDN | 返回 `{ ok: true, data: DesktopResourceManifestEnvelope }`；`payload` 是原始 UTF-8 JSON，`signature` 是服务端 Ed25519 签名，桌面端使用安装包内固定公钥验签后才解析资源；模型资源额外固化受控安装目录和模型组合的 group/role，只有主文件、文本编码器与 VAE 全部通过哈希安装后才自动登记 Anima 底模 |
-| `GET /v1/desktop/resources/:id/content` | desktop core | api | 从签名清单定位主站镜像资源，只流式返回大小与清单一致的受控文件；支持单段 HTTP Range、`ETag=SHA-256` 和断点续传，不接受客户端文件路径；本地镜像文件缺失时只允许代理同一签名资源登记的 `official` HTTPS 来源，并严格核对上游 `Content-Range`、长度和总大小，私有下载令牌不回显给桌面端 |
-| `desktop_load_resource_catalog` | desktop webview | desktop core | 拉取并验签资源清单，校验过期时间、Windows/架构、文件名、大小、SHA-256 与 HTTPS 来源后返回可展示目录；在线成功后原子保存签名信封，临时网络异常时可读取仍在有效期内的本机已验签清单 |
-| `desktop_download_resource` | desktop webview | desktop core | 按资源 ID 执行断点下载；`auto` 优先官方，连接失败或持续低速后从相同哈希的主站镜像续传，完成整体 SHA-256 后原子写入本机下载缓存 |
+| `GET /v1/desktop/resources/:id/content` | desktop core | api | 从签名清单定位主站 `/data` 镜像资源，只流式返回大小与清单一致的受控文件；支持单段 HTTP Range、`ETag=SHA-256` 和断点续传，不接受客户端文件路径；文件缺失时明确失败，不代理官方或第三方来源 |
+| `desktop_load_resource_catalog` | desktop webview | desktop core | 从主站拉取并验签唯一资源清单，校验过期时间、Windows/架构、文件名、大小、SHA-256 与唯一镜像来源后返回可展示目录；在线成功后原子保存签名信封，临时网络异常时可读取仍在有效期内的本机已验签清单 |
+| `desktop_download_resource` | desktop webview | desktop core | 按资源 ID 仅从主站镜像执行断点下载，完成整体 SHA-256 后原子写入本机下载缓存；客户端不存在官方源、第三方源或切源链路 |
 | `desktop_pause_resource_download` | desktop webview | desktop core | 将指定活动下载标记为暂停，后台流在下一个分片边界停止并保留 `.part`；再次下载同一资源从真实偏移继续 |
 | `desktop-resource-progress` | desktop core | desktop webview | 资源下载进度事件；对应 `DesktopResourceDownloadView`，包含当前来源、已下载字节、总字节、速度、剩余秒数、最近切源原因、状态与脱敏错误；切源后沿用同一已校验偏移 |
 | `desktop_install_resource` | desktop webview | desktop core | 使用在线或仍有效的本机已验签清单再次校验缓存 SHA-256 与磁盘空间后安装资源；安装不因临时清单请求超时而阻断，ZIP 拒绝路径穿越、链接和 Windows 保留名，在临时目录完成后原子切换，旧版本保留为可回滚目录 |
@@ -63,7 +63,7 @@
 | `desktop_cancel_caption_job` | desktop webview | desktop core/caption scheduler | 幂等取消排队或运行中的打标任务，已经成功落库的逐图 Caption 保留 |
 | `desktop-caption-job-updated` | desktop core/caption scheduler | desktop webview | 离线打标任务及逐图状态变化事件；载荷为 `DesktopCaptionJobView` |
 | `desktop_confirm_training_dataset` | desktop webview | desktop core | 仅在训练集含 5–200 张图片且每张 Caption 非空时事务化确认，确认成功后才允许进入训练参数阶段 |
-| `desktop_create_training_job` | desktop webview | desktop core/training scheduler | 固化已确认训练集、Anima 底模文件快照与训练参数并立即返回排队记录；对应 `DesktopTrainingJobCreateInput` 和 `DesktopTrainingJobView` |
+| `desktop_create_training_job` | desktop webview | desktop core/training scheduler | 固化已确认训练集、Anima 底模文件快照与训练参数并立即返回排队记录；默认动态达到至少 320 次图片遍历，训练产物按底模 SHA-256 绑定，切换到其他精确底模时拒绝误用；对应 `DesktopTrainingJobCreateInput` 和 `DesktopTrainingJobView` |
 | `desktop_list_training_jobs` | desktop webview | desktop core | 返回最近 100 个训练任务、尝试、排队位置、进度、产物 LoRA ID 与 OOM 降档建议 |
 | `desktop_cancel_training_job` | desktop webview | desktop core/training scheduler | 幂等取消排队或运行中的本地训练；运行中进程树由核心终止，已成功登记的 LoRA 不回滚 |
 | `desktop-training-job-updated` | desktop core/training scheduler | desktop webview | 本地训练任务状态变化事件；载荷为 `DesktopTrainingJobView` |
@@ -73,14 +73,15 @@
 | `desktop-local-job-updated` | desktop core/local scheduler | desktop webview | 本地任务状态、进度或产物变化事件；载荷为 `DesktopLocalJobView`，刷新页面后仍以 SQLite 为准 |
 | `desktop_enqueue_gallery_publication` | desktop runtime/UI | desktop core | 校验本地结果文件、计算 SHA-256，并以本地任务和文件哈希幂等写入图库同步队列 |
 | `desktop_list_gallery_sync_queue` | desktop webview | desktop core | 读取当前设备本地图库同步队列；对应 `DesktopGallerySyncItem[]` |
-| `desktop_load_website_models` / `desktop_load_website_loras` | desktop webview | desktop core/api | 使用 Credential Manager 设备会话实时读取主站仓库元数据，逐张容错缓存最多 8 张受保护示例图并以首张作为封面；`forceRefresh=true` 重新拉取首图并补齐新增媒体，失败时保留旧缓存，页面只得到本机路径和公开元数据 |
+| `desktop_load_website_models` / `desktop_load_website_loras` | desktop webview | desktop core/api | 使用 Credential Manager 设备会话实时读取主站仓库元数据，逐张容错缓存最多 8 张受保护示例图并以首张作为封面；底模目录同时下发精确组件文件名、哈希和模型级生成参数；`forceRefresh=true` 重新拉取媒体，失败时保留旧缓存，客户端没有内置模型或 LoRA 清单 |
+| `desktop_install_website_model` | desktop webview | desktop core/api | 所有仓库底模统一按在线目录中的唯一主站地址把断点直接写入用户模型盘，完整校验底模、文本编码器和 VAE 后原子登记；对应 `desktop-website-model-progress` 实时事件 |
 | `desktop_load_ai_settings` / `desktop_save_ai_settings` | desktop webview | desktop core | AI 端点类型、基础地址、模型和开关保存到 SQLite；API Key 只写 Windows Credential Manager，WebView 仅得到 `apiKeyConfigured` |
 | `desktop_test_ai_settings` | desktop webview | desktop core/OpenAI-compatible API | 使用已保存凭据向真实 Chat Completions 或 Responses 端点发送轻量文本请求，验证连接、鉴权和模型响应 |
 | `desktop_ai_analyze_image` | desktop webview | desktop core/OpenAI-compatible API | 读取 20 MiB 内 PNG/JPEG/WebP 并转 data URL，按固定 `caption` 或 `reverse` 用途调用真实多模态端点，返回可编辑文本 |
 | `desktop_install_website_lora` | desktop webview | desktop core/api | 按 LoRA 条目 ID 重新鉴权，使用 HTTP Range 断点下载最新有效 safetensors，完成整体 SHA-256 后原子导入本机仓库 |
 | `desktop-website-lora-progress` | desktop core | desktop webview | 网站 LoRA 下载与校验进度事件；对应 `DesktopWebsiteLoraInstallProgress` |
 | `desktop_software_update_status` | desktop webview | desktop core | 验签稳定通道资源清单并对比当前安装包语义版本；重启后依据实际运行版本收敛 `applying` 记录，不以进程启动成功伪造安装成功 |
-| `desktop_download_software_update` | desktop webview | desktop core | 复用依赖来源策略、低速切源、Range 断点与 SHA-256 校验下载签名清单中的 Windows NSIS 更新包 |
+| `desktop_download_software_update` | desktop webview | desktop core | 使用签名清单中的唯一主站镜像、Range 断点与 SHA-256 校验下载 Windows NSIS 更新包 |
 | `desktop_import_offline_update` | desktop webview | desktop core | 同时选择 NSIS 安装包和离线 Ed25519 签名信封；验证 key ID、签名、有效期、平台、版本、大小与 SHA-256 后写入同一受控缓存 |
 | `desktop_apply_software_update` | desktop webview | desktop core | 持久化 `staged/applying` 后启动当前用户静默 NSIS 更新辅助进程并退出应用；模型、LoRA、任务、账号和图库 SQLite 保持原目录不变 |
 | `desktop_rollback_software_update` | desktop webview | desktop core | 仅对仍保留且通过原签名清单校验的上一版本安装包执行相同静默安装；没有可信缓存时保持入口关闭 |
@@ -95,12 +96,12 @@
 | `GET /v1/models` | web/admin | api | 当前可用本地模型、工作流、模型独立的采样器/调度器/步数/CFG/质量前缀、采样最长边、画幅补偿像素预算、最终输出最大尺寸和主站价格版本；完整微调底模不得套用 Anima Base 的 Turbo 参数。全部 LoRA 组合使用同一模型级采样质量参数，不通过降低步数或像素预算伪造耗时一致 |
 | `POST /v1/training/tag-translations` | web/main-web | api | 登录用户批量解析英文 LoRA 训练标签；优先读取持久化翻译集，缺失项由真实 AI 翻译后入库，返回简体中文、来源和每个标签稳定唯一色，不改写训练 Caption |
 | `POST /v1/training/datasets/:id/assets/:assetId/caption-jobs` | main-web/web | api/training-worker | 为单张训练图片创建持久化自动打标任务；只替换该图 Caption，完成后使既有全量确认回到待确认，不重跑其他图片 |
-| `GET /v1/model-library[/:id]` | web/admin | api | 浏览当前底模仓库和详情；返回格式、采样配置、带站点名称的多个来源链接、示例图片以及引用该底模的公开任务 |
+| `GET /v1/model-library[/:id]` | web/admin/desktop core | api | 浏览唯一在线底模仓库和详情；返回格式、三档采样配置、高级参数、精确 Anima 组件、唯一主站下载信息、来源链接和示例；桌面在线成功后原子缓存最近目录，离线时只读取该缓存，不维护内置底模清单 |
 | `POST /v1/admin/model-library` | admin | api | 管理员按 Anima 格式登记已经安装到私有 GPU 的 safetensors 底模，同时创建模型、Runtime、不可变工作流和主站价格版本 |
 | `PATCH /v1/admin/model-library/:id` | admin | api | 管理员编辑底模仓库外显名称、描述、多个来源链接、使用说明和公开状态，不改写历史任务 |
 | `POST/DELETE /v1/admin/model-library/:id/examples[/:exampleId]` | admin | api | 管理员上传或删除底模封面与示例图；第一张示例作为仓库封面，图片统一转为高质量 WebP |
 | `GET /v1/model-library/examples/:id/content` | web/admin | api | 登录用户读取可访问底模的仓库示例图，不暴露对象存储键 |
-| `POST /v1/inference/jobs` | web | api | `InferenceJobCreateRequest` 创建持久化任务并完成主站资金预留后入队；同一独立身份默认每 180 秒只接受一个新任务，幂等重放不重复占用冷却，命中限制返回 HTTP 429 `inference_submission_cooldown`；正面提示词与可空的用户负面提示词独立保存，Worker 分别映射到 Runtime 的 positive/negative conditioning；`loraVersionIds` 可跨角色、画风、概念、服装、姿势等类型多选，最多 4 个且不可重复；`loraStrengths` 与 `loraSelections` 固化每个版本的 0–1.5 强度及触发词快照，Worker 以显式强度优先并把实际 LoRA 链、采样尺寸和最终提示词写入任务审计 |
+| `POST /v1/inference/jobs` | web | api | `InferenceJobCreateRequest` 创建持久化任务并完成主站资金预留后入队；同一独立身份默认每 180 秒只接受一个新任务，幂等重放不重复占用冷却；正负提示词独立保存；LoRA 最多 4 个且按版本与内容哈希去重，平台训练产物必须与训练时的精确底模一致，外部 LoRA 继续按系列兼容；任务固化实际强度、触发词和采样参数 |
 | `GET /v1/inference/jobs` | web/admin | api | 当前身份任务列表；管理员可读取全局列表；等待执行的任务批量返回全局推理队列位置、前方任务数、队列任务总数及预计等待/执行/完成秒数 |
 | `GET /v1/inference/jobs/:id` | web/admin | api | `InferenceJobView`，包含阶段、尝试、固化参数、任务所用 LoRA 的标题、类型、权重与封面地址、产物哈希与字节数、计费镜像、主站图库发布状态和等待执行时的队列估算；普通用户只读取自己的任务 |
 | `GET /v1/inference/jobs/:id/loras/:versionId/cover` | web/admin | api | 经任务归属鉴权读取该任务实际选用 LoRA 的首张示例封面；即使 LoRA 后续下架，历史任务仍可审计展示 |
@@ -109,20 +110,22 @@
 | `POST /v1/inference/jobs/:id/cancel` | web | api | `InferenceJobCancelRequest`，只取消尚未运行任务并释放资金预留；若该任务仍是所属身份最后一次提交，则在同一事务中清除该身份的本地模型提交冷却 |
 | `DELETE /v1/inference/jobs/:id` | web | api | 删除已结束推理记录；已发布作品先同步删除主站正式图库，余额、计费和产物审计不删除 |
 | `GET /v1/artifacts/:id/content` | web/admin | api | 经会话鉴权读取所属任务的对象存储产物 |
-| `GET /v1/loras` | web/admin | api | 已上传有效模型文件且当前身份可访问的 LoRA 列表 |
-| `GET /v1/lora-library` | web/admin | api | 返回公开 LoRA 和当前用户自己的私有 LoRA；`mine=1` 仅返回本人条目，私有条目不向其他用户外显；仓库不再区分草稿与发布状态 |
+| `GET /v1/loras` | web/admin | api | 已上传有效模型文件且当前身份可访问的 LoRA 列表；平台训练产物返回 `baseModelVersionId`，生成页据此过滤精确底模不匹配项 |
+| `GET /v1/lora-library` | web/admin/desktop core | api | 返回公开 LoRA 和当前用户自己的私有 LoRA；`mine=1` 仅返回本人条目，私有条目不向其他用户外显；桌面在线成功后原子缓存最近目录供同一已保存设备会话离线浏览；仓库不再区分草稿与发布状态 |
 | `GET /v1/lora-library/:id` | web/admin | api | 按 LoRA 条目 ID 或任务固化的 LoRA 版本 ID 读取唯一详情；公开条目可由其他用户查看，私有条目仅作者和管理员可读；详情附带最近引用该 LoRA 且已发布到主站图库的公开任务卡片，不外显私密任务 |
 | `GET /v1/lora-library/:id/download` | web/admin/desktop core | api | 登录用户流式下载可访问 LoRA 的最新有效 safetensors 文件；公开条目允许下载，私有条目仅作者和管理员可下载；支持单段 HTTP Range、`ETag=SHA-256` 和断点续传，不暴露对象存储键 |
 | `POST /v1/lora-library` | web | api | 创建默认可用的当前用户 LoRA 并固化公开/私有选择；自定义主模型系列会持久化为全局筛选项 |
 | `PATCH /v1/lora-library/:id` | web | api | 作者修改标题、描述、类型、主模型系列、触发词和公开/私有范围；不覆盖有效模型版本 |
 | `POST/GET/PUT /v1/lora-library/:id/uploads[/:uploadId]` | web | api | 创建、查询并按服务端偏移续传 LoRA 文件；单片最多 4MB，偏移和临时文件持久化，刷新或网络中断后可继续 |
 | `POST /v1/lora-library/:id/uploads/:uploadId/complete` | web | api | 校验完整 safetensors 文件、字节数和 SHA-256 后流式写入独立对象存储并创建版本 |
-| `PUT /v1/lora-library/:id/file` | 受控客户端 | api | 小文件直传兼容入口，仍执行相同 safetensors、大小和 SHA-256 校验 |
 | `POST /v1/lora-library/:id/examples` | web | api | 作者为 LoRA 上传最多 8 张示例图，服务端统一转为高质量 WebP 后写入独立对象存储 |
 | `DELETE /v1/lora-library/:id` | web | api | 删除当前作者 LoRA 后立即从仓库、生成选择和示例访问中下架；历史任务、训练产物、计费和产物保持可追溯 |
 | `DELETE /v1/lora-library/:id/examples/:exampleId` | web | api | 作者可删除任意示例图；没有示例图时仓库使用默认封面 |
 | `DELETE /v1/lora-library/:id/uploads/:uploadId` | web | api | 取消当前用户的未完成上传会话并清理受控临时文件 |
 | `GET /v1/lora-library/examples/:id/content` | web/admin | api | 登录用户读取公开 LoRA 示例图；私有示例图仅作者和管理员可读，并使用私有缓存策略 |
+| `POST/GET/PUT/DELETE /v1/model-library/uploads[/:uploadId]` | web/desktop | api | 登录用户在主站 data 盘创建、查询、续传或取消 Anima 底模上传；服务端按真实偏移恢复，单片限制 8MB |
+| `POST /v1/model-library/uploads/:uploadId/complete` | web | api | 完整校验字节数、SHA-256、safetensors 文件头与 Anima 张量结构后原子发布目录；失败不创建可选模型 |
+| `GET /v1/model-library/:id/download` | desktop | api | 按登录设备会话从主站 `/data` 读取用户共同维护的底模，支持标准单段 Range、SHA-256 ETag 和断点续传；不代理官方源、第三方源或 GPU Runtime |
 | `POST/GET /v1/training/datasets` | web/admin | api | 创建和读取当前身份训练数据集；管理员可使用 `scope=all` 查看全局资产 |
 | `POST /v1/training/datasets/:id/assets` | web | api | 上传训练图片，服务端统一方向、色彩空间与 WebP 编码后写入独立对象存储并记录 SHA-256 |
 | `PATCH/DELETE /v1/training/datasets/:id/assets/:assetId` | web | api | 编辑单图 Caption 或删除未被训练任务引用的数据集图片和对象 |

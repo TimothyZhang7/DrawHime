@@ -83,7 +83,7 @@ pnpm desktop:validate-windows-host --ExpectedVersion X.Y.Z --Installer INSTALLER
 
 发布脚本固定执行安装包大小/SHA-256、共享契约、Ed25519 私钥与桌面内置公钥一致性检查；生产端先上传临时文件并备份旧信封，只在资源落盘后原子切换清单，回环 API 未读到新资源时自动恢复旧信封。应用更新资源发布不重启 API，也不接触数据库、模型、LoRA、训练集、任务、媒体或钱包。
 
-签名清单历史数据存在官方/镜像重复 URL 时，先规范化到新文件并完成签名自检，再原子替换生产信封；相同 URL 保留镜像语义，避免客户端在同一故障地址之间进行无效切换：
+签名清单历史数据存在官方源、第三方源或重复 URL 时，先规范化到只含主站镜像的新文件并完成签名自检，再原子替换生产信封：
 
 ```powershell
 pnpm desktop:resource-manifest normalize --payload OLD_PAYLOAD.json --output NEXT_PAYLOAD.json
@@ -93,7 +93,14 @@ pnpm desktop:deploy-manifest --envelope NEXT_ENVELOPE.json --state-payload CURRE
 pnpm desktop:deploy-manifest --envelope NEXT_ENVELOPE.json --state-payload CURRENT_PAYLOAD.json --state-envelope CURRENT_ENVELOPE.json
 ```
 
-`add-anima-models` 幂等补齐 Anima Base、Anime Bulldozer、MiaoMiao RealSkin、MiaoMiao 3D Harem 和 MiaoMiao Harem 8-Step。五个模型均为用户主动安装的可选资源；相同 SHA-256 的 Qwen 文本编码器和 VAE 在多个模型组合间复用本机文件，不重复下载或占用磁盘。MiaoMiao Harem 8-Step 是仅推理蒸馏版本，桌面与网页训练入口均排除该模型。发布前必须确认主文件已进入 `DESKTOP_RESOURCE_STORAGE_ROOT`，或存在可由 API 严格代理的签名官方来源。
+`add-anima-models` 只用于把已知资源转换为签名依赖条目，不是客户端仓库目录。模型仓库与 LoRA 仓库均由 API 联网返回并允许离线复用最近缓存。Anima Base 是首次初始化必需资源，其他底模由用户在仓库按需安装；相同 SHA-256 的 Qwen 文本编码器和 VAE 在多个模型间复用。客户端清单只允许主站镜像，主文件必须先发布到 data 盘的 `DESKTOP_RESOURCE_STORAGE_ROOT`，API 不保留官方源、第三方代理或 GPU Runtime 回退。
+
+桌面资源通过签名清单中的资源 ID 发布。`--file` 会先在运维机流式校验再上传，`--url` 由主站直接拉取；两种方式最终都在主站重新校验大小与 SHA-256 并原子落盘，客户端不会获得一次性来源：
+
+```powershell
+pnpm desktop:publish-resource -- --resource-id RESOURCE_ID --file LOCAL_FILE
+pnpm desktop:publish-resource -- --resource-id RESOURCE_ID --url HTTPS_URL
+```
 
 可选目标：`web`、`admin`、`api`、`scheduler`、`gpu-agent`、`inference-worker`、`training-worker`、`artifact-service`、`source`、`all`。单服务目标只上传共享包与对应 app，只构建和重启该 PM2 进程；`api` 额外执行 Prisma 生成、生产迁移和标签种子，其他服务不触碰数据库。前端目标直接上传本机构建产物，不在生产机安装依赖。
 
@@ -103,7 +110,7 @@ pnpm desktop:deploy-manifest --envelope NEXT_ENVELOPE.json --state-payload CURRE
 - 部署会重载 Worker 前，应优先等待正在执行的不可中断任务完成；等待必须设置总截止时间。
 - 生产已有用户队列时，不提交会插队的合成测试。使用真实任务审计、动态工作流构建测试和脱敏参数核验完成验收。
 - 必须执行生成实测时，测试任务进入正常调度和计费链路，或者在明确的维护窗口使用不抢占用户任务的测试队列。
-- ComfyUI 推理与 LoRA 训练当前共享物理 GPU 1；`drawhime-gpu-arbiter` 以 ComfyUI 真实队列为准，在推理运行或等待期间向训练 Runtime 登记的进程组发送 `SIGSTOP`，队列清空后发送 `SIGCONT`。仲裁器只读取 `/data/drawhime-training/jobs/*/state.json` 中的运行中 PID，不扫描或控制其他 GPU 程序；仲裁器退出前必须恢复训练，队列接口不可达时按空闲处理，避免训练永久冻结。
+- 生产双卡固定隔离：ComfyUI 推理使用物理 GPU 0，LoRA 训练使用物理 GPU 1。`GPU_WORKLOADS_SHARE_DEVICE=false`，调度器通过 `INFERENCE_GPU_DEVICE_KEY=cuda:0` 与 `TRAINING_GPU_DEVICE_KEY=cuda:1` 分配各自租约；`drawhime-gpu-arbiter` 必须停用，禁止再以 `SIGSTOP` 暂停训练进程。
 - ComfyUI Anima 使用 `--cache-lru 50` 显式保留常用底模、文本编码器、VAE 与近期 LoRA 节点结果；GPU 主机具有足够系统内存，缓存用于减少底模切换时的冷加载波动，不改变采样输出。缓存变更只允许通过 `node scripts/deploy-training-runtime.mjs --comfy-cache-only` 在队列为空时重启 ComfyUI。
 
 ## 已发生错误与预防

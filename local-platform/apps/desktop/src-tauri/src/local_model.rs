@@ -1,7 +1,7 @@
 //! 本模块负责把用户已有 safetensors 原子导入受控模型目录，并返回可审计的哈希登记信息。
 
 use crate::{
-    models::{DesktopLocalLoraImportInput, DesktopLocalModelImportInput, DesktopSettings},
+    models::{DesktopLocalLoraImportInput, DesktopLocalModelImportInput, DesktopSettings, DesktopWebsiteModelComponent, DesktopWebsiteModelView},
     storage::{LocalLoraRegistration, LocalModelRegistration},
 };
 use sha2::{Digest, Sha256};
@@ -33,7 +33,7 @@ pub fn import_local_lora(settings: &DesktopSettings, input: DesktopLocalLoraImpo
     let mut keys = std::collections::HashSet::new();
     let trigger_words = input.trigger_words.into_iter().map(|word| word.trim().to_owned()).filter(|word| keys.insert(word.to_lowercase())).collect::<Vec<_>>();
     let asset = import_asset(Path::new(&input.source_path), Path::new(&settings.model_root), "loras")?;
-    Ok(LocalLoraRegistration { title: title.into(), r#type: input.r#type, file_name: asset.file_name, relative_path: asset.relative_path, sha256: asset.sha256, byte_size: asset.byte_size, modified_ms: asset.modified_ms, trigger_words })
+    Ok(LocalLoraRegistration { title: title.into(), r#type: input.r#type, file_name: asset.file_name, relative_path: asset.relative_path, sha256: asset.sha256, base_model_sha256: None, byte_size: asset.byte_size, modified_ms: asset.modified_ms, trigger_words })
 }
 
 /** 校验输入组合并导入底模及 Anima 必需的独立文本编码器和 VAE。 */
@@ -105,7 +105,89 @@ pub fn import_local_model(
         vae_file_name: vae.as_ref().map(|asset| asset.file_name.clone()),
         vae_relative_path: vae.as_ref().map(|asset| asset.relative_path.clone()),
         vae_sha256: vae.as_ref().map(|asset| asset.sha256.clone()),
+        resource_group_id: None,
+        generation_profile_json: None,
     })
+}
+
+/** 把主站已经完成 SHA-256 校验的 Anima 底模原子安装，并复用目录声明的共享组件。 */
+pub fn install_website_model(
+    settings: &DesktopSettings,
+    model: &DesktopWebsiteModelView,
+    downloaded_path: &Path,
+) -> Result<LocalModelRegistration, String> {
+    if model.runtime_format != "anima" || model.family != "anima" {
+        return Err("桌面端当前只支持安装 Anima 系列底模".into());
+    }
+    let download = model.download.as_ref().ok_or_else(|| "网站底模缺少下载信息".to_string())?;
+    let model_root = Path::new(&settings.model_root);
+    // 先校验共享组件，缺失时保留已下载断点，用户补齐初始化依赖后无需重新下载底模。
+    let text_encoder = existing_component(model_root, "text_encoders", &model.components.text_encoder)?;
+    let vae = existing_component(model_root, "vae", &model.components.vae)?;
+    let primary = install_verified_asset(downloaded_path, model_root, "diffusion_models", &download.file_name, &download.sha256, download.byte_size)?;
+    let generation_profile_json = serde_json::to_string(&model.parameters).map_err(|error| format!("序列化底模生成参数失败：{error}"))?;
+    Ok(LocalModelRegistration {
+        display_name: model.display_name.clone(),
+        family: model.family.clone(),
+        workflow_kind: model.runtime_format.clone(),
+        model_file_name: primary.file_name,
+        model_relative_path: primary.relative_path,
+        model_sha256: primary.sha256,
+        byte_size: primary.byte_size,
+        model_modified_ms: primary.modified_ms,
+        text_encoder_file_name: Some(text_encoder.file_name),
+        text_encoder_relative_path: Some(text_encoder.relative_path),
+        text_encoder_sha256: Some(text_encoder.sha256),
+        vae_file_name: Some(vae.file_name),
+        vae_relative_path: Some(vae.relative_path),
+        vae_sha256: Some(vae.sha256),
+        resource_group_id: model.resource_group_id.clone(),
+        generation_profile_json: Some(generation_profile_json),
+    })
+}
+
+/** 校验目录声明的共享组件，禁止仅凭固定文件名把错误权重注册为可用模型。 */
+fn existing_component(model_root: &Path, category: &str, component: &DesktopWebsiteModelComponent) -> Result<ImportedAsset, String> {
+    validate_file_name(&component.file_name)?;
+    let path = model_root.join(category).join(&component.file_name);
+    validate_source(&path).map_err(|error| format!("Anima 共享组件 {} 不可用：{error}", component.file_name))?;
+    let sha256 = hash_file(&path)?;
+    if sha256 != component.sha256 { return Err(format!("Anima 共享组件 {} 的 SHA-256 与主站目录不一致", component.file_name)); }
+    asset_from_existing(&path, category, sha256)
+}
+
+/** 在用户模型盘内提交已验证下载；同盘优先原子移动，避免复制 4GB 以上底模。 */
+fn install_verified_asset(source: &Path, model_root: &Path, category: &str, file_name: &str, expected_sha256: &str, expected_bytes: u64) -> Result<ImportedAsset, String> {
+    validate_file_name(file_name)?;
+    validate_source(source)?;
+    let metadata = source.metadata().map_err(|error| format!("读取网站底模失败：{error}"))?;
+    if metadata.len() != expected_bytes || hash_file(source)? != expected_sha256 { return Err("网站底模安装前校验与主站目录不一致".into()); }
+    let directory = model_root.join(category);
+    fs::create_dir_all(&directory).map_err(|error| format!("创建底模安装目录失败：{error}"))?;
+    let destination = collision_safe_destination(&directory, file_name, expected_sha256)?;
+    if destination.exists() {
+        fs::remove_file(source).map_err(|error| format!("清理重复底模下载缓存失败：{error}"))?;
+    } else if let Err(rename_error) = fs::rename(source, &destination) {
+        // 极少数自定义目录跨卷时使用校验复制，失败时保留原下载供重试。
+        let temporary = directory.join(format!(".drawhime-install-{}.tmp", Uuid::new_v4()));
+        let copied = copy_and_hash(source, &temporary);
+        match copied {
+            Ok((sha256, byte_size)) if sha256 == expected_sha256 && byte_size == expected_bytes => {
+                fs::rename(&temporary, &destination).map_err(|error| format!("提交网站底模失败：{error}"))?;
+                fs::remove_file(source).map_err(|error| format!("清理网站底模下载缓存失败：{error}"))?;
+            }
+            Ok(_) => { let _ = fs::remove_file(&temporary); return Err("复制后底模哈希发生变化".into()); }
+            Err(error) => { let _ = fs::remove_file(&temporary); return Err(format!("原子移动底模失败：{rename_error}；{error}")); }
+        }
+    }
+    asset_from_existing(&destination, category, expected_sha256.to_owned())
+}
+
+fn asset_from_existing(path: &Path, category: &str, sha256: String) -> Result<ImportedAsset, String> {
+    let metadata = path.metadata().map_err(|error| format!("读取已安装模型失败：{error}"))?;
+    let file_name = path.file_name().and_then(|value| value.to_str()).ok_or_else(|| "已安装模型文件名不是有效 Unicode".to_string())?.to_owned();
+    let modified_ms = metadata.modified().map_err(|error| format!("读取模型修改时间失败：{error}"))?.duration_since(UNIX_EPOCH).map_err(|_| "模型修改时间早于系统纪元".to_string())?.as_millis() as u64;
+    Ok(ImportedAsset { file_name: file_name.clone(), relative_path: format!("{category}/{file_name}"), sha256, byte_size: metadata.len(), modified_ms })
 }
 
 pub(crate) fn import_asset(source: &Path, model_root: &Path, category: &str) -> Result<ImportedAsset, String> {
@@ -322,6 +404,7 @@ fn validate_file_name(value: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::{DesktopWebsiteModelComponents, DesktopWebsiteModelDownload, DesktopWebsiteModelParameters, DesktopWebsiteModelPreset, DesktopWebsiteModelPresets};
 
     #[test]
     fn checkpoint_import_validates_and_registers_real_safetensors() {
@@ -331,7 +414,6 @@ mod tests {
         let settings = DesktopSettings {
             theme_mode: "system".into(),
             font_scale: 1.1,
-            dependency_source: "auto".into(),
             default_privacy: "private".into(),
             auto_upload: true,
             model_root: temporary
@@ -370,6 +452,60 @@ mod tests {
             .join(imported.model_relative_path)
             .is_file());
         assert_eq!(imported.model_sha256.len(), 64);
+    }
+
+    #[test]
+    fn website_anima_install_validates_components_and_is_idempotent() {
+        let temporary = tempfile::tempdir().expect("创建网站底模安装测试目录");
+        let settings = test_settings(temporary.path());
+        let model_root = Path::new(&settings.model_root);
+        fs::create_dir_all(model_root.join("text_encoders")).expect("创建文本编码器目录");
+        fs::create_dir_all(model_root.join("vae")).expect("创建 VAE 目录");
+        let text_encoder = model_root.join("text_encoders/qwen.safetensors");
+        let vae = model_root.join("vae/anima-vae.safetensors");
+        let downloaded = temporary.path().join("downloaded.safetensors");
+        write_test_safetensors(&text_encoder);
+        write_test_safetensors(&vae);
+        write_test_safetensors(&downloaded);
+        let primary_sha256 = hash_file(&downloaded).expect("计算底模哈希");
+        let primary_bytes = downloaded.metadata().expect("读取底模大小").len();
+        let model = website_model_fixture(primary_sha256.clone(), primary_bytes, hash_file(&text_encoder).expect("计算文本编码器哈希"), hash_file(&vae).expect("计算 VAE 哈希"));
+        let installed = install_website_model(&settings, &model, &downloaded).expect("安装网站底模");
+        assert!(!downloaded.exists());
+        assert!(model_root.join(&installed.model_relative_path).is_file());
+        assert_eq!(installed.model_sha256, primary_sha256);
+        assert!(installed.generation_profile_json.is_some());
+
+        let duplicate = temporary.path().join("duplicate.safetensors");
+        write_test_safetensors(&duplicate);
+        let second = install_website_model(&settings, &model, &duplicate).expect("幂等安装同一底模");
+        assert_eq!(second.model_relative_path, installed.model_relative_path);
+        assert!(!duplicate.exists());
+
+        let retained = temporary.path().join("retained.safetensors");
+        write_test_safetensors(&retained);
+        let mut invalid = model;
+        invalid.components.text_encoder.sha256 = "0".repeat(64);
+        assert!(install_website_model(&settings, &invalid, &retained).is_err());
+        assert!(retained.exists());
+    }
+
+    /** 构造只包含当前在线目录字段的 Anima 模型，不依赖标题或文件名推断。 */
+    fn website_model_fixture(model_sha256: String, model_bytes: u64, text_encoder_sha256: String, vae_sha256: String) -> DesktopWebsiteModelView {
+        let preset = DesktopWebsiteModelPreset { steps: 12, aspect_adjusted_steps: 12, sampling_max_edge: 1024, sampling_pixel_budget: 1_048_576 };
+        DesktopWebsiteModelView {
+            id: Uuid::new_v4().to_string(), display_name: "测试在线 Anima".into(), description: "测试".into(), family: "anima".into(), family_name: "Anima".into(), model_file_name: "online-anima.safetensors".into(), resource_group_id: None,
+            download: Some(DesktopWebsiteModelDownload { file_name: "online-anima.safetensors".into(), sha256: model_sha256, byte_size: model_bytes, content_url: "/v1/model-library/test/download".into() }),
+            components: DesktopWebsiteModelComponents { text_encoder: DesktopWebsiteModelComponent { file_name: "qwen.safetensors".into(), sha256: text_encoder_sha256 }, vae: DesktopWebsiteModelComponent { file_name: "anima-vae.safetensors".into(), sha256: vae_sha256 } },
+            runtime_format: "anima".into(), usage_guide: "测试".into(), source_links: Vec::new(),
+            parameters: DesktopWebsiteModelParameters { steps: 12, cfg: 1.0, sampler: "euler_ancestral".into(), scheduler: "normal".into(), sampling_max_edge: 1024, sampling_pixel_budget: 1_048_576, aspect_step_threshold: 1.5, max_edge: 1536, quality_prefix: "best quality".into(), default_negative_prompt: "low quality".into(), training_supported: false, available_samplers: vec!["euler_ancestral".into()], available_schedulers: vec!["normal".into()], presets: DesktopWebsiteModelPresets { fast: preset.clone(), quality: preset.clone(), extreme: preset } },
+            cover_path: None, example_paths: Vec::new(),
+        }
+    }
+
+    /** 网站安装测试使用隔离目录，避免读取真实用户设置。 */
+    fn test_settings(root: &Path) -> DesktopSettings {
+        DesktopSettings { theme_mode: "system".into(), font_scale: 1.1, default_privacy: "private".into(), auto_upload: false, model_root: root.join("models").to_string_lossy().into_owned(), output_root: root.join("outputs").to_string_lossy().into_owned(), runtime_root: root.join("runtime").to_string_lossy().into_owned(), upload_concurrency: 1, wifi_only: false, bandwidth_limit_kib: None }
     }
 
     fn write_test_safetensors(path: &Path) {

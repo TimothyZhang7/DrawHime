@@ -9,16 +9,13 @@ type ResourceItem = DesktopResourceCatalogView["resources"][number];
 type DownloadMap = Record<string, DesktopResourceDownloadView>;
 type InstallMap = Record<string, DesktopResourceInstallView>;
 
-const ANIMA_BASE_GROUP_ID = "model.anima-base-v10";
 const ACTIVE_DOWNLOAD_STATES = new Set(["queued", "downloading", "verifying"]);
 const ACTIVE_INSTALL_STATES = new Set(["verifying", "installing", "switching"]);
 const HIDDEN_RUNTIME_ISSUES = new Set(["runtime_missing", "runtime_unverified", "generation_model_missing", "captioner_missing", "trainer_missing"]);
 
-/** 资源安装页只纳入必需非模型组件和固定的 Anima Base 三文件底模。 */
+/** 资源安装页只纳入服务端签名清单明确标记为必需的依赖，客户端不写死任何底模。 */
 export function coreResources(catalog: DesktopResourceCatalogView | null): ResourceItem[] {
-  return catalog?.resources.filter((resource) => resource.kind === "model"
-    ? resource.modelRegistration?.groupId === ANIMA_BASE_GROUP_ID
-    : resource.required) || [];
+  return catalog?.resources.filter((resource) => resource.required) || [];
 }
 
 /** Runtime 缺失和等待自检由左下角统一承载，环境页只保留其他真实问题。 */
@@ -114,7 +111,7 @@ function QueueRow({ resource, current, installing, bulkBusy, onDownload, onPause
   const percent = installBusy ? Math.round(installing!.progress) : currentFailed ? safeDownloadPercent(current) : resource.installed || downloadComplete ? 100 : current ? safeDownloadPercent(current) : 0;
   const status = installBusy ? installStatusLabel(installing!.status) : currentFailed ? "下载失败" : resource.installed ? "已加载" : downloadComplete ? "下载完成" : current ? downloadStatusLabel(current.status) : "等待下载";
   const meta = progressMeta(resource, current, installing);
-  return <article className="queue-resource"><header><div><strong>{resourceDisplayName(resource)}</strong><span>{resource.fileName}</span></div><b>{percent}%</b></header><div className="resource-progress-head"><strong>{status}</strong><span>{current ? `${formatResourceBytes(current.downloadedBytes)} / ${formatResourceBytes(current.totalBytes)}` : resource.installed ? "文件已加载" : formatResourceBytes(resource.byteSize)}</span></div><div className={`resource-progress-track is-${current?.status || (installBusy ? "installing" : resource.installed ? "downloaded" : "queued")}`}><i style={{ width: `${percent}%` }} /></div><div className="resource-progress-meta">{meta.map((item) => <span key={item}>{item}</span>)}</div>{current?.switchReason && <small className="resource-switch-reason">{current.switchReason}</small>}<footer><ResourceAction resource={resource} current={current} installing={installing} bulkBusy={bulkBusy} onDownload={onDownload} onPause={onPause} onInstall={onInstall} /></footer></article>;
+  return <article className="queue-resource"><header><div><strong>{resourceDisplayName(resource)}</strong><span>{resource.fileName}</span></div><b>{percent}%</b></header><div className="resource-progress-head"><strong>{status}</strong><span>{current ? `${formatResourceBytes(current.downloadedBytes)} / ${formatResourceBytes(current.totalBytes)}` : resource.installed ? "文件已加载" : formatResourceBytes(resource.byteSize)}</span></div><div className={`resource-progress-track is-${current?.status || (installBusy ? "installing" : resource.installed ? "downloaded" : "queued")}`}><i style={{ width: `${percent}%` }} /></div><div className="resource-progress-meta">{meta.map((item) => <span key={item}>{item}</span>)}</div><footer><ResourceAction resource={resource} current={current} installing={installing} bulkBusy={bulkBusy} onDownload={onDownload} onPause={onPause} onInstall={onInstall} /></footer></article>;
 }
 
 /** 资源按钮根据真实下载和安装状态选择暂停、继续、安装或完成。 */

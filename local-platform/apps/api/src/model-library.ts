@@ -9,6 +9,7 @@ import { database } from "@drawhime/database";
 import { MainPlatformIntegrationError, publishMainPrice } from "@drawhime/main-platform-client";
 import { deleteObject, getObjectBuffer, putObjectBuffer, readJsonBody, sendError, sendSuccess, type ServiceRouter } from "@drawhime/service-runtime";
 import sharp from "sharp";
+import { animaComponentDefaults, animaRuntimeComponents } from "./anima-components.js";
 
 const maximumExampleBytes = 12 * 1024 * 1024;
 type SessionRecord = { externalIdentity: ExternalIdentity };
@@ -258,6 +259,7 @@ function buildDefaultParameters(input: ModelLibraryCreateRequest): Prisma.InputJ
     modelByteSize: input.modelByteSize,
     usageGuide: input.usageGuide,
     repositoryVisible: input.visible,
+    ...animaComponentDefaults(),
   };
 }
 
@@ -304,6 +306,7 @@ async function getEntryView(id: string, identity: ExternalIdentity): Promise<Mod
 async function toEntryView(row: ModelWithRepository, admin: boolean): Promise<ModelLibraryEntryView> {
   const defaults = readObject(row.defaultParameters);
   const sourceLinks = readSourceLinks(defaults);
+  const presets = readGenerationPresets(defaults);
   const references = await database.inferenceJob.findMany({
     where: {
       modelVersionId: row.id,
@@ -323,6 +326,7 @@ async function toEntryView(row: ModelWithRepository, admin: boolean): Promise<Mo
     family: row.family.slug,
     familyName: row.family.name,
     modelFileName: row.version,
+    resourceGroupId: stringValue(defaults.desktopResourceGroupId) || null,
     runtimeFormat: row.runtimeFormat,
     sourceUrl: sourceLinks[0]?.url || null,
     sourceLinks,
@@ -330,13 +334,23 @@ async function toEntryView(row: ModelWithRepository, admin: boolean): Promise<Mo
     visible: isVisible(row),
     isAdmin: admin,
     priceCny: String(defaults.priceCny || "0.00"),
+    download: readModelDownload(row.id, row.version, defaults),
+    components: readModelComponents(defaults),
     parameters: {
-      steps: numberValue(defaults.steps),
+      steps: presets.quality.steps,
       cfg: numberValue(defaults.cfg),
       sampler: stringValue(defaults.sampler) || "-",
       scheduler: stringValue(defaults.scheduler) || "-",
-      samplingMaxEdge: numberValue(defaults.samplingMaxEdge),
+      samplingMaxEdge: presets.quality.samplingMaxEdge,
+      samplingPixelBudget: presets.quality.samplingPixelBudget,
+      aspectStepThreshold: boundedNumber(defaults.aspectStepThreshold, 1, 4, 1.5),
       maxEdge: numberValue(defaults.maxEdge),
+      qualityPrefix: stringValue(defaults.qualityPrefix) || "",
+      defaultNegativePrompt: stringValue(defaults.defaultNegativePrompt) || "",
+      trainingSupported: defaults.trainingSupported !== false,
+      availableSamplers: stringList(defaults.availableSamplers, stringValue(defaults.sampler) || "euler"),
+      availableSchedulers: stringList(defaults.availableSchedulers, stringValue(defaults.scheduler) || "normal"),
+      presets,
     },
     examples: row.repositoryExamples.map((example) => ({
       id: example.id,
@@ -358,6 +372,35 @@ async function toEntryView(row: ModelWithRepository, admin: boolean): Promise<Mo
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
+}
+
+/** 从模型级目录参数读取 Runtime 组件；旧记录迁移期间使用服务端 Anima 默认值，不下沉到客户端。 */
+function readModelComponents(defaults: Record<string, unknown>): ModelLibraryEntryView["components"] {
+  const textEncoderFileName = safeComponentFileName(defaults.textEncoderFileName) || animaRuntimeComponents.textEncoder.fileName;
+  const textEncoderSha256 = readComponentSha256(defaults.textEncoderSha256) || animaRuntimeComponents.textEncoder.sha256;
+  const vaeFileName = safeComponentFileName(defaults.vaeFileName) || animaRuntimeComponents.vae.fileName;
+  const vaeSha256 = readComponentSha256(defaults.vaeSha256) || animaRuntimeComponents.vae.sha256;
+  return { textEncoder: { fileName: textEncoderFileName, sha256: textEncoderSha256 }, vae: { fileName: vaeFileName, sha256: vaeSha256 } };
+}
+
+function safeComponentFileName(value: unknown): string | null {
+  const name = stringValue(value);
+  return name && /^[a-zA-Z0-9._-]+\.safetensors$/.test(name) ? name : null;
+}
+
+function readComponentSha256(value: unknown): string | null {
+  const sha256 = stringValue(value)?.toLowerCase() ?? "";
+  return /^[a-f0-9]{64}$/.test(sha256) ? sha256 : null;
+}
+
+/** 主站 data 盘文件只有在目录同时声明文件名、大小和 SHA-256 时才允许桌面安装。 */
+function readModelDownload(modelId: string, fallbackFileName: string, defaults: Record<string, unknown>): ModelLibraryEntryView["download"] {
+  if (defaults.desktopDownloadEnabled !== true) return null;
+  const fileName = stringValue(defaults.desktopStorageFileName) || fallbackFileName;
+  const sha256 = stringValue(defaults.modelSha256)?.toLowerCase() || "";
+  const byteSize = numberValue(defaults.modelByteSize);
+  if (!/^[a-zA-Z0-9._-]+\.safetensors$/.test(fileName) || !/^[a-f0-9]{64}$/.test(sha256) || !Number.isSafeInteger(byteSize) || byteSize <= 0) return null;
+  return { fileName, sha256, byteSize, contentUrl: `/v1/model-library/${modelId}/download` };
 }
 
 /** 从受限请求头读取可选示例提示词，避免二进制图片请求引入额外 JSON 包装。 */
@@ -424,6 +467,45 @@ function normalizeInputSourceUrls(input: { sourceUrls: string[]; sourceUrl?: str
 function numberValue(value: unknown): number {
   const number = Number(value);
   return Number.isFinite(number) ? number : 0;
+}
+
+/** 读取模型目录持久化的三档采样预算；旧记录缺失时三档都使用当前推荐值，不由客户端猜测差异。 */
+function readGenerationPresets(defaults: Record<string, unknown>) {
+  const configured = readObject(defaults.generationPresets);
+  const fallback = {
+    steps: boundedInteger(defaults.steps, 1, 80, 20),
+    aspectAdjustedSteps: boundedInteger(defaults.aspectAdjustedSteps, 1, 80, boundedInteger(defaults.steps, 1, 80, 20)),
+    samplingMaxEdge: boundedInteger(defaults.samplingMaxEdge, 512, 2048, 1024),
+    samplingPixelBudget: boundedInteger(defaults.samplingPixelBudget, 262_144, 4_194_304, 1_048_576),
+  };
+  const readPreset = (key: string) => {
+    const value = readObject(configured[key]);
+    return {
+      steps: boundedInteger(value.steps, 1, 80, fallback.steps),
+      aspectAdjustedSteps: boundedInteger(value.aspectAdjustedSteps, 1, 80, fallback.aspectAdjustedSteps),
+      samplingMaxEdge: boundedInteger(value.samplingMaxEdge, 512, 2048, fallback.samplingMaxEdge),
+      samplingPixelBudget: boundedInteger(value.samplingPixelBudget, 262_144, 4_194_304, fallback.samplingPixelBudget),
+    };
+  };
+  return { fast: readPreset("fast"), quality: readPreset("quality"), extreme: readPreset("extreme") };
+}
+
+/** 读取受范围约束的整数配置。 */
+function boundedInteger(value: unknown, minimum: number, maximum: number, fallback: number): number {
+  const number = Number(value);
+  return Number.isSafeInteger(number) && number >= minimum && number <= maximum ? number : fallback;
+}
+
+/** 读取受范围约束的有限数值配置。 */
+function boundedNumber(value: unknown, minimum: number, maximum: number, fallback: number): number {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= minimum && number <= maximum ? number : fallback;
+}
+
+/** 读取模型允许的字符串选项并去重，至少保留当前推荐值。 */
+function stringList(value: unknown, fallback: string): string[] {
+  const values = Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim()) : [];
+  return [...new Set(values.length ? values : [fallback])].slice(0, 32);
 }
 
 /** 将管理员输入的主模型系列转为唯一稳定标识。 */

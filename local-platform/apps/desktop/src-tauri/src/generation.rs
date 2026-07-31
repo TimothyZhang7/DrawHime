@@ -544,7 +544,7 @@ mod tests {
         let Ok(model_root) = std::env::var("DRAWHIME_GENERATION_TEST_MODEL_ROOT") else { return; };
         let output_root = std::env::var("DRAWHIME_GENERATION_TEST_OUTPUT_ROOT").map(PathBuf::from).unwrap_or_else(|_| tempfile::tempdir().expect("创建真实生成输出目录").keep());
         let temporary = tempfile::tempdir().expect("创建真实生成状态目录");
-        let settings = DesktopSettings { theme_mode: "system".into(), font_scale: 1.1, dependency_source: "auto".into(), default_privacy: "private".into(), auto_upload: true, model_root, output_root: output_root.to_string_lossy().into_owned(), runtime_root, upload_concurrency: 2, wifi_only: false, bandwidth_limit_kib: None };
+        let settings = DesktopSettings { theme_mode: "system".into(), font_scale: 1.1, default_privacy: "private".into(), auto_upload: true, model_root, output_root: output_root.to_string_lossy().into_owned(), runtime_root, upload_concurrency: 2, wifi_only: false, bandwidth_limit_kib: None };
         let controller = RuntimeController::new();
         controller.self_test(&settings, temporary.path()).expect("真实 Runtime 自检");
         let endpoint = controller.endpoint().expect("读取 Runtime 端点");

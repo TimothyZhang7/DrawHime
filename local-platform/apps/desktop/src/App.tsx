@@ -1,7 +1,7 @@
 /**
  * 本文件实现桌面生成、任务、模型、Runtime、资源、环境、图库同步和本地设置的响应式工作区。
  */
-import type { DesktopAccountView, DesktopBootstrapView, DesktopCaptionJobView, DesktopLocalJobView, DesktopLocalLoraView, DesktopLocalModelView, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopSettings, DesktopSoftwareUpdateView, DesktopTrainingDatasetView, DesktopTrainingJobView, DesktopWebsiteLoraInstallProgress, DesktopWebsiteLoraView, DesktopWebsiteModelView } from "@drawhime/contracts";
+import type { DesktopAccountView, DesktopBootstrapView, DesktopCaptionJobView, DesktopLocalJobView, DesktopLocalLoraView, DesktopLocalModelView, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopSettings, DesktopSoftwareUpdateView, DesktopTrainingDatasetView, DesktopTrainingJobView, DesktopWebsiteLoraInstallProgress, DesktopWebsiteLoraView, DesktopWebsiteModelInstallProgress, DesktopWebsiteModelView } from "@drawhime/contracts";
 import type { DesktopAiSettings, DesktopAiSettingsUpdate } from "@drawhime/contracts";
 import { AlertTriangle, BookOpenCheck, CheckCircle2, Database, Download, FlaskConical, FolderCog, Gauge, Image, Images, KeyRound, Layers3, LoaderCircle, Monitor, Moon, PackageCheck, RefreshCw, Save, Settings2, ShieldCheck, Sparkles, Sun, Tags, Upload } from "lucide-react";
 import { Copy } from "lucide-react";
@@ -9,7 +9,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { applyDesktopSoftwareUpdate, cancelDesktopLocalJob, downloadDesktopResource, downloadDesktopSoftwareUpdate, importDesktopOfflineUpdate, inspectDesktopEnvironment, installDesktopResource, installDesktopWebsiteLora, listDesktopCaptionJobs, listDesktopLocalJobs, listDesktopLocalLoras, listDesktopLocalModels, listDesktopTrainingDatasets, listDesktopTrainingJobs, listenDesktopCaptionJobUpdates, listenDesktopLocalJobUpdates, listenDesktopResourceInstallProgress, listenDesktopResourceProgress, listenDesktopTrainingJobUpdates, listenDesktopWebsiteLoraProgress, loadDesktopAccountStatus, loadDesktopBootstrap, loadDesktopResourceCatalog, loadDesktopRuntimeStatus, loadDesktopSoftwareUpdateStatus, loadDesktopWebsiteLoras, loadDesktopWebsiteModels, pauseDesktopResourceDownload, rollbackDesktopSoftwareUpdate, saveDesktopSettings, selfTestDesktopRuntime, startDesktopRuntime } from "./desktop-api";
+import { applyDesktopSoftwareUpdate, cancelDesktopLocalJob, downloadDesktopResource, downloadDesktopSoftwareUpdate, importDesktopOfflineUpdate, inspectDesktopEnvironment, installDesktopResource, installDesktopWebsiteLora, installDesktopWebsiteModel, listDesktopCaptionJobs, listDesktopLocalJobs, listDesktopLocalLoras, listDesktopLocalModels, listDesktopTrainingDatasets, listDesktopTrainingJobs, listenDesktopCaptionJobUpdates, listenDesktopLocalJobUpdates, listenDesktopResourceInstallProgress, listenDesktopResourceProgress, listenDesktopTrainingJobUpdates, listenDesktopWebsiteLoraProgress, listenDesktopWebsiteModelProgress, loadDesktopAccountStatus, loadDesktopBootstrap, loadDesktopResourceCatalog, loadDesktopRuntimeStatus, loadDesktopSoftwareUpdateStatus, loadDesktopWebsiteLoras, loadDesktopWebsiteModels, pauseDesktopResourceDownload, rollbackDesktopSoftwareUpdate, saveDesktopSettings, selfTestDesktopRuntime, startDesktopRuntime } from "./desktop-api";
 import { analyzeDesktopImage, loadDesktopAiSettings, saveDesktopAiSettings, testDesktopAiSettings } from "./desktop-api";
 import { AccountPage } from "./AccountPage";
 import { LoraRepositoryPage, ModelRepositoryPage } from "./RepositoryPages";
@@ -50,6 +50,7 @@ export function App() {
   const [websiteModels, setWebsiteModels] = useState<DesktopWebsiteModelView[]>([]);
   const [websiteLoras, setWebsiteLoras] = useState<DesktopWebsiteLoraView[]>([]);
   const [websiteLoraProgress, setWebsiteLoraProgress] = useState<Record<string, DesktopWebsiteLoraInstallProgress>>({});
+  const [websiteModelProgress, setWebsiteModelProgress] = useState<Record<string, DesktopWebsiteModelInstallProgress>>({});
   const [softwareUpdate, setSoftwareUpdate] = useState<DesktopSoftwareUpdateView | null>(null);
   const [trainingDatasets, setTrainingDatasets] = useState<DesktopTrainingDatasetView[]>([]);
   const [captionJobs, setCaptionJobs] = useState<DesktopCaptionJobView[]>([]);
@@ -62,7 +63,6 @@ export function App() {
   const [themeSaving, setThemeSaving] = useState(false);
   const [startupPhase, setStartupPhase] = useState<StartupPhase>(null);
   const [resourceBulkBusy, setResourceBulkBusy] = useState(false);
-  const [modelGroupBusy, setModelGroupBusy] = useState<string | null>(null);
   const [downloadQueueOpen, setDownloadQueueOpen] = useState(false);
   const [message, setMessage] = useState("");
   const environmentCheckRunning = useRef(false);
@@ -70,7 +70,7 @@ export function App() {
   const captionDatasetRefresh = useRef<number | null>(null);
   const bootstrapReady = bootstrap !== null;
 
-  useEffect(() => { void loadDesktopBootstrap().then(async (state) => { lastEnvironmentCheckAt.current = Date.now(); setBootstrap(state); const accountRequest = loadDesktopAccountStatus().catch((): DesktopAccountView => ({ status: "offline", identity: null, expiresAt: null, message: "账号服务当前未连接；全部本地功能继续可用" })); const [catalog, nextModels, nextJobs, nextLoras, nextTrainingDatasets, nextCaptionJobs, nextTrainingJobs, nextAccount] = await Promise.all([loadDesktopResourceCatalog(), listDesktopLocalModels(), listDesktopLocalJobs(), listDesktopLocalLoras(), listDesktopTrainingDatasets(), listDesktopCaptionJobs(), listDesktopTrainingJobs(), accountRequest]); setResourceCatalog(catalog); setModels(nextModels); setJobs(nextJobs); setLoras(nextLoras); setTrainingDatasets(nextTrainingDatasets); setCaptionJobs(nextCaptionJobs); setTrainingJobs(nextTrainingJobs); setAccount(nextAccount); if (nextAccount.status === "connected") void Promise.all([loadDesktopWebsiteModels().catch(() => []), loadDesktopWebsiteLoras().catch(() => [])]).then(([remoteModels, remoteLoras]) => { setWebsiteModels(remoteModels); setWebsiteLoras(remoteLoras); }); }).catch((error) => setMessage(errorMessage(error))).finally(() => setLoading(false)); }, []);
+  useEffect(() => { void loadDesktopBootstrap().then(async (state) => { lastEnvironmentCheckAt.current = Date.now(); setBootstrap(state); const accountRequest = loadDesktopAccountStatus().catch((): DesktopAccountView => ({ status: "offline", identity: null, expiresAt: null, message: "账号服务当前未连接；全部本地功能继续可用" })); const [catalog, nextModels, nextJobs, nextLoras, nextTrainingDatasets, nextCaptionJobs, nextTrainingJobs, nextAccount] = await Promise.all([loadDesktopResourceCatalog(), listDesktopLocalModels(), listDesktopLocalJobs(), listDesktopLocalLoras(), listDesktopTrainingDatasets(), listDesktopCaptionJobs(), listDesktopTrainingJobs(), accountRequest]); setResourceCatalog(catalog); setModels(nextModels); setJobs(nextJobs); setLoras(nextLoras); setTrainingDatasets(nextTrainingDatasets); setCaptionJobs(nextCaptionJobs); setTrainingJobs(nextTrainingJobs); setAccount(nextAccount); if (["connected", "offline"].includes(nextAccount.status)) void Promise.all([loadDesktopWebsiteModels().catch(() => []), loadDesktopWebsiteLoras().catch(() => [])]).then(([remoteModels, remoteLoras]) => { setWebsiteModels(remoteModels); setWebsiteLoras(remoteLoras); }); }).catch((error) => setMessage(errorMessage(error))).finally(() => setLoading(false)); }, []);
   useEffect(() => { void loadDesktopSoftwareUpdateStatus().then(setSoftwareUpdate).catch((error) => setMessage(errorMessage(error))); }, []);
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -78,6 +78,11 @@ export function App() {
       setResourceProgress((current) => ({ ...current, [progress.resourceId]: progress }));
       if (progress.status === "downloaded") setMessage((current) => isTransientNetworkNotice(current) ? "" : current);
     }).then((dispose) => { unlisten = dispose; }).catch((error) => setMessage(errorMessage(error)));
+    return () => unlisten?.();
+  }, []);
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    void listenDesktopWebsiteModelProgress((progress) => setWebsiteModelProgress((current) => ({ ...current, [progress.modelId]: progress }))).then((dispose) => { unlisten = dispose; }).catch((error) => setMessage(errorMessage(error)));
     return () => unlisten?.();
   }, []);
   useEffect(() => {
@@ -185,16 +190,16 @@ export function App() {
   /** 单资源下载完成后重新读取目录，使已验证缓存状态立即更新。 */
   const downloadResource = async (resourceId: string, catalogOverride?: DesktopResourceCatalogView) => {
     const totalBytes = (catalogOverride || resourceCatalog)?.resources.find((item) => item.id === resourceId)?.byteSize || 1;
-    setResourceProgress((current) => ({ ...current, [resourceId]: { resourceId, status: "queued", sourceKind: current[resourceId]?.sourceKind || null, downloadedBytes: current[resourceId]?.downloadedBytes || 0, totalBytes, bytesPerSecond: 0, etaSeconds: null, switchReason: current[resourceId]?.switchReason || null, targetPath: null, error: null } }));
+    setResourceProgress((current) => ({ ...current, [resourceId]: { resourceId, status: "queued", sourceKind: current[resourceId]?.sourceKind || null, downloadedBytes: current[resourceId]?.downloadedBytes || 0, totalBytes, bytesPerSecond: 0, etaSeconds: null, targetPath: null, error: null } }));
     try { const progress = await downloadDesktopResource(resourceId); setResourceProgress((current) => ({ ...current, [resourceId]: progress })); await reloadResourceCatalog(); setMessage((current) => isTransientNetworkNotice(current) ? "" : current); return true; }
-    catch (error) { const message = errorMessage(error); const cacheInvalidated = message.includes("已隔离"); setResourceProgress((current) => ({ ...current, [resourceId]: { resourceId, status: "failed", sourceKind: current[resourceId]?.sourceKind || null, downloadedBytes: cacheInvalidated ? 0 : current[resourceId]?.downloadedBytes || 0, totalBytes, bytesPerSecond: 0, etaSeconds: null, switchReason: current[resourceId]?.switchReason || null, targetPath: null, error: message } })); await reloadResourceCatalog(); setMessage(message); return false; }
+    catch (error) { const message = errorMessage(error); const cacheInvalidated = message.includes("已隔离"); setResourceProgress((current) => ({ ...current, [resourceId]: { resourceId, status: "failed", sourceKind: current[resourceId]?.sourceKind || null, downloadedBytes: cacheInvalidated ? 0 : current[resourceId]?.downloadedBytes || 0, totalBytes, bytesPerSecond: 0, etaSeconds: null, targetPath: null, error: message } })); await reloadResourceCatalog(); setMessage(message); return false; }
   };
 
   /** 安装使用已验证缓存；完成后同步刷新资源状态与 Runtime 环境门禁。 */
   const installResource = async (resourceId: string) => {
     setInstallProgress((current) => ({ ...current, [resourceId]: { resourceId, status: "verifying", progress: 0, installPath: null, rollbackPath: null, error: null } }));
     try { const progress = await installDesktopResource(resourceId); setInstallProgress((current) => ({ ...current, [resourceId]: progress })); const [, , nextModels] = await Promise.all([reloadResourceCatalog(), recheck(true), listDesktopLocalModels()]); setModels(nextModels); setMessage((current) => isTransientNetworkNotice(current) ? "" : current); return true; }
-    catch (error) { const message = errorMessage(error); setInstallProgress((current) => ({ ...current, [resourceId]: { resourceId, status: "failed", progress: current[resourceId]?.progress || 0, installPath: null, rollbackPath: null, error: message } })); if (message.includes("已隔离")) setResourceProgress((current) => ({ ...current, [resourceId]: { resourceId, status: "failed", sourceKind: current[resourceId]?.sourceKind || null, downloadedBytes: 0, totalBytes: resourceCatalog?.resources.find((item) => item.id === resourceId)?.byteSize || current[resourceId]?.totalBytes || 1, bytesPerSecond: 0, etaSeconds: null, switchReason: null, targetPath: null, error: message } })); await reloadResourceCatalog(); setMessage(message); return false; }
+    catch (error) { const message = errorMessage(error); setInstallProgress((current) => ({ ...current, [resourceId]: { resourceId, status: "failed", progress: current[resourceId]?.progress || 0, installPath: null, rollbackPath: null, error: message } })); if (message.includes("已隔离")) setResourceProgress((current) => ({ ...current, [resourceId]: { resourceId, status: "failed", sourceKind: current[resourceId]?.sourceKind || null, downloadedBytes: 0, totalBytes: resourceCatalog?.resources.find((item) => item.id === resourceId)?.byteSize || current[resourceId]?.totalBytes || 1, bytesPerSecond: 0, etaSeconds: null, targetPath: null, error: message } })); await reloadResourceCatalog(); setMessage(message); return false; }
   };
 
   /** 初始化严格按签名清单顺序安装核心资源，任一失败即停止并保留断点。 */
@@ -204,7 +209,7 @@ export function App() {
     try {
       const pending = coreResources(catalog).filter((item) => !item.installed || forceResourceIds.includes(item.id));
       // 批量安装开始时先把所有缺失下载登记为队列，弹窗可立即展示真实执行顺序。
-      setResourceProgress((current) => pending.reduce((next, resource) => resource.downloaded ? next : ({ ...next, [resource.id]: { resourceId: resource.id, status: "queued", sourceKind: current[resource.id]?.sourceKind || null, downloadedBytes: current[resource.id]?.downloadedBytes || 0, totalBytes: resource.byteSize, bytesPerSecond: 0, etaSeconds: null, switchReason: current[resource.id]?.switchReason || null, targetPath: null, error: null } }), { ...current }));
+      setResourceProgress((current) => pending.reduce((next, resource) => resource.downloaded ? next : ({ ...next, [resource.id]: { resourceId: resource.id, status: "queued", sourceKind: current[resource.id]?.sourceKind || null, downloadedBytes: current[resource.id]?.downloadedBytes || 0, totalBytes: resource.byteSize, bytesPerSecond: 0, etaSeconds: null, targetPath: null, error: null } }), { ...current }));
       if (pending.length > 0) setDownloadQueueOpen(true);
       for (const resource of pending) {
         if (!resource.downloaded && !(await downloadResource(resource.id, catalog))) return false;
@@ -218,32 +223,13 @@ export function App() {
   const refreshRepositories = async () => {
     setCatalogLoading(true);
     try {
-      const remoteModels = account.status === "connected" ? loadDesktopWebsiteModels(true).catch(() => websiteModels) : Promise.resolve([]);
-      const remoteLoras = account.status === "connected" ? loadDesktopWebsiteLoras(true).catch(() => websiteLoras) : Promise.resolve([]);
+      const canReadCatalog = ["connected", "offline"].includes(account.status);
+      const remoteModels = canReadCatalog ? loadDesktopWebsiteModels(true).catch(() => websiteModels) : Promise.resolve([]);
+      const remoteLoras = canReadCatalog ? loadDesktopWebsiteLoras(true).catch(() => websiteLoras) : Promise.resolve([]);
       const [catalog, nextModels, nextLoras, nextWebsiteModels, nextWebsiteLoras] = await Promise.all([loadDesktopResourceCatalog(), listDesktopLocalModels(), listDesktopLocalLoras(), remoteModels, remoteLoras]);
       setResourceCatalog(catalog); setModels(nextModels); setLoras(nextLoras); setWebsiteModels(nextWebsiteModels); setWebsiteLoras(nextWebsiteLoras); setMessage("模型与 LoRA 仓库已刷新");
     } catch (error) { setMessage(errorMessage(error)); }
     finally { setCatalogLoading(false); }
-  };
-
-  /** 底模仓库按签名组顺序完成断点下载、校验与安装，任一文件失败即停止。 */
-  const installModelGroup = async (groupId: string, resourceIds: string[]) => {
-    if (modelGroupBusy || !resourceCatalog?.configured) return;
-    setModelGroupBusy(groupId);
-    try {
-      let installedResource = false;
-      for (const resourceId of resourceIds) {
-        const resource = resourceCatalog.resources.find((item) => item.id === resourceId);
-        if (!resource || resource.installed) continue;
-        if (!resource.downloaded && !(await downloadResource(resourceId))) return;
-        if (!(await installResource(resourceId))) return;
-        installedResource = true;
-      }
-      // 文件已经存在但本地数据库尚未登记时，重新执行一次幂等安装以恢复模型登记。
-      if (!installedResource && resourceIds[0] && !(await installResource(resourceIds[0]))) return;
-      const [nextModels, nextCatalog] = await Promise.all([listDesktopLocalModels(), loadDesktopResourceCatalog()]);
-      setModels(nextModels); setResourceCatalog(nextCatalog); setMessage("底模文件已安装并完成本地登记");
-    } finally { setModelGroupBusy(null); }
   };
 
   /** 首次初始化串联环境检测、核心依赖、Runtime 启动和完整自检，后续只执行启动。 */
@@ -302,6 +288,16 @@ export function App() {
     try { loraImported(await installDesktopWebsiteLora(id)); setWebsiteLoras(await loadDesktopWebsiteLoras()); }
     catch (error) { const message = errorMessage(error); setWebsiteLoraProgress((current) => ({ ...current, [id]: { loraId: id, status: "failed", downloadedBytes: current[id]?.downloadedBytes || 0, totalBytes: current[id]?.totalBytes || 1, bytesPerSecond: 0, error: message } })); setMessage(message); }
   };
+  /** 所有仓库底模不依赖签名资源组，直接按主站目录 SHA-256 安装并刷新本机模型。 */
+  const installWebsiteModel = async (id: string) => {
+    try { modelImported(await installDesktopWebsiteModel(id)); setWebsiteModels(await loadDesktopWebsiteModels()); }
+    catch (error) {
+      const message = errorMessage(error);
+      const totalBytes = websiteModels.find((item) => item.id === id)?.download?.byteSize || websiteModelProgress[id]?.totalBytes || 1;
+      setWebsiteModelProgress((current) => ({ ...current, [id]: { modelId: id, status: "failed", downloadedBytes: current[id]?.downloadedBytes || 0, totalBytes, bytesPerSecond: 0, error: message } }));
+      setMessage(message);
+    }
+  };
   /** 训练集任一步骤成功后按 ID 更新并置顶，页面实例保持当前输入。 */
   const trainingDatasetUpdated = (dataset: DesktopTrainingDatasetView) => {
     setTrainingDatasets((current) => [dataset, ...current.filter((item) => item.id !== dataset.id)]);
@@ -338,7 +334,7 @@ export function App() {
        {bootstrap.environment.status !== "ready" && critical && <section className={`environment-banner is-${critical.severity}`}><AlertTriangle /><div><strong>{critical.title}</strong><span>{critical.message}</span></div><button onClick={() => { setPage("overview"); setOverviewSection("start"); }}>查看启动状态</button></section>}
       {message && <div className="desktop-notice" role="status" aria-live="polite"><span>{message}</span><button aria-label="关闭提示" onClick={() => setMessage("")}>×</button></div>}
       <div hidden={page !== "generate"}><GenerationPage models={models} loras={loras} websiteLoras={websiteLoras} websiteLoraProgress={websiteLoraProgress} jobs={jobs} inferenceReady={bootstrap.environment.capabilities.inference} defaultPrivacy={bootstrap.settings.defaultPrivacy} onCreated={jobCreated} onInstallWebsiteLora={(id) => void installWebsiteLora(id)} onError={setMessage} /></div>
-      <div hidden={page !== "models"}><ModelRepositoryPage models={models} websiteModels={websiteModels} jobs={jobs} catalog={resourceCatalog} downloadProgress={resourceProgress} installProgress={installProgress} accountConnected={account.status === "connected"} modelRoot={bootstrap.settings.modelRoot} busyGroupId={modelGroupBusy} onRefresh={() => void refreshRepositories()} onInstallGroup={(groupId, resourceIds) => void installModelGroup(groupId, resourceIds)} onImported={modelImported} onOpenSettings={() => { setPage("settings"); setSettingsSection("general"); }} onError={setMessage} /></div>
+      <div hidden={page !== "models"}><ModelRepositoryPage models={models} websiteModels={websiteModels} jobs={jobs} websiteProgress={websiteModelProgress} accountConnected={account.status === "connected"} modelRoot={bootstrap.settings.modelRoot} onRefresh={() => void refreshRepositories()} onInstallWebsite={(id) => void installWebsiteModel(id)} onImported={modelImported} onOpenSettings={() => { setPage("settings"); setSettingsSection("general"); }} onError={setMessage} /></div>
       <div hidden={page !== "loras"}><LoraRepositoryPage loras={loras} websiteLoras={websiteLoras} jobs={jobs} progress={websiteLoraProgress} accountConnected={account.status === "connected"} modelRoot={bootstrap.settings.modelRoot} onRefresh={() => void refreshRepositories()} onInstall={(id) => void installWebsiteLora(id)} onImported={loraImported} onError={setMessage} /></div>
       <div hidden={page !== "captioning"}><CaptioningPage datasets={trainingDatasets} captionJobs={captionJobs} captioningReady={bootstrap.environment.capabilities.captioning} onUpdated={trainingDatasetUpdated} onCaptionJobUpdated={captionJobUpdated} onOpenResources={() => { setPage("overview"); setOverviewSection("start"); }} onError={setMessage} /></div>
       <div hidden={page !== "training"}><LoraTrainingPage datasets={trainingDatasets} trainingJobs={trainingJobs} models={models} trainingReady={bootstrap.environment.capabilities.training} onTrainingJobUpdated={trainingJobUpdated} onOpenResources={() => { setPage("overview"); setOverviewSection("start"); }} onError={setMessage} /></div>

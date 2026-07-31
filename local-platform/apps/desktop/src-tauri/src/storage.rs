@@ -2,7 +2,7 @@
 
 use crate::captioner::CaptionScheduler;
 use crate::gallery_sync::GallerySyncScheduler;
-use crate::models::{DesktopAiSettings, DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraView, DesktopLocalModelView, DesktopSettings, DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetView, DesktopTrainingJobCreateInput, DesktopTrainingJobView, DesktopTrainingTriggerWordsUpdateInput, GalleryPublicationInput, GallerySyncItem};
+use crate::models::{DesktopAiSettings, DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraView, DesktopLocalModelView, DesktopSettings, DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetView, DesktopTrainingJobCreateInput, DesktopTrainingJobView, DesktopTrainingTriggerWordsUpdateInput, DesktopWebsiteModelView, GalleryPublicationInput, GallerySyncItem};
 use crate::runtime::RuntimeController;
 use crate::scheduler::LocalScheduler;
 use crate::trainer::TrainingScheduler;
@@ -32,13 +32,13 @@ impl DesktopState {
         let database_path = app_data_dir.join("desktop.sqlite3");
         let connection = Connection::open(&database_path).map_err(|error| format!("打开桌面数据库失败：{error}"))?;
         connection.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
-            CREATE TABLE IF NOT EXISTS desktop_settings (id INTEGER PRIMARY KEY CHECK(id=1), theme_mode TEXT NOT NULL DEFAULT 'system', font_scale REAL NOT NULL DEFAULT 1.1, dependency_source TEXT NOT NULL DEFAULT 'mirror', default_privacy TEXT NOT NULL DEFAULT 'public', auto_upload INTEGER NOT NULL DEFAULT 1, model_root TEXT NOT NULL, output_root TEXT NOT NULL, runtime_root TEXT NOT NULL, upload_concurrency INTEGER NOT NULL, wifi_only INTEGER NOT NULL, bandwidth_limit_kib INTEGER, updated_at TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS desktop_settings (id INTEGER PRIMARY KEY CHECK(id=1), theme_mode TEXT NOT NULL DEFAULT 'system', font_scale REAL NOT NULL DEFAULT 1.1, default_privacy TEXT NOT NULL DEFAULT 'public', auto_upload INTEGER NOT NULL DEFAULT 1, model_root TEXT NOT NULL, output_root TEXT NOT NULL, runtime_root TEXT NOT NULL, upload_concurrency INTEGER NOT NULL, wifi_only INTEGER NOT NULL, bandwidth_limit_kib INTEGER, updated_at TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS desktop_ai_settings (id INTEGER PRIMARY KEY CHECK(id=1), enabled INTEGER NOT NULL DEFAULT 0, endpoint_type TEXT NOT NULL DEFAULT 'openai_chat', base_url TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS environment_snapshots (id INTEGER PRIMARY KEY AUTOINCREMENT, report_json TEXT NOT NULL, checked_at TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS software_updates (version TEXT PRIMARY KEY, resource_id TEXT NOT NULL, file_name TEXT NOT NULL, sha256 TEXT NOT NULL, byte_size INTEGER NOT NULL, source TEXT NOT NULL, status TEXT NOT NULL, error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, applied_at TEXT);
             CREATE TABLE IF NOT EXISTS gallery_sync_queue (id TEXT PRIMARY KEY, local_task_id TEXT NOT NULL, artifact_path TEXT NOT NULL, artifact_sha256 TEXT NOT NULL, privacy TEXT NOT NULL, status TEXT NOT NULL, uploaded_bytes INTEGER NOT NULL DEFAULT 0, retry_count INTEGER NOT NULL DEFAULT 0, gallery_item_id TEXT, last_error TEXT, owner_issuer TEXT, owner_subject TEXT, server_upload_id TEXT, next_attempt_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(local_task_id, artifact_sha256));
             CREATE TABLE IF NOT EXISTS local_models (id TEXT PRIMARY KEY, display_name TEXT NOT NULL, family TEXT NOT NULL, workflow_kind TEXT NOT NULL, model_file_name TEXT NOT NULL, model_relative_path TEXT NOT NULL, model_sha256 TEXT NOT NULL, byte_size INTEGER NOT NULL, model_modified_ms INTEGER NOT NULL, text_encoder_file_name TEXT, text_encoder_relative_path TEXT, text_encoder_sha256 TEXT, vae_file_name TEXT, vae_relative_path TEXT, vae_sha256 TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(model_sha256, workflow_kind));
-            CREATE TABLE IF NOT EXISTS local_loras (id TEXT PRIMARY KEY, title TEXT NOT NULL, type TEXT NOT NULL, file_name TEXT NOT NULL, relative_path TEXT NOT NULL, sha256 TEXT NOT NULL UNIQUE, byte_size INTEGER NOT NULL, modified_ms INTEGER NOT NULL, trigger_words_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS local_loras (id TEXT PRIMARY KEY, title TEXT NOT NULL, type TEXT NOT NULL, file_name TEXT NOT NULL, relative_path TEXT NOT NULL, sha256 TEXT NOT NULL UNIQUE, byte_size INTEGER NOT NULL, modified_ms INTEGER NOT NULL, trigger_words_json TEXT NOT NULL, base_model_sha256 TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS local_training_datasets (id TEXT PRIMARY KEY, title TEXT NOT NULL, type TEXT NOT NULL, trigger_words_json TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS local_training_assets (id TEXT PRIMARY KEY, dataset_id TEXT NOT NULL, file_name TEXT NOT NULL, relative_path TEXT NOT NULL, sha256 TEXT NOT NULL, byte_size INTEGER NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL, caption TEXT, confirmed INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(dataset_id,sha256), FOREIGN KEY(dataset_id) REFERENCES local_training_datasets(id));
             CREATE TABLE IF NOT EXISTS local_caption_jobs (id TEXT PRIMARY KEY, dataset_id TEXT NOT NULL, asset_id TEXT, status TEXT NOT NULL, progress INTEGER NOT NULL DEFAULT 0, total_assets INTEGER NOT NULL, processed_assets INTEGER NOT NULL DEFAULT 0, succeeded_assets INTEGER NOT NULL DEFAULT 0, failed_assets INTEGER NOT NULL DEFAULT 0, skipped_assets INTEGER NOT NULL DEFAULT 0, general_threshold REAL NOT NULL, character_threshold REAL NOT NULL, include_character_tags INTEGER NOT NULL, cancel_requested INTEGER NOT NULL DEFAULT 0, error TEXT, created_at TEXT NOT NULL, started_at TEXT, completed_at TEXT, updated_at TEXT NOT NULL, FOREIGN KEY(dataset_id) REFERENCES local_training_datasets(id));
@@ -68,8 +68,10 @@ impl DesktopState {
         connection.execute("UPDATE local_training_jobs SET status='queued',progress=0,current_epoch=0,started_at=NULL,error=NULL,suggestion_json=NULL,updated_at=?1 WHERE status='running' AND cancel_requested=0", [&recovery_time]).map_err(|error| format!("恢复中断的训练任务失败：{error}"))?;
         ensure_column(&connection, "desktop_settings", "theme_mode", "TEXT NOT NULL DEFAULT 'system'")?;
         ensure_column(&connection, "desktop_settings", "font_scale", "REAL NOT NULL DEFAULT 1.1")?;
-        ensure_column(&connection, "desktop_settings", "dependency_source", "TEXT NOT NULL DEFAULT 'mirror'")?;
         ensure_column(&connection, "desktop_settings", "auto_upload", "INTEGER NOT NULL DEFAULT 1")?;
+        ensure_column(&connection, "local_models", "resource_group_id", "TEXT")?;
+        ensure_column(&connection, "local_models", "generation_profile_json", "TEXT")?;
+        ensure_column(&connection, "local_loras", "base_model_sha256", "TEXT")?;
         ensure_column(&connection, "local_job_loras", "relative_path", "TEXT NOT NULL DEFAULT ''")?;
         ensure_column(&connection, "local_job_loras", "byte_size", "INTEGER NOT NULL DEFAULT 0")?;
         ensure_column(&connection, "local_job_loras", "modified_ms", "INTEGER NOT NULL DEFAULT 0")?;
@@ -99,9 +101,7 @@ impl DesktopState {
         let runtime_root = app_data_dir.join("runtime");
         let output_root = app_data_dir.join("outputs");
         for directory in [&model_root, &runtime_root, &output_root] { fs::create_dir_all(directory).map_err(|error| format!("创建本地目录失败：{error}"))?; }
-        connection.execute("INSERT OR IGNORE INTO desktop_settings (id, theme_mode, font_scale, dependency_source, default_privacy, auto_upload, model_root, output_root, runtime_root, upload_concurrency, wifi_only, bandwidth_limit_kib, updated_at) VALUES (1, 'system', 1.1, 'mirror', 'public', 1, ?1, ?2, ?3, 2, 0, NULL, ?4)", params![path_text(&model_root), path_text(&output_root), path_text(&runtime_root), Utc::now().to_rfc3339()]).map_err(|error| format!("写入默认设置失败：{error}"))?;
-        // 旧版本保存的自动或官方来源统一迁移为主站镜像，升级后不再向第三方下载资源。
-        connection.execute("UPDATE desktop_settings SET dependency_source='mirror' WHERE dependency_source<>'mirror'", []).map_err(|error| format!("迁移主站镜像下载来源失败：{error}"))?;
+        connection.execute("INSERT OR IGNORE INTO desktop_settings (id, theme_mode, font_scale, default_privacy, auto_upload, model_root, output_root, runtime_root, upload_concurrency, wifi_only, bandwidth_limit_kib, updated_at) VALUES (1, 'system', 1.1, 'public', 1, ?1, ?2, ?3, 2, 0, NULL, ?4)", params![path_text(&model_root), path_text(&output_root), path_text(&runtime_root), Utc::now().to_rfc3339()]).map_err(|error| format!("写入默认设置失败：{error}"))?;
         connection.execute("INSERT OR IGNORE INTO desktop_ai_settings (id, enabled, endpoint_type, base_url, model, updated_at) VALUES (1, 0, 'openai_chat', '', '', ?1)", [Utc::now().to_rfc3339()]).map_err(|error| format!("写入默认 AI 设置失败：{error}"))?;
         Ok(Self { database: Mutex::new(connection), app_data_dir: app_data_dir.to_path_buf(), database_path, scheduler: None, caption_scheduler: None, training_scheduler: None, gallery_sync_scheduler: None, runtime: Arc::new(RuntimeController::initialize(app_data_dir)?), gpu_workload: GpuWorkloadCoordinator::new() })
     }
@@ -119,15 +119,13 @@ impl DesktopState {
     /** 读取唯一桌面设置记录。 */
     pub fn load_settings(&self) -> Result<DesktopSettings, String> {
         let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
-        database.query_row("SELECT theme_mode, font_scale, dependency_source, default_privacy, auto_upload, model_root, output_root, runtime_root, upload_concurrency, wifi_only, bandwidth_limit_kib FROM desktop_settings WHERE id=1", [], |row| Ok(DesktopSettings { theme_mode: row.get(0)?, font_scale: row.get(1)?, dependency_source: row.get(2)?, default_privacy: row.get(3)?, auto_upload: row.get::<_, i64>(4)? != 0, model_root: row.get(5)?, output_root: row.get(6)?, runtime_root: row.get(7)?, upload_concurrency: row.get(8)?, wifi_only: row.get::<_, i64>(9)? != 0, bandwidth_limit_kib: row.get(10)? })).map_err(|error| format!("读取桌面设置失败：{error}"))
+        database.query_row("SELECT theme_mode, font_scale, default_privacy, auto_upload, model_root, output_root, runtime_root, upload_concurrency, wifi_only, bandwidth_limit_kib FROM desktop_settings WHERE id=1", [], |row| Ok(DesktopSettings { theme_mode: row.get(0)?, font_scale: row.get(1)?, default_privacy: row.get(2)?, auto_upload: row.get::<_, i64>(3)? != 0, model_root: row.get(4)?, output_root: row.get(5)?, runtime_root: row.get(6)?, upload_concurrency: row.get(7)?, wifi_only: row.get::<_, i64>(8)? != 0, bandwidth_limit_kib: row.get(9)? })).map_err(|error| format!("读取桌面设置失败：{error}"))
     }
 
     /** 校验目录和上传策略后事务化更新设置。 */
     pub fn save_settings(&self, mut settings: DesktopSettings) -> Result<DesktopSettings, String> {
         if !matches!(settings.theme_mode.as_str(), "system" | "dark" | "light") { return Err("主题模式不正确".into()); }
         if !settings.font_scale.is_finite() || !(1.0..=1.3).contains(&settings.font_scale) || ((settings.font_scale * 20.0).round() - settings.font_scale * 20.0).abs() > 0.001 { return Err("字体大小必须是 100%–130% 的 5% 档位".into()); }
-        // 下载来源不再由界面选择，后端始终固化为经过签名和哈希校验的主站镜像。
-        settings.dependency_source = "mirror".into();
         if !matches!(settings.default_privacy.as_str(), "public" | "private") { return Err("默认图库权限不正确".into()); }
         if !(1..=4).contains(&settings.upload_concurrency) { return Err("上传并发数必须是 1–4".into()); }
         // 存储目录固定跟随安装目录，前端传入的旧目录值不得把模型或作品重新写到其他磁盘位置。
@@ -142,7 +140,7 @@ impl DesktopState {
             fs::remove_file(probe).map_err(|error| format!("目录清理测试失败：{path}：{error}"))?;
         }
         let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
-        database.execute("UPDATE desktop_settings SET theme_mode=?1, font_scale=?2, dependency_source=?3, default_privacy=?4, auto_upload=?5, model_root=?6, output_root=?7, runtime_root=?8, upload_concurrency=?9, wifi_only=?10, bandwidth_limit_kib=?11, updated_at=?12 WHERE id=1", params![settings.theme_mode, settings.font_scale, settings.dependency_source, settings.default_privacy, settings.auto_upload, settings.model_root, settings.output_root, settings.runtime_root, settings.upload_concurrency, settings.wifi_only, settings.bandwidth_limit_kib, Utc::now().to_rfc3339()]).map_err(|error| format!("保存桌面设置失败：{error}"))?;
+        database.execute("UPDATE desktop_settings SET theme_mode=?1, font_scale=?2, default_privacy=?3, auto_upload=?4, model_root=?5, output_root=?6, runtime_root=?7, upload_concurrency=?8, wifi_only=?9, bandwidth_limit_kib=?10, updated_at=?11 WHERE id=1", params![settings.theme_mode, settings.font_scale, settings.default_privacy, settings.auto_upload, settings.model_root, settings.output_root, settings.runtime_root, settings.upload_concurrency, settings.wifi_only, settings.bandwidth_limit_kib, Utc::now().to_rfc3339()]).map_err(|error| format!("保存桌面设置失败：{error}"))?;
         drop(database);
         self.load_settings()
     }
@@ -206,7 +204,7 @@ impl DesktopState {
         let existing: Option<String> = database.query_row("SELECT id FROM local_models WHERE model_sha256=?1 AND workflow_kind=?2", params![model.model_sha256, model.workflow_kind], |row| row.get(0)).optional().map_err(|error| format!("查询本地模型失败：{error}"))?;
         let id = existing.unwrap_or_else(|| Uuid::new_v4().to_string());
         let now = Utc::now().to_rfc3339();
-        database.execute("INSERT INTO local_models (id, display_name, family, workflow_kind, model_file_name, model_relative_path, model_sha256, byte_size, model_modified_ms, text_encoder_file_name, text_encoder_relative_path, text_encoder_sha256, vae_file_name, vae_relative_path, vae_sha256, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?16) ON CONFLICT(model_sha256, workflow_kind) DO UPDATE SET display_name=excluded.display_name, family=excluded.family, model_file_name=excluded.model_file_name, model_relative_path=excluded.model_relative_path, byte_size=excluded.byte_size, model_modified_ms=excluded.model_modified_ms, text_encoder_file_name=excluded.text_encoder_file_name, text_encoder_relative_path=excluded.text_encoder_relative_path, text_encoder_sha256=excluded.text_encoder_sha256, vae_file_name=excluded.vae_file_name, vae_relative_path=excluded.vae_relative_path, vae_sha256=excluded.vae_sha256, updated_at=excluded.updated_at", params![id, model.display_name, model.family, model.workflow_kind, model.model_file_name, model.model_relative_path, model.model_sha256, model.byte_size, model.model_modified_ms, model.text_encoder_file_name, model.text_encoder_relative_path, model.text_encoder_sha256, model.vae_file_name, model.vae_relative_path, model.vae_sha256, now]).map_err(|error| format!("登记本地模型失败：{error}"))?;
+        database.execute("INSERT INTO local_models (id, display_name, family, workflow_kind, model_file_name, model_relative_path, model_sha256, byte_size, model_modified_ms, text_encoder_file_name, text_encoder_relative_path, text_encoder_sha256, vae_file_name, vae_relative_path, vae_sha256, resource_group_id, generation_profile_json, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?18) ON CONFLICT(model_sha256, workflow_kind) DO UPDATE SET display_name=excluded.display_name, family=excluded.family, model_file_name=excluded.model_file_name, model_relative_path=excluded.model_relative_path, byte_size=excluded.byte_size, model_modified_ms=excluded.model_modified_ms, text_encoder_file_name=excluded.text_encoder_file_name, text_encoder_relative_path=excluded.text_encoder_relative_path, text_encoder_sha256=excluded.text_encoder_sha256, vae_file_name=excluded.vae_file_name, vae_relative_path=excluded.vae_relative_path, vae_sha256=excluded.vae_sha256, resource_group_id=COALESCE(excluded.resource_group_id,local_models.resource_group_id), generation_profile_json=COALESCE(excluded.generation_profile_json,local_models.generation_profile_json), updated_at=excluded.updated_at", params![id, model.display_name, model.family, model.workflow_kind, model.model_file_name, model.model_relative_path, model.model_sha256, model.byte_size, model.model_modified_ms, model.text_encoder_file_name, model.text_encoder_relative_path, model.text_encoder_sha256, model.vae_file_name, model.vae_relative_path, model.vae_sha256, model.resource_group_id, model.generation_profile_json, now]).map_err(|error| format!("登记本地模型失败：{error}"))?;
         drop(database);
         self.local_model(&id)?.ok_or_else(|| "本地模型登记后不存在".into())
     }
@@ -215,9 +213,21 @@ impl DesktopState {
     pub fn list_local_models(&self) -> Result<Vec<DesktopLocalModelView>, String> {
         let settings = self.load_settings()?;
         let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
-        let mut statement = database.prepare("SELECT id,display_name,family,workflow_kind,model_file_name,model_relative_path,model_sha256,byte_size,model_modified_ms,text_encoder_file_name,text_encoder_relative_path,vae_file_name,vae_relative_path,created_at,updated_at FROM local_models ORDER BY updated_at DESC").map_err(|error| format!("读取本地模型列表失败：{error}"))?;
+        let mut statement = database.prepare("SELECT id,display_name,family,workflow_kind,model_file_name,model_relative_path,model_sha256,byte_size,model_modified_ms,text_encoder_file_name,text_encoder_relative_path,vae_file_name,vae_relative_path,resource_group_id,generation_profile_json,created_at,updated_at FROM local_models ORDER BY updated_at DESC").map_err(|error| format!("读取本地模型列表失败：{error}"))?;
         let rows = statement.query_map([], |row| local_model_from_row(row, &settings.model_root)).map_err(|error| format!("查询本地模型列表失败：{error}"))?;
         rows.collect::<Result<Vec<_>, _>>().map_err(|error| format!("解析本地模型列表失败：{error}"))
+    }
+
+    /** 把 Rust 核心刚获取或从可信缓存读取的在线目录参数同步到已安装底模。 */
+    pub fn sync_model_profiles(&self, models: &[DesktopWebsiteModelView]) -> Result<(), String> {
+        let mut database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        let transaction = database.transaction().map_err(|error| format!("开启底模参数同步事务失败：{error}"))?;
+        for model in models {
+            let Some(group_id) = model.resource_group_id.as_deref() else { continue; };
+            let profile = serde_json::to_string(&model.parameters).map_err(|error| format!("序列化底模生成参数失败：{error}"))?;
+            transaction.execute("UPDATE local_models SET generation_profile_json=?1,updated_at=?2 WHERE resource_group_id=?3", params![profile, Utc::now().to_rfc3339(), group_id]).map_err(|error| format!("同步底模生成参数失败：{error}"))?;
+        }
+        transaction.commit().map_err(|error| format!("提交底模参数同步失败：{error}"))
     }
 
     /** 按内容哈希幂等登记本机 LoRA。 */
@@ -227,7 +237,7 @@ impl DesktopState {
         let id = existing.unwrap_or_else(|| Uuid::new_v4().to_string());
         let now = Utc::now().to_rfc3339();
         let trigger_words_json = serde_json::to_string(&lora.trigger_words).map_err(|error| format!("序列化 LoRA 触发词失败：{error}"))?;
-        database.execute("INSERT INTO local_loras (id,title,type,file_name,relative_path,sha256,byte_size,modified_ms,trigger_words_json,created_at,updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?10) ON CONFLICT(sha256) DO UPDATE SET title=excluded.title,type=excluded.type,file_name=excluded.file_name,relative_path=excluded.relative_path,byte_size=excluded.byte_size,modified_ms=excluded.modified_ms,trigger_words_json=excluded.trigger_words_json,updated_at=excluded.updated_at", params![id,lora.title,lora.r#type,lora.file_name,lora.relative_path,lora.sha256,lora.byte_size,lora.modified_ms,trigger_words_json,now]).map_err(|error| format!("登记本地 LoRA 失败：{error}"))?;
+        database.execute("INSERT INTO local_loras (id,title,type,file_name,relative_path,sha256,byte_size,modified_ms,trigger_words_json,base_model_sha256,created_at,updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?11) ON CONFLICT(sha256) DO UPDATE SET title=excluded.title,type=excluded.type,file_name=excluded.file_name,relative_path=excluded.relative_path,byte_size=excluded.byte_size,modified_ms=excluded.modified_ms,trigger_words_json=excluded.trigger_words_json,base_model_sha256=COALESCE(excluded.base_model_sha256,local_loras.base_model_sha256),updated_at=excluded.updated_at", params![id,lora.title,lora.r#type,lora.file_name,lora.relative_path,lora.sha256,lora.byte_size,lora.modified_ms,trigger_words_json,lora.base_model_sha256,now]).map_err(|error| format!("登记本地 LoRA 失败：{error}"))?;
         drop(database);
         self.local_lora(&id)?.ok_or_else(|| "本地 LoRA 登记后不存在".into())
     }
@@ -236,7 +246,7 @@ impl DesktopState {
     pub fn list_local_loras(&self) -> Result<Vec<DesktopLocalLoraView>, String> {
         let settings = self.load_settings()?;
         let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
-        let mut statement = database.prepare("SELECT id,title,type,file_name,relative_path,sha256,byte_size,modified_ms,trigger_words_json,created_at,updated_at FROM local_loras ORDER BY updated_at DESC").map_err(|error| format!("读取本地 LoRA 列表失败：{error}"))?;
+        let mut statement = database.prepare("SELECT id,title,type,file_name,relative_path,sha256,byte_size,modified_ms,trigger_words_json,base_model_sha256,created_at,updated_at FROM local_loras ORDER BY updated_at DESC").map_err(|error| format!("读取本地 LoRA 列表失败：{error}"))?;
         let rows = statement.query_map([], |row| local_lora_from_row(row, &settings.model_root)).map_err(|error| format!("查询本地 LoRA 列表失败：{error}"))?;
         rows.collect::<Result<Vec<_>, _>>().map_err(|error| format!("解析本地 LoRA 列表失败：{error}"))
     }
@@ -244,7 +254,7 @@ impl DesktopState {
     fn local_lora(&self, id: &str) -> Result<Option<DesktopLocalLoraView>, String> {
         let settings = self.load_settings()?;
         let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
-        database.query_row("SELECT id,title,type,file_name,relative_path,sha256,byte_size,modified_ms,trigger_words_json,created_at,updated_at FROM local_loras WHERE id=?1", [id], |row| local_lora_from_row(row, &settings.model_root)).optional().map_err(|error| format!("读取本地 LoRA 失败：{error}"))
+        database.query_row("SELECT id,title,type,file_name,relative_path,sha256,byte_size,modified_ms,trigger_words_json,base_model_sha256,created_at,updated_at FROM local_loras WHERE id=?1", [id], |row| local_lora_from_row(row, &settings.model_root)).optional().map_err(|error| format!("读取本地 LoRA 失败：{error}"))
     }
 
     /** 创建持久化本地训练集，后续图片导入、打标和训练共用同一记录。 */
@@ -359,7 +369,7 @@ impl DesktopState {
     fn local_model(&self, id: &str) -> Result<Option<DesktopLocalModelView>, String> {
         let settings = self.load_settings()?;
         let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
-        database.query_row("SELECT id,display_name,family,workflow_kind,model_file_name,model_relative_path,model_sha256,byte_size,model_modified_ms,text_encoder_file_name,text_encoder_relative_path,vae_file_name,vae_relative_path,created_at,updated_at FROM local_models WHERE id=?1", [id], |row| local_model_from_row(row, &settings.model_root)).optional().map_err(|error| format!("读取本地模型失败：{error}"))
+        database.query_row("SELECT id,display_name,family,workflow_kind,model_file_name,model_relative_path,model_sha256,byte_size,model_modified_ms,text_encoder_file_name,text_encoder_relative_path,vae_file_name,vae_relative_path,resource_group_id,generation_profile_json,created_at,updated_at FROM local_models WHERE id=?1", [id], |row| local_model_from_row(row, &settings.model_root)).optional().map_err(|error| format!("读取本地模型失败：{error}"))
     }
 
     fn gallery_item(&self, id: &str) -> Result<Option<GallerySyncItem>, String> {
@@ -384,6 +394,8 @@ pub struct LocalModelRegistration {
     pub vae_file_name: Option<String>,
     pub vae_relative_path: Option<String>,
     pub vae_sha256: Option<String>,
+    pub resource_group_id: Option<String>,
+    pub generation_profile_json: Option<String>,
 }
 
 /** 已完成安全复制、等待写入 SQLite 的 LoRA 记录。 */
@@ -393,6 +405,7 @@ pub struct LocalLoraRegistration {
     pub file_name: String,
     pub relative_path: String,
     pub sha256: String,
+    pub base_model_sha256: Option<String>,
     pub byte_size: u64,
     pub modified_ms: u64,
     pub trigger_words: Vec<String>,
@@ -408,7 +421,9 @@ fn local_model_from_row(row: &rusqlite::Row<'_>, model_root: &str) -> rusqlite::
     let vae_relative_path: Option<String> = row.get(12)?;
     let primary_available = metadata.as_ref().is_some_and(|value| value.is_file() && value.len() == expected_size && modified_millis(value).ok() == Some(expected_modified_ms));
     let components_available = workflow_kind != "anima" || (text_relative_path.as_ref().is_some_and(|path| Path::new(model_root).join(path).is_file()) && vae_relative_path.as_ref().is_some_and(|path| Path::new(model_root).join(path).is_file()));
-    Ok(DesktopLocalModelView { id: row.get(0)?, display_name: row.get(1)?, family: row.get(2)?, workflow_kind, model_file_name: row.get(4)?, model_sha256: row.get(6)?, byte_size: expected_size, text_encoder_file_name: row.get(9)?, vae_file_name: row.get(11)?, available: primary_available && components_available, created_at: row.get(13)?, updated_at: row.get(14)? })
+    let profile_json: Option<String> = row.get(14)?;
+    let generation_profile = profile_json.map(|value| serde_json::from_str(&value).map_err(|error| rusqlite::Error::FromSqlConversionFailure(14, rusqlite::types::Type::Text, Box::new(error)))).transpose()?;
+    Ok(DesktopLocalModelView { id: row.get(0)?, display_name: row.get(1)?, family: row.get(2)?, workflow_kind, model_file_name: row.get(4)?, resource_group_id: row.get(13)?, generation_profile, model_sha256: row.get(6)?, byte_size: expected_size, text_encoder_file_name: row.get(9)?, vae_file_name: row.get(11)?, available: primary_available && components_available, created_at: row.get(15)?, updated_at: row.get(16)? })
 }
 
 fn local_lora_from_row(row: &rusqlite::Row<'_>, model_root: &str) -> rusqlite::Result<DesktopLocalLoraView> {
@@ -419,7 +434,7 @@ fn local_lora_from_row(row: &rusqlite::Row<'_>, model_root: &str) -> rusqlite::R
     let trigger_words_json: String = row.get(8)?;
     let trigger_words = serde_json::from_str(&trigger_words_json).map_err(|error| rusqlite::Error::FromSqlConversionFailure(8, rusqlite::types::Type::Text, Box::new(error)))?;
     let available = metadata.as_ref().is_some_and(|value| value.is_file() && value.len() == expected_size && modified_millis(value).ok() == Some(expected_modified_ms));
-    Ok(DesktopLocalLoraView { id: row.get(0)?, title: row.get(1)?, r#type: row.get(2)?, file_name: row.get(3)?, sha256: row.get(5)?, byte_size: expected_size, trigger_words, available, created_at: row.get(9)?, updated_at: row.get(10)? })
+    Ok(DesktopLocalLoraView { id: row.get(0)?, title: row.get(1)?, r#type: row.get(2)?, file_name: row.get(3)?, sha256: row.get(5)?, base_model_sha256: row.get(9)?, byte_size: expected_size, trigger_words, available, created_at: row.get(10)?, updated_at: row.get(11)? })
 }
 
 fn gallery_item_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<GallerySyncItem> { Ok(GallerySyncItem { id: row.get(0)?, local_task_id: row.get(1)?, artifact_path: row.get(2)?, artifact_sha256: row.get(3)?, privacy: row.get(4)?, status: row.get(5)?, uploaded_bytes: row.get(6)?, retry_count: row.get(7)?, gallery_item_id: row.get(8)?, last_error: row.get(9)?, created_at: row.get(10)?, updated_at: row.get(11)? }) }
@@ -465,7 +480,6 @@ mod tests {
         let mut settings = state.load_settings().expect("读取设置");
         assert_eq!(settings.theme_mode, "system");
         assert!((settings.font_scale - 1.1).abs() < f64::EPSILON);
-        assert_eq!(settings.dependency_source, "mirror");
         assert_eq!(settings.default_privacy, "public");
         assert!(settings.auto_upload);
         settings.default_privacy = "public".into();

@@ -19,6 +19,7 @@ mod training_dataset;
 mod trainer;
 mod workload;
 mod website_lora;
+mod website_catalog_cache;
 mod website_media;
 mod website_model;
 mod website_tag_translation;
@@ -207,7 +208,39 @@ async fn desktop_load_website_loras(state: State<'_, DesktopState>, force_refres
 #[tauri::command]
 async fn desktop_load_website_models(state: State<'_, DesktopState>, force_refresh: bool) -> Result<Vec<DesktopWebsiteModelView>, String> {
     let app_data_dir = state.app_data_dir.clone();
-    tauri::async_runtime::spawn_blocking(move || website_model::load_catalog(&app_data_dir, force_refresh)).await.map_err(|error| format!("网站底模目录任务异常：{error}"))?
+    let models = tauri::async_runtime::spawn_blocking(move || website_model::load_catalog(&app_data_dir, force_refresh)).await.map_err(|error| format!("网站底模目录任务异常：{error}"))??;
+    state.sync_model_profiles(&models)?;
+    Ok(models)
+}
+
+/** 从唯一主站下载底模，在用户模型盘内校验安装并登记为可生成模型。 */
+#[tauri::command]
+async fn desktop_install_website_model(app: tauri::AppHandle, state: State<'_, DesktopState>, model_id: String) -> Result<DesktopLocalModelView, String> {
+    let settings = state.load_settings()?;
+    let app_data_dir = state.app_data_dir.clone();
+    let app_for_install = app.clone();
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
+        let downloaded = website_model::download_and_verify(&app_data_dir, PathBuf::from(&settings.model_root).as_path(), &model_id, &app_for_install)?;
+        let total_bytes = downloaded.view.download.as_ref().map(|item| item.byte_size).unwrap_or(1);
+        website_model::emit_install_state(&app_for_install, &downloaded.view.id, total_bytes, "installing", None);
+        match local_model::install_website_model(&settings, &downloaded.view, &downloaded.path) {
+            Ok(registration) => Ok((downloaded.view.id, total_bytes, registration)),
+            Err(error) => {
+                website_model::emit_install_state(&app_for_install, &downloaded.view.id, total_bytes, "failed", Some(error.clone()));
+                Err(error)
+            }
+        }
+    }).await.map_err(|error| format!("网站底模安装任务异常：{error}"))??;
+    match state.register_local_model(outcome.2) {
+        Ok(view) => {
+            website_model::emit_install_state(&app, &outcome.0, outcome.1, "installed", None);
+            Ok(view)
+        }
+        Err(error) => {
+            website_model::emit_install_state(&app, &outcome.0, outcome.1, "failed", Some(error.clone()));
+            Err(error)
+        }
+    }
 }
 
 /** 断点下载并校验网站 LoRA 后原子导入本机仓库。 */
@@ -440,7 +473,7 @@ pub fn run() {
                 .map_err(|error| format!("创建桌面窗口失败：{error}"))?;
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![desktop_account_status, desktop_start_authorization, desktop_poll_authorization, desktop_sign_out, desktop_bootstrap, desktop_inspect_environment, desktop_save_settings, desktop_load_ai_settings, desktop_save_ai_settings, desktop_test_ai_settings, desktop_ai_analyze_image, desktop_enqueue_gallery_publication, desktop_list_gallery_sync_queue, desktop_load_resource_catalog, desktop_download_resource, desktop_pause_resource_download, desktop_install_resource, desktop_runtime_status, desktop_start_runtime, desktop_stop_runtime, desktop_self_test_runtime, desktop_import_local_model, desktop_list_local_models, desktop_import_local_lora, desktop_list_local_loras, desktop_load_website_models, desktop_load_website_loras, desktop_install_website_lora, desktop_software_update_status, desktop_download_software_update, desktop_import_offline_update, desktop_apply_software_update, desktop_rollback_software_update, desktop_create_training_dataset, desktop_list_training_datasets, desktop_update_training_trigger_words, desktop_add_training_images, desktop_update_training_caption, desktop_delete_training_asset, desktop_translate_training_tags, desktop_create_caption_job, desktop_list_caption_jobs, desktop_cancel_caption_job, desktop_confirm_training_dataset, desktop_create_training_job, desktop_list_training_jobs, desktop_cancel_training_job, desktop_create_local_job, desktop_list_local_jobs, desktop_cancel_local_job])
+        .invoke_handler(tauri::generate_handler![desktop_account_status, desktop_start_authorization, desktop_poll_authorization, desktop_sign_out, desktop_bootstrap, desktop_inspect_environment, desktop_save_settings, desktop_load_ai_settings, desktop_save_ai_settings, desktop_test_ai_settings, desktop_ai_analyze_image, desktop_enqueue_gallery_publication, desktop_list_gallery_sync_queue, desktop_load_resource_catalog, desktop_download_resource, desktop_pause_resource_download, desktop_install_resource, desktop_runtime_status, desktop_start_runtime, desktop_stop_runtime, desktop_self_test_runtime, desktop_import_local_model, desktop_list_local_models, desktop_import_local_lora, desktop_list_local_loras, desktop_load_website_models, desktop_install_website_model, desktop_load_website_loras, desktop_install_website_lora, desktop_software_update_status, desktop_download_software_update, desktop_import_offline_update, desktop_apply_software_update, desktop_rollback_software_update, desktop_create_training_dataset, desktop_list_training_datasets, desktop_update_training_trigger_words, desktop_add_training_images, desktop_update_training_caption, desktop_delete_training_asset, desktop_translate_training_tags, desktop_create_caption_job, desktop_list_caption_jobs, desktop_cancel_caption_job, desktop_confirm_training_dataset, desktop_create_training_job, desktop_list_training_jobs, desktop_cancel_training_job, desktop_create_local_job, desktop_list_local_jobs, desktop_cancel_local_job])
         .run(tauri::generate_context!())
         .expect("DrawHime Desktop 启动失败");
 }

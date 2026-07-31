@@ -211,7 +211,7 @@ set -a
 set +a
 : "\${DESKTOP_RESOURCE_STORAGE_ROOT:?缺少资源存储目录}"
 : "\${DESKTOP_RESOURCE_MANIFEST_ENVELOPE_FILE:?缺少资源清单路径}"
-case "$DESKTOP_RESOURCE_STORAGE_ROOT" in /*) ;; *) echo '资源存储目录必须是绝对路径' >&2; exit 1;; esac
+case "$DESKTOP_RESOURCE_STORAGE_ROOT" in /data/*) ;; *) echo '资源存储目录必须位于 data 盘' >&2; exit 1;; esac
 case "$DESKTOP_RESOURCE_MANIFEST_ENVELOPE_FILE" in /*) ;; *) echo '资源清单路径必须是绝对路径' >&2; exit 1;; esac
 test "$(stat -c %s "$UPLOADED_ASSET")" = "$EXPECTED_SIZE"
 test "$(sha256sum "$UPLOADED_ASSET" | awk '{print $1}')" = "$EXPECTED_SHA256"

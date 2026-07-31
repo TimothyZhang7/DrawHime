@@ -79,7 +79,8 @@ async function executeTrainingAttempt(jobId: string, attemptId: string, attemptN
         gradientAccumulationSteps: parameters.gradientAccumulationSteps,
         captionDropoutRate: parameters.captionDropoutRate,
         shuffleCaption: parameters.shuffleCaption,
-        keepTokens: parameters.keepTokens,
+        // 打乱 Caption 时至少保护全部触发词，避免角色身份锚点被随机拆散。
+        keepTokens: Math.max(parameters.keepTokens, Math.min(10, triggerWords.length)),
         seed: parameters.seed,
         samplePrompt: parameters.samplePrompt,
       },

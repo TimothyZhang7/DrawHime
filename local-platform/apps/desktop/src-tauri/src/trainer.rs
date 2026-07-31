@@ -137,12 +137,15 @@ fn execute_runner(database: &Connection, app_data_dir: &Path, runtime: &RuntimeC
     let workspace = app_data_dir.join("training-workspaces").join(&job.id).join(&job.attempt_id);
     fs::create_dir_all(&workspace).map_err(|error| failed(format!("创建训练工作目录失败：{error}")))?;
     let request_path = workspace.join("request.json");
+    let mut protected_parameters = job.parameters.clone();
+    // Caption 打乱时至少保留全部用户触发词，避免角色身份锚点被随机拆散。
+    protected_parameters.keep_tokens = protected_keep_tokens(protected_parameters.keep_tokens, &job.trigger_words);
     let request = TrainerRequest {
         job_id: job.id.clone(), output_name: safe_output_name(&job.id), workspace: workspace.to_string_lossy().into_owned(),
         model_path: Path::new(&settings.model_root).join(&job.model_relative_path).to_string_lossy().into_owned(),
         text_encoder_path: Path::new(&settings.model_root).join(&job.text_encoder_relative_path).to_string_lossy().into_owned(),
         vae_path: Path::new(&settings.model_root).join(&job.vae_relative_path).to_string_lossy().into_owned(),
-        parameters: job.parameters.clone(),
+        parameters: protected_parameters,
         assets: job.assets.iter().map(|asset| TrainerAssetRequest { path: app_data_dir.join(&asset.relative_path).to_string_lossy().into_owned(), sha256: asset.sha256.clone(), byte_size: asset.byte_size, caption: compose_caption(&asset.caption, &job.trigger_words) }).collect(),
     };
     write_request(&request_path, &request).map_err(failed)?;
@@ -193,7 +196,10 @@ fn execute_runner(database: &Connection, app_data_dir: &Path, runtime: &RuntimeC
     }
     let output_path = output_path.ok_or_else(|| failed("Trainer 完成但没有返回 LoRA 产物"))?;
     validate_output_path(&workspace, &output_path).map_err(failed)?;
-    local_model::import_local_lora(&settings, DesktopLocalLoraImportInput { title: job.title.clone(), r#type: job.r#type.clone(), source_path: output_path.to_string_lossy().into_owned(), trigger_words: job.trigger_words.clone() }).map_err(failed)
+    let mut registration = local_model::import_local_lora(&settings, DesktopLocalLoraImportInput { title: job.title.clone(), r#type: job.r#type.clone(), source_path: output_path.to_string_lossy().into_owned(), trigger_words: job.trigger_words.clone() }).map_err(failed)?;
+    // 本机训练产物必须绑定训练时的精确底模，避免切换同系列微调模型后角色失真。
+    registration.base_model_sha256 = Some(job.model_sha256.clone());
+    Ok(registration)
 }
 
 fn validate_execution_files(app_data_dir: &Path, model_root: &Path, job: &TrainingExecution) -> Result<(), String> {
@@ -238,6 +244,12 @@ fn validate_output_path(workspace: &Path, output: &Path) -> Result<(), String> {
 fn compose_caption(caption: &str, trigger_words: &[String]) -> String {
     let existing = caption.split([',','，','\n',';','；']).map(|value| value.trim().to_lowercase()).filter(|value| !value.is_empty()).collect::<std::collections::HashSet<_>>();
     trigger_words.iter().map(|value| value.trim()).filter(|value| !value.is_empty() && !existing.contains(&value.to_lowercase())).chain(std::iter::once(caption.trim())).filter(|value| !value.is_empty()).collect::<Vec<_>>().join(", ")
+}
+
+/** 触发词保护数量不低于有效触发词数，并受契约上限约束。 */
+fn protected_keep_tokens(configured: u32, trigger_words: &[String]) -> u32 {
+    let required = trigger_words.iter().filter(|value| !value.trim().is_empty()).count().min(10) as u32;
+    configured.max(required).min(10)
 }
 
 fn oom_suggestion(job: &TrainingExecution) -> DesktopTrainingSuggestionView {
@@ -298,7 +310,7 @@ fn kill_process_tree(child: &mut Child) {
 }
 
 
-fn load_settings(database: &Connection) -> Result<DesktopSettings, String> { database.query_row("SELECT theme_mode,font_scale,dependency_source,default_privacy,auto_upload,model_root,output_root,runtime_root,upload_concurrency,wifi_only,bandwidth_limit_kib FROM desktop_settings WHERE id=1", [], |row| Ok(DesktopSettings { theme_mode: row.get(0)?, font_scale: row.get(1)?, dependency_source: row.get(2)?, default_privacy: row.get(3)?, auto_upload: row.get::<_,i64>(4)? != 0, model_root: row.get(5)?, output_root: row.get(6)?, runtime_root: row.get(7)?, upload_concurrency: row.get(8)?, wifi_only: row.get::<_,i64>(9)? != 0, bandwidth_limit_kib: row.get(10)? })).map_err(|error| format!("读取 Trainer 设置失败：{error}")) }
+fn load_settings(database: &Connection) -> Result<DesktopSettings, String> { database.query_row("SELECT theme_mode,font_scale,default_privacy,auto_upload,model_root,output_root,runtime_root,upload_concurrency,wifi_only,bandwidth_limit_kib FROM desktop_settings WHERE id=1", [], |row| Ok(DesktopSettings { theme_mode: row.get(0)?, font_scale: row.get(1)?, default_privacy: row.get(2)?, auto_upload: row.get::<_,i64>(3)? != 0, model_root: row.get(4)?, output_root: row.get(5)?, runtime_root: row.get(6)?, upload_concurrency: row.get(7)?, wifi_only: row.get::<_,i64>(8)? != 0, bandwidth_limit_kib: row.get(9)? })).map_err(|error| format!("读取 Trainer 设置失败：{error}")) }
 fn sha256_file(path: &Path) -> Result<String, String> { let mut reader = BufReader::new(File::open(path).map_err(|error| format!("读取训练快照失败：{error}"))?); let mut hash = Sha256::new(); let mut buffer = [0_u8; 1024 * 1024]; loop { let read = reader.read(&mut buffer).map_err(|error| format!("计算训练快照哈希失败：{error}"))?; if read == 0 { break; } hash.update(&buffer[..read]); } Ok(hex::encode(hash.finalize())) }
 fn modified_millis(metadata: &fs::Metadata) -> Result<u64, String> { metadata.modified().map_err(|error| format!("读取训练底模修改时间失败：{error}"))?.duration_since(std::time::UNIX_EPOCH).map(|duration| duration.as_millis() as u64).map_err(|_| "训练底模修改时间早于系统纪元".to_string()) }
 fn safe_output_name(id: &str) -> String { format!("drawhime-{}", id.replace('-', "")) }
@@ -319,5 +331,11 @@ mod tests {
         assert_eq!(event.kind, "progress");
         assert_eq!(event.progress, Some(42));
         assert!(receiver.try_recv().is_err());
+    }
+
+    #[test]
+    fn trainer_keeps_all_trigger_words_when_captions_are_shuffled() {
+        assert_eq!(protected_keep_tokens(1, &["my_character".into(), "special_style".into()]), 2);
+        assert_eq!(protected_keep_tokens(5, &["my_character".into()]), 5);
     }
 }

@@ -1,9 +1,9 @@
 /**
  * 本文件实现独立本地模型用户端，包含主站会话交换、真实生成表单、刷新可恢复任务和产物预览。
  */
-import type { InferenceJobView, InferenceLoraView, InferenceModelView, LocalPlatformSessionView, LoraLibraryEntryView, ModelLibraryEntryView } from "@drawhime/contracts";
+import type { InferenceJobView, InferenceLoraView, InferenceModelView, InferenceSamplingOverrides, LocalPlatformSessionView, LoraLibraryEntryView, ModelGenerationProfile, ModelLibraryEntryView } from "@drawhime/contracts";
 import { Activity, Bot, BrainCircuit, Clock3, Cpu, Eye, Folder, ImageIcon, Images, Layers3, Layout, LoaderCircle, LogIn, LogOut, MoreHorizontal, Paintbrush, ScanSearch, Sparkles, Trash2, Trophy, User, Wallet, WalletCards, Wrench, X, type LucideIcon } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { TrainingPage } from "./TrainingPage";
 import { LoraLibraryPage } from "./LoraLibraryPage";
 import { ModelLibraryPage } from "./ModelLibraryPage";
@@ -17,8 +17,15 @@ const sessionStorageKey = "drawhime_local_session";
 const generationSettingsKey = "drawhime_local_generation_settings";
 const maximumSelectedLoras = 4;
 
-/** 用户可选的真实输出边长，最终仍由 Runtime 按模型上限和 8 像素对齐规则约束。 */
-type RenderEdge = "1024" | "1536";
+/** 质量档只决定目录预设，不暗含任何底模名称或文件名判断。 */
+type GenerationPresetName = "fast" | "quality" | "extreme";
+
+/** 每个模型独立持久化当前质量档与高级覆盖值，切换模型不会串用不兼容参数。 */
+interface PersistedSamplingSelection {
+  preset: GenerationPresetName;
+  customized: boolean;
+  overrides: InferenceSamplingOverrides;
+}
 
 /** 生成页按 LoRA 资产类型分组，避免角色、画风和服装类资产混在同一选择列表。 */
 const loraTypeLabels: Record<InferenceLoraView["type"], string> = {
@@ -346,26 +353,36 @@ function GenerateForm({ session, wallet, models, loras, loraUseRequest, modelUse
   const [prompt, setPrompt] = useState("");
   const [negativePrompt, setNegativePrompt] = useState("");
   const [ratio, setRatio] = useState(saved.ratio);
-  const [renderEdge, setRenderEdge] = useState<RenderEdge>(saved.renderEdge);
+  const [renderEdge, setRenderEdge] = useState(saved.renderEdge);
   const [seed, setSeed] = useState("");
   const [loraVersionIds, setLoraVersionIds] = useState(saved.loraVersionIds);
   const [loraStrengths, setLoraStrengths] = useState(saved.loraStrengths);
   const [promptEnhancement, setPromptEnhancement] = useState(saved.promptEnhancement);
   const [isPrivate, setPrivate] = useState(saved.isPrivate);
   const [publishToGallery, setPublishToGallery] = useState(saved.publishToGallery);
+  const [samplingSelections, setSamplingSelections] = useState(saved.samplingSelections);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
   const model = models.find((item) => item.modelVersionId === modelId) ?? models[0];
-  const compatibleLoras = loras.filter((item) => item.modelFamily === model?.family);
+  const modelProfile = useMemo(() => readModelGenerationProfile(model?.defaultParameters), [model]);
+  const samplingSelection = model ? samplingSelections[model.modelVersionId] ?? createSamplingSelection(modelProfile, "quality") : null;
+  const outputEdges = useMemo(() => createOutputEdges(modelProfile.maxEdge), [modelProfile.maxEdge]);
+  const compatibleLoras = loras.filter((item) => item.modelFamily === model?.family && (!item.baseModelVersionId || item.baseModelVersionId === model?.modelVersionId));
   const promptEnhancementAvailable = model?.defaultParameters.promptEnhancementEnabled === true;
   useEffect(() => {
-    // 切换主模型时只保留兼容 LoRA，防止旧模型系列的版本被意外提交。
+    // 平台训练 LoRA 绑定精确底模；外部上传 LoRA 仍按模型系列兼容。
     setLoraVersionIds((current) => {
       const next = current.filter((id) => compatibleLoras.some((item) => item.loraVersionId === id)).slice(0, maximumSelectedLoras);
       return next.length === current.length && next.every((id, index) => id === current[index]) ? current : next;
     });
   }, [compatibleLoras]);
   useEffect(() => { if (!modelId && models[0]) setModelId(models[0].modelVersionId); }, [modelId, models]);
+  useEffect(() => {
+    if (!model) return;
+    // 新模型第一次出现时从目录质量档建立状态；已有模型保留用户在该模型上的高级参数。
+    setSamplingSelections((current) => current[model.modelVersionId] ? current : { ...current, [model.modelVersionId]: createSamplingSelection(modelProfile, "quality") });
+    setRenderEdge((current) => nearestOutputEdge(current, createOutputEdges(modelProfile.maxEdge)));
+  }, [model, modelProfile]);
   useEffect(() => {
     if (!modelUseRequest || !models.some((item) => item.modelVersionId === modelUseRequest.modelVersionId)) return;
     setModelId(modelUseRequest.modelVersionId);
@@ -376,8 +393,8 @@ function GenerateForm({ session, wallet, models, loras, loraUseRequest, modelUse
   }, [loraUseRequest]);
   useEffect(() => {
     // 持久化只保留当前已选 LoRA 的权重，自动修复旧版 localStorage 残留键。
-    localStorage.setItem(generationSettingsKey, JSON.stringify({ modelId, ratio, renderEdge, loraVersionIds, loraStrengths: selectLoraStrengths(loraStrengths, loraVersionIds), promptEnhancement, isPrivate, publishToGallery }));
-  }, [modelId, ratio, renderEdge, loraVersionIds, loraStrengths, promptEnhancement, isPrivate, publishToGallery]);
+    localStorage.setItem(generationSettingsKey, JSON.stringify({ modelId, ratio, renderEdge, loraVersionIds, loraStrengths: selectLoraStrengths(loraStrengths, loraVersionIds), promptEnhancement, isPrivate, publishToGallery, samplingSelections }));
+  }, [modelId, ratio, renderEdge, loraVersionIds, loraStrengths, promptEnhancement, isPrivate, publishToGallery, samplingSelections]);
   const dimensions = useMemo(() => ratioDimensions(ratio, Number(renderEdge)), [ratio, renderEdge]);
 
   const submit = async () => {
@@ -399,6 +416,8 @@ function GenerateForm({ session, wallet, models, loras, loraUseRequest, modelUse
           height: dimensions[1],
           batchSize: 1,
           seed: seed.trim() ? Number(seed) : null,
+          // 质量档和高级参数都在创建时固化，Worker 重试只复用同一份任务快照。
+          samplingOverrides: samplingSelection?.overrides ?? createSamplingSelection(modelProfile, "quality").overrides,
           loraVersionIds,
           // API 只接收当前选择集合对应的权重，取消选择和切换模型后的旧状态不得进入请求。
           loraStrengths: selectLoraStrengths(loraStrengths, loraVersionIds),
@@ -433,21 +452,39 @@ function GenerateForm({ session, wallet, models, loras, loraUseRequest, modelUse
           <div className="section-heading"><div><span>输出参数</span><small>参数随任务固化保存。</small></div></div>
           <div className="generation-parameter-grid">
             <label className="field"><span>画幅比例</span><select value={ratio} onChange={(event) => setRatio(event.target.value)}>{["1:1", "3:4", "4:3", "2:3", "3:2", "9:16", "16:9"].map((item) => <option key={item}>{item}</option>)}</select></label>
-            <label className="field"><span>输出边长</span><select value={renderEdge} onChange={(event) => setRenderEdge(event.target.value as RenderEdge)}><option value="1536">1536 px · 高质量</option><option value="1024">1024 px · 更快</option></select></label>
+            <label className="field"><span>质量预设</span><select value={samplingSelection?.preset ?? "quality"} onChange={(event) => {
+              if (!model) return;
+              const preset = event.target.value as GenerationPresetName;
+              setSamplingSelections((current) => ({ ...current, [model.modelVersionId]: createSamplingSelection(modelProfile, preset) }));
+            }}><option value="fast">快速</option><option value="quality">质量</option><option value="extreme">极致</option></select></label>
+            <label className="field"><span>输出边长</span><select value={renderEdge} onChange={(event) => setRenderEdge(Number(event.target.value))}>{outputEdges.map((edge) => <option key={edge} value={edge}>{edge} px{edge === modelProfile.maxEdge ? " · 模型上限" : ""}</option>)}</select></label>
             <label className="field"><span>随机种子 <small>可选</small></span><input type="number" min="0" value={seed} onChange={(event) => setSeed(event.target.value)} placeholder="留空随机" /></label>
           </div>
         </section>
       </div>
       <LoraPicker loras={compatibleLoras} selectedIds={loraVersionIds} strengths={loraStrengths} onChange={(ids) => { setLoraVersionIds(ids); setLoraStrengths((current) => selectLoraStrengths(current, ids)); }} onStrengthChange={(id, strength) => setLoraStrengths((current) => ({ ...current, [id]: strength }))} />
       <details className="generation-advanced">
-        <summary><span>高级控制</span><small>负面提示词、AI 增强与发布范围</small></summary>
+        <summary><span>高级控制</span><small>{samplingSelection?.customized ? "已使用自定义采样参数" : "采样参数、负面提示词与发布范围"}</small></summary>
         <div className="advanced-content">
-          <label className="field"><span>负面提示词 <small>可选</small></span><textarea value={negativePrompt} onChange={(event) => setNegativePrompt(event.target.value)} placeholder="留空时使用模型默认结构避免词" rows={3} /></label>
+          <div className="sampling-control-panel">
+            <header><div><strong>采样参数</strong><small>初始值来自当前底模目录，可按任务单独覆盖。</small></div>{samplingSelection?.customized && model && <button type="button" onClick={() => setSamplingSelections((current) => ({ ...current, [model.modelVersionId]: createSamplingSelection(modelProfile, samplingSelection.preset) }))}>恢复预设</button>}</header>
+            <div className="sampling-control-grid">
+              <SamplingNumber label="步数" value={samplingSelection?.overrides.steps ?? modelProfile.steps} min={1} max={80} step={1} onChange={(value) => updateSamplingSelection(model, modelProfile, samplingSelection, setSamplingSelections, "steps", value)} />
+              <SamplingNumber label="CFG" value={samplingSelection?.overrides.cfg ?? modelProfile.cfg} min={0.1} max={20} step={0.1} onChange={(value) => updateSamplingSelection(model, modelProfile, samplingSelection, setSamplingSelections, "cfg", value)} />
+              <label className="field"><span>采样器</span><select value={samplingSelection?.overrides.sampler ?? modelProfile.sampler} onChange={(event) => updateSamplingSelection(model, modelProfile, samplingSelection, setSamplingSelections, "sampler", event.target.value)}>{modelProfile.availableSamplers.map((value) => <option key={value} value={value}>{samplingOptionLabel(value)}</option>)}</select></label>
+              <label className="field"><span>调度器</span><select value={samplingSelection?.overrides.scheduler ?? modelProfile.scheduler} onChange={(event) => updateSamplingSelection(model, modelProfile, samplingSelection, setSamplingSelections, "scheduler", event.target.value)}>{modelProfile.availableSchedulers.map((value) => <option key={value} value={value}>{samplingOptionLabel(value)}</option>)}</select></label>
+              <SamplingNumber label="采样最长边" value={samplingSelection?.overrides.samplingMaxEdge ?? modelProfile.samplingMaxEdge} min={512} max={2048} step={64} onChange={(value) => updateSamplingSelection(model, modelProfile, samplingSelection, setSamplingSelections, "samplingMaxEdge", value)} />
+              <SamplingNumber label="像素预算" value={samplingSelection?.overrides.samplingPixelBudget ?? modelProfile.samplingPixelBudget} min={262144} max={4194304} step={65536} onChange={(value) => updateSamplingSelection(model, modelProfile, samplingSelection, setSamplingSelections, "samplingPixelBudget", value)} />
+              <SamplingNumber label="极端画幅阈值" value={samplingSelection?.overrides.aspectStepThreshold ?? modelProfile.aspectStepThreshold} min={1} max={4} step={0.1} onChange={(value) => updateSamplingSelection(model, modelProfile, samplingSelection, setSamplingSelections, "aspectStepThreshold", value)} />
+              <SamplingNumber label="极端画幅步数" value={samplingSelection?.overrides.aspectAdjustedSteps ?? modelProfile.presets.quality.aspectAdjustedSteps} min={1} max={samplingSelection?.overrides.steps ?? modelProfile.steps} step={1} onChange={(value) => updateSamplingSelection(model, modelProfile, samplingSelection, setSamplingSelections, "aspectAdjustedSteps", value)} />
+            </div>
+          </div>
+          <div className="generation-secondary-controls"><label className="field"><span>负面提示词 <small>可选</small></span><textarea value={negativePrompt} onChange={(event) => setNegativePrompt(event.target.value)} placeholder="留空时使用模型默认结构避免词" rows={3} /></label>
           <div className="switch-grid">
             {promptEnhancementAvailable && <label className="switch-row"><span><strong>AI 提示增强</strong><small>每个任务只执行一次</small></span><button type="button" className={promptEnhancement ? "switch on" : "switch"} onClick={() => setPromptEnhancement((value) => !value)} aria-pressed={promptEnhancement}><i /></button></label>}
             <label className="switch-row"><span><strong>发布到主站图库</strong><small>同步原图、缩略图与最终提示词</small></span><button type="button" className={publishToGallery ? "switch on" : "switch"} onClick={() => setPublishToGallery((value) => !value)} aria-pressed={publishToGallery}><i /></button></label>
             <label className="switch-row"><span><strong>设为私密任务</strong><small>发布后仅自己可见</small></span><button type="button" className={isPrivate ? "switch on" : "switch"} onClick={() => setPrivate((value) => !value)} aria-pressed={isPrivate}><i /></button></label>
-          </div>
+          </div></div>
         </div>
       </details>
       {formError && <div className="notice error compact">{formError}</div>}
@@ -455,6 +492,11 @@ function GenerateForm({ session, wallet, models, loras, loraUseRequest, modelUse
       <div className="billing-note"><WalletCards size={16} /><span>提交时由主站按模型价格预留余额；失败或取消将按原钱包分账自动退回。</span></div>
     </section>
   );
+}
+
+/** 渲染受范围约束的高级数值项，避免各输入框采用不一致的步进和类型。 */
+function SamplingNumber({ label, value, min, max, step, onChange }: { label: string; value: number; min: number; max: number; step: number; onChange: (value: number) => void }) {
+  return <label className="field"><span>{label}</span><input type="number" value={value} min={min} max={max} step={step} onChange={(event) => { const next = Number(event.target.value); if (Number.isFinite(next)) onChange(Math.min(max, Math.max(min, next))); }} /></label>;
 }
 
 /** 按资产类型提供多选 LoRA，提交前始终限制为四个兼容版本。 */
@@ -659,7 +701,7 @@ async function loadMainWallet(): Promise<MainWalletSummary | null> {
 }
 
 /** 恢复用户上次选择的模型、输出尺寸、多 LoRA 与发布开关，并兼容旧版单 LoRA 保存值。 */
-function readGenerationSettings(): { modelId: string; ratio: string; renderEdge: RenderEdge; loraVersionIds: string[]; loraStrengths: Record<string, number>; promptEnhancement: boolean; isPrivate: boolean; publishToGallery: boolean } {
+function readGenerationSettings(): { modelId: string; ratio: string; renderEdge: number; loraVersionIds: string[]; loraStrengths: Record<string, number>; promptEnhancement: boolean; isPrivate: boolean; publishToGallery: boolean; samplingSelections: Record<string, PersistedSamplingSelection> } {
   try {
     const value = JSON.parse(localStorage.getItem(generationSettingsKey) || "{}") as Record<string, unknown>;
     const loraVersionIds = Array.isArray(value.loraVersionIds)
@@ -671,15 +713,133 @@ function readGenerationSettings(): { modelId: string; ratio: string; renderEdge:
     return {
       modelId: typeof value.modelId === "string" ? value.modelId : "",
       ratio: typeof value.ratio === "string" ? value.ratio : "1:1",
-      renderEdge: value.renderEdge === "1024" ? "1024" : "1536",
+      renderEdge: Number.isSafeInteger(Number(value.renderEdge)) && Number(value.renderEdge) >= 512 && Number(value.renderEdge) <= 2048 ? Number(value.renderEdge) : 1536,
       loraVersionIds,
       loraStrengths: selectLoraStrengths(storedStrengths, loraVersionIds),
       promptEnhancement: value.promptEnhancement !== false,
       isPrivate: value.isPrivate === true,
       publishToGallery: value.publishToGallery !== false,
+      samplingSelections: readPersistedSamplingSelections(value.samplingSelections),
     };
-  } catch { return { modelId: "", ratio: "1:1", renderEdge: "1536", loraVersionIds: [], loraStrengths: {}, promptEnhancement: true, isPrivate: false, publishToGallery: true }; }
+  } catch { return { modelId: "", ratio: "1:1", renderEdge: 1536, loraVersionIds: [], loraStrengths: {}, promptEnhancement: true, isPrivate: false, publishToGallery: true, samplingSelections: {} }; }
 }
+
+/** 读取模型目录配置；缺失字段只使用通用数值回退，不按标题、版本或文件名推断模型能力。 */
+function readModelGenerationProfile(value: unknown): ModelGenerationProfile {
+  const source = readUnknownRecord(value);
+  const generationPresets = readUnknownRecord(source.generationPresets);
+  const defaultSteps = boundedInteger(source.steps, 1, 80, 20);
+  const defaultAspectSteps = boundedInteger(source.aspectAdjustedSteps, 1, defaultSteps, defaultSteps);
+  const defaultSamplingMaxEdge = boundedInteger(source.samplingMaxEdge, 512, 2048, 1024);
+  const defaultPixelBudget = boundedInteger(source.samplingPixelBudget, 262144, 4194304, 1048576);
+  const readPreset = (name: GenerationPresetName): ModelGenerationProfile["presets"][GenerationPresetName] => {
+    const preset = readUnknownRecord(generationPresets[name]);
+    const steps = boundedInteger(preset.steps, 1, 80, defaultSteps);
+    return {
+      steps,
+      aspectAdjustedSteps: boundedInteger(preset.aspectAdjustedSteps, 1, steps, Math.min(defaultAspectSteps, steps)),
+      samplingMaxEdge: boundedInteger(preset.samplingMaxEdge, 512, 2048, defaultSamplingMaxEdge),
+      samplingPixelBudget: boundedInteger(preset.samplingPixelBudget, 262144, 4194304, defaultPixelBudget),
+    };
+  };
+  const sampler = stringValue(source.sampler, "er_sde");
+  const scheduler = stringValue(source.scheduler, "simple");
+  return {
+    steps: defaultSteps,
+    cfg: boundedNumber(source.cfg, 0.1, 20, 1),
+    sampler,
+    scheduler,
+    samplingMaxEdge: defaultSamplingMaxEdge,
+    samplingPixelBudget: defaultPixelBudget,
+    aspectStepThreshold: boundedNumber(source.aspectStepThreshold, 1, 4, 1.5),
+    maxEdge: boundedInteger(source.maxEdge, 512, 2048, 1536),
+    qualityPrefix: stringValue(source.qualityPrefix, ""),
+    defaultNegativePrompt: stringValue(source.defaultNegativePrompt, ""),
+    trainingSupported: source.trainingSupported !== false,
+    availableSamplers: readStringOptions(source.availableSamplers, sampler),
+    availableSchedulers: readStringOptions(source.availableSchedulers, scheduler),
+    presets: { fast: readPreset("fast"), quality: readPreset("quality"), extreme: readPreset("extreme") },
+  };
+}
+
+/** 从模型目录质量档构造一次完整任务覆盖值。 */
+function createSamplingSelection(profile: ModelGenerationProfile, preset: GenerationPresetName): PersistedSamplingSelection {
+  const selected = profile.presets[preset];
+  return {
+    preset,
+    customized: false,
+    overrides: {
+      steps: selected.steps,
+      cfg: profile.cfg,
+      sampler: profile.sampler,
+      scheduler: profile.scheduler,
+      samplingMaxEdge: selected.samplingMaxEdge,
+      samplingPixelBudget: selected.samplingPixelBudget,
+      aspectStepThreshold: profile.aspectStepThreshold,
+      aspectAdjustedSteps: Math.min(selected.steps, selected.aspectAdjustedSteps),
+    },
+  };
+}
+
+/** 更新当前模型的单个高级字段，并同步保持极端画幅步数不高于基础步数。 */
+function updateSamplingSelection<Key extends keyof InferenceSamplingOverrides>(
+  model: InferenceModelView | undefined,
+  profile: ModelGenerationProfile,
+  selection: PersistedSamplingSelection | null,
+  update: Dispatch<SetStateAction<Record<string, PersistedSamplingSelection>>>,
+  key: Key,
+  value: InferenceSamplingOverrides[Key],
+): void {
+  if (!model) return;
+  const current = selection ?? createSamplingSelection(profile, "quality");
+  const overrides = { ...current.overrides, [key]: value };
+  if (key === "steps") overrides.aspectAdjustedSteps = Math.min(overrides.aspectAdjustedSteps, Number(value));
+  update((items) => ({ ...items, [model.modelVersionId]: { ...current, customized: true, overrides } }));
+}
+
+/** 只恢复结构完整的本机高级参数；最终仍由 API 按在线模型目录白名单校验。 */
+function readPersistedSamplingSelections(value: unknown): Record<string, PersistedSamplingSelection> {
+  const source = readUnknownRecord(value);
+  return Object.fromEntries(Object.entries(source).flatMap(([modelId, item]) => {
+    const row = readUnknownRecord(item);
+    const preset = row.preset === "fast" || row.preset === "extreme" ? row.preset : "quality";
+    const overrides = readUnknownRecord(row.overrides);
+    const candidate: InferenceSamplingOverrides = {
+      steps: boundedInteger(overrides.steps, 1, 80, 20),
+      cfg: boundedNumber(overrides.cfg, 0.1, 20, 1),
+      sampler: stringValue(overrides.sampler, "er_sde"),
+      scheduler: stringValue(overrides.scheduler, "simple"),
+      samplingMaxEdge: boundedInteger(overrides.samplingMaxEdge, 512, 2048, 1024),
+      samplingPixelBudget: boundedInteger(overrides.samplingPixelBudget, 262144, 4194304, 1048576),
+      aspectStepThreshold: boundedNumber(overrides.aspectStepThreshold, 1, 4, 1.5),
+      aspectAdjustedSteps: boundedInteger(overrides.aspectAdjustedSteps, 1, 80, 20),
+    };
+    candidate.aspectAdjustedSteps = Math.min(candidate.steps, candidate.aspectAdjustedSteps);
+    return modelId ? [[modelId, { preset, customized: row.customized === true, overrides: candidate } satisfies PersistedSamplingSelection]] : [];
+  }));
+}
+
+/** 模型输出边长由目录上限生成，常用尺寸不足上限时自动补入精确上限。 */
+function createOutputEdges(maxEdge: number): number[] {
+  return [...new Set([768, 1024, 1280, 1536, 1792, 2048, maxEdge].filter((value) => value <= maxEdge))].sort((left, right) => left - right);
+}
+
+/** 把旧缓存中的任意边长收敛到当前模型真实可选值。 */
+function nearestOutputEdge(value: number, options: number[]): number { return options.reduce((best, current) => Math.abs(current - value) < Math.abs(best - value) ? current : best, options[0] ?? 1024); }
+
+/** 把运行时标识转换为紧凑可读文本，不维护模型专属映射。 */
+function samplingOptionLabel(value: string): string { return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()); }
+
+/** 将未知 JSON 读取为普通对象。 */
+function readUnknownRecord(value: unknown): Record<string, unknown> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
+/** 读取受限整数。 */
+function boundedInteger(value: unknown, minimum: number, maximum: number, fallback: number): number { const parsed = Number(value); return Number.isSafeInteger(parsed) && parsed >= minimum && parsed <= maximum ? parsed : fallback; }
+/** 读取受限数值。 */
+function boundedNumber(value: unknown, minimum: number, maximum: number, fallback: number): number { const parsed = Number(value); return Number.isFinite(parsed) && parsed >= minimum && parsed <= maximum ? parsed : fallback; }
+/** 读取非空字符串。 */
+function stringValue(value: unknown, fallback: string): string { return typeof value === "string" && value.trim() ? value.trim() : fallback; }
+/** 读取去重后的非空字符串选项，并确保推荐值始终可选。 */
+function readStringOptions(value: unknown, fallback: string): string[] { return [...new Set([...(Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim()) : []), fallback])]; }
 
 /** 按当前 LoRA 版本 ID 集合筛选权重，版本标题变化不会影响任务绑定。 */
 function selectLoraStrengths(strengths: Record<string, number>, selectedIds: string[]): Record<string, number> {

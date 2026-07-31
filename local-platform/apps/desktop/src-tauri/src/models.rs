@@ -33,6 +33,8 @@ pub struct DesktopLocalModelView {
     pub family: String,
     pub workflow_kind: String,
     pub model_file_name: String,
+    pub resource_group_id: Option<String>,
+    pub generation_profile: Option<DesktopWebsiteModelParameters>,
     pub model_sha256: String,
     pub byte_size: u64,
     pub text_encoder_file_name: Option<String>,
@@ -63,6 +65,7 @@ pub struct DesktopLocalLoraView {
     pub r#type: String,
     pub file_name: String,
     pub sha256: String,
+    pub base_model_sha256: Option<String>,
     pub byte_size: u64,
     pub trigger_words: Vec<String>,
     pub available: bool,
@@ -499,7 +502,6 @@ pub struct DesktopSettings {
     pub theme_mode: String,
     /** 字体缩放仅允许 100%–130%，默认 110%。 */
     pub font_scale: f64,
-    pub dependency_source: String,
     pub default_privacy: String,
     /** 登录账号后是否自动把新完成的本机图片加入网页图库同步队列。 */
     pub auto_upload: bool,
@@ -640,7 +642,6 @@ pub struct DesktopResourceDownloadView {
     pub total_bytes: u64,
     pub bytes_per_second: u64,
     pub eta_seconds: Option<u64>,
-    pub switch_reason: Option<String>,
     pub target_path: Option<String>,
     pub error: Option<String>,
 }
@@ -686,7 +687,22 @@ pub struct DesktopWebsiteLoraView { pub id: String, pub title: String, pub descr
 /** 桌面端网站底模仓库视图；远端封面已转换为受控本机缓存路径。 */
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DesktopWebsiteModelView { pub id: String, pub display_name: String, pub description: String, pub family: String, pub family_name: String, pub model_file_name: String, pub runtime_format: String, pub usage_guide: String, pub source_links: Vec<DesktopWebsiteSourceLink>, pub parameters: DesktopWebsiteModelParameters, pub cover_path: Option<String>, pub example_paths: Vec<String> }
+pub struct DesktopWebsiteModelView { pub id: String, pub display_name: String, pub description: String, pub family: String, pub family_name: String, pub model_file_name: String, pub resource_group_id: Option<String>, pub download: Option<DesktopWebsiteModelDownload>, pub components: DesktopWebsiteModelComponents, pub runtime_format: String, pub usage_guide: String, pub source_links: Vec<DesktopWebsiteSourceLink>, pub parameters: DesktopWebsiteModelParameters, pub cover_path: Option<String>, pub example_paths: Vec<String> }
+
+/** 网站底模统一由主站提供的可断点下载文件。 */
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopWebsiteModelDownload { pub file_name: String, pub sha256: String, pub byte_size: u64, pub content_url: String }
+
+/** 由主站模型目录下发的 Anima 共享组件，客户端按文件名和哈希同时校验。 */
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopWebsiteModelComponents { pub text_encoder: DesktopWebsiteModelComponent, pub vae: DesktopWebsiteModelComponent }
+
+/** 一个可复用 Runtime 组件的受控文件身份。 */
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopWebsiteModelComponent { pub file_name: String, pub sha256: String }
 
 /** 网站底模来源链接只包含可公开展示的站点名称和 HTTPS 地址。 */
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -696,12 +712,42 @@ pub struct DesktopWebsiteSourceLink { pub label: String, pub url: String }
 /** 网站底模详情中的推荐采样参数。 */
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DesktopWebsiteModelParameters { pub steps: f64, pub cfg: f64, pub sampler: String, pub scheduler: String, pub sampling_max_edge: f64, pub max_edge: f64 }
+pub struct DesktopWebsiteModelParameters {
+    pub steps: u32,
+    pub cfg: f64,
+    pub sampler: String,
+    pub scheduler: String,
+    pub sampling_max_edge: u32,
+    pub sampling_pixel_budget: u32,
+    pub aspect_step_threshold: f64,
+    pub max_edge: u32,
+    pub quality_prefix: String,
+    pub default_negative_prompt: String,
+    pub training_supported: bool,
+    pub available_samplers: Vec<String>,
+    pub available_schedulers: Vec<String>,
+    pub presets: DesktopWebsiteModelPresets,
+}
+
+/** 在线底模目录的三个质量档，实际提交时由核心再次校验范围。 */
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopWebsiteModelPresets { pub fast: DesktopWebsiteModelPreset, pub quality: DesktopWebsiteModelPreset, pub extreme: DesktopWebsiteModelPreset }
+
+/** 一个质量档的步数和潜空间预算。 */
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopWebsiteModelPreset { pub steps: u32, pub aspect_adjusted_steps: u32, pub sampling_max_edge: u32, pub sampling_pixel_budget: u32 }
 
 /** 网站 LoRA 断点下载、校验与安装进度。 */
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DesktopWebsiteLoraInstallProgress { pub lora_id: String, pub status: String, pub downloaded_bytes: u64, pub total_bytes: u64, pub bytes_per_second: u64, pub error: Option<String> }
+
+/** 网站底模断点下载、校验和安装进度。 */
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopWebsiteModelInstallProgress { pub model_id: String, pub status: String, pub downloaded_bytes: u64, pub total_bytes: u64, pub bytes_per_second: u64, pub error: Option<String> }
 
 /** PowerShell 一次性采集的 Windows 系统与显卡硬件探针结果。 */
 #[derive(Debug, Deserialize)]

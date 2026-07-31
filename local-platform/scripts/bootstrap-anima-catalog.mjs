@@ -13,27 +13,54 @@ const defaultTrainingPricingVersion = 3;
 const defaultTrainingPriceCny = "0.80";
 const sharedDefaults = { width: 1024, height: 1024, maxEdge: 1536, maxAttempts: 3, promptEnhancementEnabled: true, pricingVersion: defaultPricingVersion, priceCny: defaultPriceCny, trainingProductCode: defaultTrainingProductCode, trainingPricingVersion: defaultTrainingPricingVersion, trainingPriceCny: defaultTrainingPriceCny };
 const defaultNegativePrompt = "worst quality, low quality, score_1, score_2, score_3, artist name";
+// 共享组件写入每个模型版本，客户端始终以在线目录为唯一事实源。
+const animaComponents = {
+  textEncoderFileName: "qwen_3_06b_base.safetensors",
+  textEncoderSha256: "cd2a512003e2f9f3cd3c32a9c3573f820bb28c940f73c57b1ddaa983d9223eba",
+  vaeFileName: "qwen_image_vae.safetensors",
+  vaeSha256: "a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f",
+};
 // 正方形使用 37 步与约 1160² 潜空间，极端横竖幅按实测使用 34 步；LoRA 不降低质量参数，目标耗时为 240～280 秒。
-const balancedFullCheckpointSampling = { qualityProfile: "balanced-exclusive-260s-v6", targetSeconds: 260, steps: 37, aspectStepThreshold: 1.5, aspectAdjustedSteps: 34, samplingMaxEdge: 1536, samplingPixelBudget: 1350000, samplingPixelBudgetAspectSlope: 0, systemTurboLoraEnabled: false, systemHighresLoraEnabled: false };
+const balancedFullCheckpointSampling = {
+  qualityProfile: "balanced-exclusive-260s-v6",
+  targetSeconds: 260,
+  steps: 37,
+  aspectStepThreshold: 1.5,
+  aspectAdjustedSteps: 34,
+  samplingMaxEdge: 1536,
+  samplingPixelBudget: 1350000,
+  samplingPixelBudgetAspectSlope: 0,
+  generationPresets: {
+    fast: { steps: 20, aspectAdjustedSteps: 18, samplingMaxEdge: 1280, samplingPixelBudget: 786432 },
+    quality: { steps: 37, aspectAdjustedSteps: 34, samplingMaxEdge: 1536, samplingPixelBudget: 1350000 },
+    extreme: { steps: 45, aspectAdjustedSteps: 42, samplingMaxEdge: 1792, samplingPixelBudget: 2073600 },
+  },
+  availableSamplers: ["er_sde", "euler", "euler_ancestral"],
+  availableSchedulers: ["simple", "normal"],
+  systemTurboLoraEnabled: false,
+  systemHighresLoraEnabled: false,
+};
 
 // 模型文件名、哈希、CFG 与采样器来自对应版本；像素预算按生产 P40 的横竖幅与正方形任务实测校准到约 260 秒。
 const modelCatalog = [
   {
     workflowVersion: 28,
     fileName: "anima-base-v1.0.safetensors",
+    desktopResourceGroupId: "model.anima-base-v10",
     displayName: "Anima Base v1.0",
     description: "Anima Base v1.0 原生底模，仅加载用户主动选择的 LoRA。",
     runtimeSlug: "comfyui-anima-production-v1",
     productCode: "local.anima-base-v1.image",
     sourceUrls: ["https://huggingface.co/circlestone-labs/Anima/"],
     sourceVersionId: null,
-    sha256: null,
+    sha256: "BD43B7CFFE1ED1153D9C41E7BEB2F18CB1273EAFBAA3AF3EDD6A173DC90A006E",
     byteSize: 4182218328,
     parameters: { profileRevision: 11, ...balancedFullCheckpointSampling, cfg: 4, sampler: "er_sde", scheduler: "simple", qualityPrefix: "masterpiece, best quality, score_7", defaultNegativePrompt, systemTurboLoraEnabled: false, systemLoraSha256: [] },
   },
   {
     workflowVersion: 29,
     fileName: "animeBulldozer_anima.safetensors",
+    desktopResourceGroupId: "model.anime-bulldozer-anima",
     displayName: "Anime Bulldozer Anima",
     description: "Anime/bulldozer Anima 完整微调底模，偏高完成度动漫插画。",
     runtimeSlug: "comfyui-anime-bulldozer-anima-v1",
@@ -47,6 +74,7 @@ const modelCatalog = [
   {
     workflowVersion: 30,
     fileName: "miaomiaoRealskin_anima11.safetensors",
+    desktopResourceGroupId: "model.miaomiao-realskin-anima11",
     displayName: "MiaoMiao RealSkin Anima 1.1",
     description: "MiaoMiao RealSkin Anima 1.1 完整微调底模，面向写实皮肤与摄影质感。",
     runtimeSlug: "comfyui-miaomiao-realskin-anima11",
@@ -60,6 +88,7 @@ const modelCatalog = [
   {
     workflowVersion: 31,
     fileName: "miaomiao3DHarem_animaLH3D10.safetensors",
+    desktopResourceGroupId: "model.miaomiao-3d-harem-anima-lh3d10",
     displayName: "MiaoMiao 3D Harem Anima LH3D 1.0",
     description: "MiaoMiao 3D Harem Anima LH3D 1.0 完整微调底模，面向精细三维动漫质感。",
     runtimeSlug: "comfyui-miaomiao-3d-harem-anima-lh3d10",
@@ -73,6 +102,7 @@ const modelCatalog = [
   {
     workflowVersion: 32,
     fileName: "waiANIMA_v10Base10.safetensors",
+    desktopResourceGroupId: "model.wai-anima-v10",
     displayName: "WAI Anima v1.0",
     description: "WAI Anima v1.0 完整微调底模，面向高质量二次元角色插画。",
     runtimeSlug: "comfyui-wai-anima-v10-base10",
@@ -86,6 +116,7 @@ const modelCatalog = [
   {
     workflowVersion: 33,
     fileName: "miaomiaoHarem_anima8Step10.safetensors",
+    desktopResourceGroupId: "model.miaomiao-harem-anima8step10",
     displayName: "MiaoMiao Harem Anima 8-Step 1.0",
     description: "MiaoMiao Harem Anima 8-Step 1.0 蒸馏底模，使用 12 步质量档与 CFG 1；该实验版本仅用于推理。",
     runtimeSlug: "comfyui-miaomiao-harem-anima8step10",
@@ -95,7 +126,32 @@ const modelCatalog = [
     sha256: "10760718321F82577F648893416655FB979A8026CDD8977FD74A9AC998E1314A",
     byteSize: 4182218328,
     // 蒸馏模型按作者建议使用 Euler A + Normal，独立配置避免被完整底模的 37 步质量档覆盖。
-    parameters: { profileRevision: 1, qualityProfile: "miaomiao-harem-anima8step-v1", targetSeconds: 90, steps: 12, aspectStepThreshold: 1.5, aspectAdjustedSteps: 12, samplingMaxEdge: 1536, samplingPixelBudget: 1350000, samplingPixelBudgetAspectSlope: 0, cfg: 1, sampler: "euler_ancestral", scheduler: "normal", qualityPrefix: "masterpiece, best quality, score_7, safe, very aesthetic, ultra detailed, pale skin, fair skin, high contrast", defaultNegativePrompt, systemTurboLoraEnabled: false, systemHighresLoraEnabled: false, trainingSupported: false },
+    parameters: {
+      profileRevision: 2,
+      qualityProfile: "miaomiao-harem-anima8step-v2",
+      targetSeconds: 90,
+      steps: 12,
+      aspectStepThreshold: 1.5,
+      aspectAdjustedSteps: 12,
+      samplingMaxEdge: 1536,
+      samplingPixelBudget: 1350000,
+      samplingPixelBudgetAspectSlope: 0,
+      generationPresets: {
+        fast: { steps: 8, aspectAdjustedSteps: 8, samplingMaxEdge: 1280, samplingPixelBudget: 786432 },
+        quality: { steps: 12, aspectAdjustedSteps: 12, samplingMaxEdge: 1536, samplingPixelBudget: 1350000 },
+        extreme: { steps: 30, aspectAdjustedSteps: 30, samplingMaxEdge: 1536, samplingPixelBudget: 1350000 },
+      },
+      availableSamplers: ["euler", "euler_ancestral"],
+      availableSchedulers: ["normal", "beta"],
+      cfg: 1,
+      sampler: "euler_ancestral",
+      scheduler: "normal",
+      qualityPrefix: "masterpiece, best quality, score_7, safe, very aesthetic, ultra detailed, pale skin, fair skin, high contrast",
+      defaultNegativePrompt,
+      systemTurboLoraEnabled: false,
+      systemHighresLoraEnabled: false,
+      trainingSupported: false,
+    },
   },
 ];
 
@@ -109,7 +165,7 @@ try {
   });
 
   for (const catalog of modelCatalog) {
-    const defaults = { ...sharedDefaults, ...catalog.parameters, productCode: catalog.productCode, sourceUrls: catalog.sourceUrls, sourceUrl: null, sourceVersionId: catalog.sourceVersionId, modelSha256: catalog.sha256, modelByteSize: catalog.byteSize };
+    const defaults = { ...sharedDefaults, ...animaComponents, ...catalog.parameters, productCode: catalog.productCode, sourceUrls: catalog.sourceUrls, sourceUrl: null, sourceVersionId: catalog.sourceVersionId, modelSha256: catalog.sha256, modelByteSize: catalog.byteSize, desktopResourceGroupId: catalog.desktopResourceGroupId, desktopStorageFileName: catalog.fileName, desktopDownloadEnabled: true };
     const model = await database.modelVersion.findUnique({ where: { familyId_version: { familyId: family.id, version: catalog.fileName } } }) ?? await database.modelVersion.create({
       data: { familyId: family.id, version: catalog.fileName, displayName: catalog.displayName, description: catalog.description, status: "ACTIVE", runtimeFormat: "anima", defaultParameters: defaults },
     });

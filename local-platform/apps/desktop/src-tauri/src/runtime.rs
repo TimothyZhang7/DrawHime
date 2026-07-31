@@ -611,7 +611,6 @@ mod tests {
         let settings = DesktopSettings {
             theme_mode: "system".into(),
             font_scale: 1.1,
-            dependency_source: "auto".into(),
             default_privacy: "private".into(),
             auto_upload: true,
             model_root: temporary
@@ -648,7 +647,6 @@ mod tests {
         let settings = DesktopSettings {
             theme_mode: "system".into(),
             font_scale: 1.1,
-            dependency_source: "auto".into(),
             default_privacy: "private".into(),
             auto_upload: true,
             model_root: temporary

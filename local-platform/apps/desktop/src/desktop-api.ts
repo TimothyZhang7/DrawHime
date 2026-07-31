@@ -1,5 +1,5 @@
 /** 本文件封装 WebView 到 Tauri 本地核心的受类型约束命令。 */
-import type { DesktopAccountView, DesktopAuthorizationRequestView, DesktopAuthorizationStartRequest, DesktopBootstrapView, DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopEnvironmentReport, DesktopGalleryPrivacy, DesktopGallerySyncItem, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopOfflineUpdateImportInput, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView, DesktopSettings, DesktopSettingsUpdate, DesktopSoftwareUpdateView, DesktopTrainingAssetDeleteInput, DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetIdInput, DesktopTrainingDatasetView, DesktopTrainingImagesAddInput, DesktopTrainingJobCreateInput, DesktopTrainingJobView, DesktopTrainingTagTranslationInput, DesktopTrainingTriggerWordsUpdateInput, DesktopWebsiteLoraInstallProgress, DesktopWebsiteLoraView, DesktopWebsiteModelView, TrainingTagTranslationView } from "@drawhime/contracts";
+import type { DesktopAccountView, DesktopAuthorizationRequestView, DesktopAuthorizationStartRequest, DesktopBootstrapView, DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopEnvironmentReport, DesktopGalleryPrivacy, DesktopGallerySyncItem, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopOfflineUpdateImportInput, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView, DesktopSettings, DesktopSettingsUpdate, DesktopSoftwareUpdateView, DesktopTrainingAssetDeleteInput, DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetIdInput, DesktopTrainingDatasetView, DesktopTrainingImagesAddInput, DesktopTrainingJobCreateInput, DesktopTrainingJobView, DesktopTrainingTagTranslationInput, DesktopTrainingTriggerWordsUpdateInput, DesktopWebsiteLoraInstallProgress, DesktopWebsiteLoraView, DesktopWebsiteModelInstallProgress, DesktopWebsiteModelView, TrainingTagTranslationView } from "@drawhime/contracts";
 import type { DesktopAiAnalyzeInput, DesktopAiAnalyzeView, DesktopAiSettings, DesktopAiSettingsUpdate } from "@drawhime/contracts";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -69,6 +69,10 @@ export function loadDesktopWebsiteLoras(forceRefresh = false): Promise<DesktopWe
 
 /** 读取主站底模仓库和已缓存封面，不把设备会话暴露给页面。 */
 export function loadDesktopWebsiteModels(forceRefresh = false): Promise<DesktopWebsiteModelView[]> { return invoke("desktop_load_website_models", { forceRefresh }); }
+/** 从主站断点下载并安装一个在线底模。 */
+export function installDesktopWebsiteModel(modelId: string): Promise<DesktopLocalModelView> { return invoke("desktop_install_website_model", { modelId }); }
+/** 监听网站底模下载、校验和安装进度。 */
+export function listenDesktopWebsiteModelProgress(handler: (progress: DesktopWebsiteModelInstallProgress) => void): Promise<UnlistenFn> { return listen<DesktopWebsiteModelInstallProgress>("desktop-website-model-progress", (event) => handler(event.payload)); }
 /** 断点下载、校验并安装一个网站 LoRA。 */
 export function installDesktopWebsiteLora(loraId: string): Promise<DesktopLocalLoraView> { return invoke("desktop_install_website_lora", { loraId }); }
 /** 监听网站 LoRA 下载、校验和安装进度。 */

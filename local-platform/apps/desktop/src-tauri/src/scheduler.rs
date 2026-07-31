@@ -6,7 +6,7 @@ use crate::{
     models::{
         DesktopLocalArtifactView, DesktopLocalJobAttemptView, DesktopLocalJobCreateInput,
         DesktopLocalJobLoraView, DesktopLocalJobParametersView, DesktopLocalJobView,
-        DesktopLocalLoraSelectionInput, DesktopSettings,
+        DesktopLocalLoraSelectionInput, DesktopSettings, DesktopWebsiteModelParameters,
     },
     runtime::RuntimeController,
     workload::GpuWorkloadCoordinator,
@@ -163,7 +163,7 @@ pub fn create_job(
 ) -> Result<DesktopLocalJobView, String> {
     validate_job_input(&input)?;
     let transaction = database.transaction().map_err(|error| format!("开启本地任务事务失败：{error}"))?;
-    let model = transaction.query_row("SELECT display_name,workflow_kind,model_file_name,model_relative_path,model_sha256,byte_size,model_modified_ms,text_encoder_file_name,text_encoder_relative_path,vae_file_name,vae_relative_path FROM local_models WHERE id=?1", [&input.model_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?, row.get::<_, String>(4)?, row.get::<_, u64>(5)?, row.get::<_, u64>(6)?, row.get::<_, Option<String>>(7)?, row.get::<_, Option<String>>(8)?, row.get::<_, Option<String>>(9)?, row.get::<_, Option<String>>(10)?))).optional().map_err(|error| format!("读取任务底模失败：{error}"))?.ok_or_else(|| "所选本地模型不存在".to_string())?;
+    let model = transaction.query_row("SELECT display_name,workflow_kind,model_file_name,model_relative_path,model_sha256,byte_size,model_modified_ms,text_encoder_file_name,text_encoder_relative_path,vae_file_name,vae_relative_path,generation_profile_json FROM local_models WHERE id=?1", [&input.model_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?, row.get::<_, String>(4)?, row.get::<_, u64>(5)?, row.get::<_, u64>(6)?, row.get::<_, Option<String>>(7)?, row.get::<_, Option<String>>(8)?, row.get::<_, Option<String>>(9)?, row.get::<_, Option<String>>(10)?, row.get::<_, Option<String>>(11)?))).optional().map_err(|error| format!("读取任务底模失败：{error}"))?.ok_or_else(|| "所选本地模型不存在".to_string())?;
     validate_registered_asset(&model.3, &model.2, if model.1 == "anima" { "diffusion_models" } else { "checkpoints" })?;
     if model.1 == "anima" {
         validate_registered_asset(model.8.as_deref().ok_or_else(|| "Anima 模型缺少文本编码器路径".to_string())?, model.7.as_deref().ok_or_else(|| "Anima 模型缺少文本编码器文件名".to_string())?, "text_encoders")?;
@@ -178,13 +178,17 @@ pub fn create_job(
         model.10.as_deref(),
         &model.1,
     )?;
-    let loras = selected_lora_snapshots(&transaction, settings, &input.loras)?;
+    let loras = selected_lora_snapshots(&transaction, settings, &model.4, &input.loras)?;
     // 非自定义预设必须由核心按实际底模重新解析，避免旧页面或篡改请求降低质量档语义。
-    let parameters = resolve_generation_parameters(&input, &model.1, &model.2);
+    let generation_profile: Option<DesktopWebsiteModelParameters> = model.11.as_deref().map(serde_json::from_str).transpose().map_err(|error| format!("读取底模生成参数失败：{error}"))?;
+    validate_model_sampling_selection(&input, generation_profile.as_ref())?;
+    let parameters = resolve_generation_parameters(&input, generation_profile.as_ref());
     let id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
     let seed = input.seed.unwrap_or_else(random_seed);
-    transaction.execute("INSERT INTO local_jobs (id,status,progress,prompt,negative_prompt,model_id,model_display_name,workflow_kind,model_file_name,model_relative_path,model_sha256,text_encoder_file_name,vae_file_name,width,height,quality_preset,steps,cfg,sampler_name,scheduler_name,sampling_max_edge,sampling_pixel_budget,aspect_step_threshold,aspect_adjusted_steps,upscale_method,quality_prompt_enabled,quality_prefix,default_negative_enabled,default_negative_prompt,seed,privacy,created_at,updated_at) VALUES (?1,'queued',0,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?30)", params![id, input.prompt.trim(), input.negative_prompt.as_deref().map(str::trim).filter(|value| !value.is_empty()), input.model_id, model.0, model.1, model.2, model.3, model.4, model.7, model.9, input.width, input.height, parameters.quality_preset, parameters.steps, parameters.cfg, parameters.sampler_name, parameters.scheduler_name, parameters.sampling_max_edge, parameters.sampling_pixel_budget, parameters.aspect_step_threshold, parameters.aspect_adjusted_steps, parameters.upscale_method, parameters.quality_prompt_enabled, parameters.quality_prefix, parameters.default_negative_enabled, parameters.default_negative_prompt, seed, input.privacy, now]).map_err(|error| format!("创建本地任务失败：{error}"))?;
+    // LoRA 触发词属于实际 Runtime 输入，创建任务时即固化，图库与记录不会只保存用户的初始文本。
+    let submitted_prompt = append_lora_trigger_words(input.prompt.trim(), &loras);
+    transaction.execute("INSERT INTO local_jobs (id,status,progress,prompt,negative_prompt,model_id,model_display_name,workflow_kind,model_file_name,model_relative_path,model_sha256,text_encoder_file_name,vae_file_name,width,height,quality_preset,steps,cfg,sampler_name,scheduler_name,sampling_max_edge,sampling_pixel_budget,aspect_step_threshold,aspect_adjusted_steps,upscale_method,quality_prompt_enabled,quality_prefix,default_negative_enabled,default_negative_prompt,seed,privacy,created_at,updated_at) VALUES (?1,'queued',0,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?30)", params![id, submitted_prompt, input.negative_prompt.as_deref().map(str::trim).filter(|value| !value.is_empty()), input.model_id, model.0, model.1, model.2, model.3, model.4, model.7, model.9, input.width, input.height, parameters.quality_preset, parameters.steps, parameters.cfg, parameters.sampler_name, parameters.scheduler_name, parameters.sampling_max_edge, parameters.sampling_pixel_budget, parameters.aspect_step_threshold, parameters.aspect_adjusted_steps, parameters.upscale_method, parameters.quality_prompt_enabled, parameters.quality_prefix, parameters.default_negative_enabled, parameters.default_negative_prompt, seed, input.privacy, now]).map_err(|error| format!("创建本地任务失败：{error}"))?;
     for (sequence, lora) in loras.iter().enumerate() {
         let trigger_words_json = serde_json::to_string(&lora.trigger_words).map_err(|error| format!("序列化任务 LoRA 触发词失败：{error}"))?;
         transaction.execute("INSERT INTO local_job_loras (job_id,sequence,lora_id,title,type,file_name,relative_path,sha256,byte_size,modified_ms,strength,clip_strength,trigger_words_json) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)", params![id, sequence, lora.id, lora.title, lora.r#type, lora.file_name, lora.relative_path, lora.sha256, lora.byte_size, lora.modified_ms, lora.strength, lora.clip_strength, trigger_words_json]).map_err(|error| format!("保存任务 LoRA 快照失败：{error}"))?;
@@ -303,6 +307,11 @@ fn execute_job(
         update_progress(database, &job.id, 5)?;
         emit_job(database, app, &job.id);
         let endpoint = runtime.endpoint().map_err(GenerationFailure::Failed)?;
+        // 旧排队任务也在执行前补齐触发词，并把实际文本回写记录，避免升级边界出现行为差异。
+        let submitted_prompt = append_lora_trigger_words(&job.prompt, &job.loras);
+        if submitted_prompt != job.prompt {
+            database.execute("UPDATE local_jobs SET prompt=?2,updated_at=?3 WHERE id=?1", params![job.id, submitted_prompt, Utc::now().to_rfc3339()]).map_err(|error| GenerationFailure::Failed(format!("保存实际提交提示词失败：{error}")))?;
+        }
         let request = GenerationRequest {
             job_id: job.id.clone(),
             workflow_kind: job.workflow_kind.clone(),
@@ -310,7 +319,7 @@ fn execute_job(
             text_encoder_file_name: job.text_encoder_file_name.clone(),
             vae_file_name: job.vae_file_name.clone(),
             loras: job.loras.iter().map(|lora| GenerationLora { file_name: lora.file_name.clone(), strength: lora.strength, clip_strength: lora.clip_strength }).collect(),
-            prompt: job.prompt.clone(),
+            prompt: submitted_prompt,
             negative_prompt: job.negative_prompt.clone(),
             width: job.width,
             height: job.height,
@@ -453,7 +462,7 @@ fn validate_job_input(input: &DesktopLocalJobCreateInput) -> Result<(), String> 
         return Err("采样步数或 CFG 超出范围".into());
     }
     if !matches!(input.sampler_name.as_str(), "er_sde" | "euler" | "euler_ancestral")
-        || !matches!(input.scheduler_name.as_str(), "normal" | "simple")
+        || !matches!(input.scheduler_name.as_str(), "normal" | "simple" | "beta")
     {
         return Err("采样器或调度器不受支持".into());
     }
@@ -476,79 +485,68 @@ fn validate_job_input(input: &DesktopLocalJobCreateInput) -> Result<(), String> 
     Ok(())
 }
 
-/** 质量档完整复刻当前生产 GPU 的平衡质量参数，快速和极致只调整采样预算与步数。 */
-fn resolve_generation_parameters(input: &DesktopLocalJobCreateInput, workflow_kind: &str, model_file_name: &str) -> ResolvedGenerationParameters {
-    let (model_cfg, sampler, scheduler, prefix, negative) = model_quality_profile(workflow_kind, model_file_name);
-    let distilled_anima = workflow_kind == "anima" && model_file_name.to_ascii_lowercase().contains("anima8step");
-    let (steps, adjusted_steps, max_edge, pixel_budget) = match (distilled_anima, input.quality_preset.as_str()) {
-        (true, "fast") => (8, 8, 1280, 786_432),
-        (true, "quality") => (12, 12, 1536, 1_350_000),
-        (true, "extreme") => (30, 30, 1536, 1_350_000),
-        (false, "fast") => (20, 18, 1280, 786_432),
-        (false, "quality") => (37, 34, 1536, 1_350_000),
-        (false, "extreme") => (45, 42, 1792, 2_073_600),
-        _ => (input.steps, input.aspect_adjusted_steps, input.sampling_max_edge, input.sampling_pixel_budget),
-    };
+/** 质量档只读取在线目录已经持久化到本机的参数；自定义模式完整保留用户输入。 */
+fn resolve_generation_parameters(input: &DesktopLocalJobCreateInput, profile: Option<&DesktopWebsiteModelParameters>) -> ResolvedGenerationParameters {
     let custom = input.quality_preset == "custom";
-    let quality_prompt_enabled = if custom { input.quality_prompt_enabled } else { true };
-    let default_negative_enabled = if custom { input.default_negative_enabled } else { true };
+    let preset = if custom { None } else { profile.map(|value| match input.quality_preset.as_str() { "fast" => &value.presets.fast, "extreme" => &value.presets.extreme, _ => &value.presets.quality }) };
+    let steps = preset.map(|value| value.steps).unwrap_or(input.steps);
+    let adjusted_steps = preset.map(|value| value.aspect_adjusted_steps).unwrap_or(input.aspect_adjusted_steps);
+    let max_edge = preset.map(|value| value.sampling_max_edge).unwrap_or(input.sampling_max_edge);
+    let pixel_budget = preset.map(|value| value.sampling_pixel_budget).unwrap_or(input.sampling_pixel_budget);
+    let quality_prompt_enabled = if custom || profile.is_none() { input.quality_prompt_enabled } else { true };
+    let default_negative_enabled = if custom || profile.is_none() { input.default_negative_enabled } else { true };
     ResolvedGenerationParameters {
         quality_preset: input.quality_preset.clone(),
         steps,
-        cfg: if custom { input.cfg } else { model_cfg },
-        sampler_name: if custom { input.sampler_name.clone() } else { sampler.into() },
-        scheduler_name: if custom { input.scheduler_name.clone() } else { scheduler.into() },
+        cfg: if custom { input.cfg } else { profile.map(|value| value.cfg).unwrap_or(input.cfg) },
+        sampler_name: if custom { input.sampler_name.clone() } else { profile.map(|value| value.sampler.clone()).unwrap_or_else(|| input.sampler_name.clone()) },
+        scheduler_name: if custom { input.scheduler_name.clone() } else { profile.map(|value| value.scheduler.clone()).unwrap_or_else(|| input.scheduler_name.clone()) },
         sampling_max_edge: max_edge,
         sampling_pixel_budget: pixel_budget,
-        aspect_step_threshold: if custom { input.aspect_step_threshold } else { 1.5 },
+        aspect_step_threshold: if custom { input.aspect_step_threshold } else { profile.map(|value| value.aspect_step_threshold).unwrap_or(input.aspect_step_threshold) },
         // 极端画幅只能减少或保持步数，任务快照直接保存 Runtime 最终会使用的值。
         aspect_adjusted_steps: adjusted_steps.min(steps),
         upscale_method: if custom { input.upscale_method.clone() } else { "lanczos".into() },
         quality_prompt_enabled,
-        quality_prefix: quality_prompt_enabled.then(|| prefix.into()),
+        quality_prefix: quality_prompt_enabled.then(|| profile.map(|value| value.quality_prefix.clone()).unwrap_or_default()),
         default_negative_enabled,
-        default_negative_prompt: default_negative_enabled.then(|| negative.into()),
+        default_negative_prompt: default_negative_enabled.then(|| profile.map(|value| value.default_negative_prompt.clone()).unwrap_or_default()),
     }
 }
 
-/** 根据正式模型目录返回与服务器一致的 CFG、采样器和提示词质量配置。 */
-fn model_quality_profile(workflow_kind: &str, model_file_name: &str) -> (f64, &'static str, &'static str, &'static str, &'static str) {
-    const NEGATIVE: &str = "worst quality, low quality, score_1, score_2, score_3, artist name";
-    let file_name = model_file_name.to_ascii_lowercase();
-    if workflow_kind != "anima" {
-        return (5.0, "euler", "normal", "masterpiece, best quality", NEGATIVE);
+/** 自定义模式只能使用当前底模在线目录声明的采样组合，预设档由核心直接覆盖为目录推荐值。 */
+fn validate_model_sampling_selection(input: &DesktopLocalJobCreateInput, profile: Option<&DesktopWebsiteModelParameters>) -> Result<(), String> {
+    if input.quality_preset != "custom" { return Ok(()); }
+    let Some(profile) = profile else { return Ok(()); };
+    if !profile.available_samplers.contains(&input.sampler_name) || !profile.available_schedulers.contains(&input.scheduler_name) {
+        return Err("采样器或调度器不在当前底模目录允许范围内".into());
     }
-    if file_name.contains("anima8step") {
-        return (1.0, "euler_ancestral", "normal", "masterpiece, best quality, score_7, safe, very aesthetic, ultra detailed, pale skin, fair skin, high contrast", NEGATIVE);
-    }
-    if file_name.contains("realskin") {
-        return (4.0, "euler_ancestral", "normal", "best quality, score_7, score_9, very aesthetic, ultra detailed, fair skin, high contrast, photorealistic, raw photo, photo background", NEGATIVE);
-    }
-    if file_name.contains("3dharem") {
-        return (4.0, "euler_ancestral", "normal", "best quality, score_7, score_9, very aesthetic, ultra detailed, high contrast", NEGATIVE);
-    }
-    if file_name.contains("waianima") {
-        return (4.5, "euler_ancestral", "normal", "masterpiece, best quality, score_7", "worst quality, low quality, score_1, score_2, score_3, artist name, blurry, jpeg artifacts, lowres, censor");
-    }
-    if file_name.contains("bulldozer") {
-        return (4.0, "er_sde", "simple", "masterpiece, best quality, score_7, very aesthetic", "worst quality, low quality, score_1, score_2, score_3, artist name, blurry, jpeg artifacts, sepia, muscular female");
-    }
-    (4.0, "er_sde", "simple", "masterpiece, best quality, score_7", NEGATIVE)
+    Ok(())
 }
 
 /** 在创建任务的同一事务中读取并校验 LoRA，标题变化不会改写历史任务快照。 */
-fn selected_lora_snapshots(transaction: &Transaction<'_>, settings: &DesktopSettings, selections: &[DesktopLocalLoraSelectionInput]) -> Result<Vec<LocalJobLoraExecution>, String> {
+fn selected_lora_snapshots(transaction: &Transaction<'_>, settings: &DesktopSettings, model_sha256: &str, selections: &[DesktopLocalLoraSelectionInput]) -> Result<Vec<LocalJobLoraExecution>, String> {
     let mut snapshots = Vec::with_capacity(selections.len());
     let mut content_hashes = std::collections::HashSet::new();
     for selection in selections {
-        let lora = transaction.query_row("SELECT id,title,type,file_name,relative_path,sha256,byte_size,modified_ms,trigger_words_json FROM local_loras WHERE id=?1", [&selection.id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?, row.get::<_, String>(4)?, row.get::<_, String>(5)?, row.get::<_, u64>(6)?, row.get::<_, u64>(7)?, row.get::<_, String>(8)?))).optional().map_err(|error| format!("读取所选 LoRA 失败：{error}"))?.ok_or_else(|| "所选 LoRA 不存在".to_string())?;
+        let lora = transaction.query_row("SELECT id,title,type,file_name,relative_path,sha256,byte_size,modified_ms,trigger_words_json,base_model_sha256 FROM local_loras WHERE id=?1", [&selection.id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?, row.get::<_, String>(4)?, row.get::<_, String>(5)?, row.get::<_, u64>(6)?, row.get::<_, u64>(7)?, row.get::<_, String>(8)?, row.get::<_, Option<String>>(9)?))).optional().map_err(|error| format!("读取所选 LoRA 失败：{error}"))?.ok_or_else(|| "所选 LoRA 不存在".to_string())?;
         if !content_hashes.insert(lora.5.clone()) { return Err("不能选择内容相同的多个 LoRA".into()); }
         validate_registered_asset(&lora.4, &lora.3, "loras")?;
         validate_lora_snapshot(settings, &lora.4, lora.6, lora.7)?;
+        if lora.9.as_deref().is_some_and(|expected| expected != model_sha256) { return Err(format!("LoRA“{}”由另一个精确底模训练，请切换回训练底模后使用", lora.1)); }
         let trigger_words = serde_json::from_str(&lora.8).map_err(|error| format!("解析 LoRA 触发词失败：{error}"))?;
         snapshots.push(LocalJobLoraExecution { id: lora.0, title: lora.1, r#type: lora.2, file_name: lora.3, relative_path: lora.4, sha256: lora.5, byte_size: lora.6, modified_ms: lora.7, strength: selection.strength, clip_strength: selection.clip_strength, trigger_words });
     }
     Ok(snapshots)
+}
+
+/** 按选择顺序补齐 LoRA 触发词，大小写不敏感去重且不覆盖用户提示词。 */
+fn append_lora_trigger_words(prompt: &str, loras: &[LocalJobLoraExecution]) -> String {
+    let trimmed = prompt.trim();
+    let lower = trimmed.to_lowercase();
+    let mut seen = std::collections::HashSet::new();
+    let missing = loras.iter().flat_map(|lora| lora.trigger_words.iter()).map(|word| word.trim()).filter(|word| !word.is_empty() && seen.insert(word.to_lowercase())).filter(|word| !lower.contains(&word.to_lowercase())).collect::<Vec<_>>();
+    if missing.is_empty() { trimmed.into() } else { format!("{trimmed}, {}", missing.join(", ")) }
 }
 
 fn validate_model_snapshot(
@@ -658,7 +656,7 @@ fn controlled_join(root: &Path, relative: &str) -> Result<PathBuf, String> {
 }
 
 fn load_settings(database: &Connection) -> Result<DesktopSettings, GenerationFailure> {
-    database.query_row("SELECT theme_mode,font_scale,dependency_source,default_privacy,auto_upload,model_root,output_root,runtime_root,upload_concurrency,wifi_only,bandwidth_limit_kib FROM desktop_settings WHERE id=1", [], |row| Ok(DesktopSettings { theme_mode: row.get(0)?, font_scale: row.get(1)?, dependency_source: row.get(2)?, default_privacy: row.get(3)?, auto_upload: row.get::<_, i64>(4)? != 0, model_root: row.get(5)?, output_root: row.get(6)?, runtime_root: row.get(7)?, upload_concurrency: row.get(8)?, wifi_only: row.get::<_, i64>(9)? != 0, bandwidth_limit_kib: row.get(10)? })).map_err(|error| GenerationFailure::Failed(format!("读取本地调度设置失败：{error}")))
+    database.query_row("SELECT theme_mode,font_scale,default_privacy,auto_upload,model_root,output_root,runtime_root,upload_concurrency,wifi_only,bandwidth_limit_kib FROM desktop_settings WHERE id=1", [], |row| Ok(DesktopSettings { theme_mode: row.get(0)?, font_scale: row.get(1)?, default_privacy: row.get(2)?, auto_upload: row.get::<_, i64>(3)? != 0, model_root: row.get(4)?, output_root: row.get(5)?, runtime_root: row.get(6)?, upload_concurrency: row.get(7)?, wifi_only: row.get::<_, i64>(8)? != 0, bandwidth_limit_kib: row.get(9)? })).map_err(|error| GenerationFailure::Failed(format!("读取本地调度设置失败：{error}")))
 }
 
 fn read_job(database: &Connection, id: &str) -> Result<Option<DesktopLocalJobView>, String> {
@@ -839,6 +837,7 @@ fn random_seed() -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::{DesktopWebsiteModelPreset, DesktopWebsiteModelPresets};
     use crate::storage::{DesktopState, LocalLoraRegistration, LocalModelRegistration};
 
     #[test]
@@ -880,6 +879,16 @@ mod tests {
     }
 
     #[test]
+    fn lora_trigger_words_are_appended_once_in_selection_order() {
+        let lora = LocalJobLoraExecution {
+            id: "lora-1".into(), title: "角色".into(), r#type: "character".into(), file_name: "character.safetensors".into(), relative_path: "loras/character.safetensors".into(), sha256: "a".repeat(64), byte_size: 1, modified_ms: 1, strength: 1.0, clip_strength: 1.0,
+            trigger_words: vec!["my_character".into(), "special_style".into(), "my_character".into()],
+        };
+        assert_eq!(append_lora_trigger_words("1girl", std::slice::from_ref(&lora)), "1girl, my_character, special_style");
+        assert_eq!(append_lora_trigger_words("1girl, my_character", &[lora]), "1girl, my_character, special_style");
+    }
+
+    #[test]
     fn quality_preset_matches_production_anima_profile() {
         let mut input = DesktopLocalJobCreateInput {
             model_id: Uuid::new_v4().to_string(), prompt: "subject".into(), negative_prompt: None,
@@ -889,16 +898,46 @@ mod tests {
             upscale_method: "nearest-exact".into(), quality_prompt_enabled: false, default_negative_enabled: false,
             seed: None, loras: Vec::new(), privacy: "public".into(),
         };
-        let base = resolve_generation_parameters(&input, "anima", "anima-base-v1.0.safetensors");
+        let profile = DesktopWebsiteModelParameters {
+            steps: 37,
+            cfg: 4.0,
+            sampler: "er_sde".into(),
+            scheduler: "simple".into(),
+            sampling_max_edge: 1536,
+            sampling_pixel_budget: 1_350_000,
+            aspect_step_threshold: 1.5,
+            max_edge: 1536,
+            quality_prefix: "masterpiece".into(),
+            default_negative_prompt: "low quality".into(),
+            training_supported: true,
+            available_samplers: vec!["er_sde".into()],
+            available_schedulers: vec!["simple".into()],
+            presets: DesktopWebsiteModelPresets {
+                fast: DesktopWebsiteModelPreset { steps: 20, aspect_adjusted_steps: 18, sampling_max_edge: 1280, sampling_pixel_budget: 786_432 },
+                quality: DesktopWebsiteModelPreset { steps: 37, aspect_adjusted_steps: 34, sampling_max_edge: 1536, sampling_pixel_budget: 1_350_000 },
+                extreme: DesktopWebsiteModelPreset { steps: 45, aspect_adjusted_steps: 42, sampling_max_edge: 1792, sampling_pixel_budget: 2_073_600 },
+            },
+        };
+        let base = resolve_generation_parameters(&input, Some(&profile));
         assert_eq!((base.steps, base.aspect_adjusted_steps, base.sampling_max_edge, base.sampling_pixel_budget), (37, 34, 1536, 1_350_000));
         assert_eq!((base.cfg, base.sampler_name.as_str(), base.scheduler_name.as_str()), (4.0, "er_sde", "simple"));
         assert!(base.quality_prompt_enabled && base.default_negative_enabled);
+        input.quality_preset = "custom".into();
+        assert!(validate_model_sampling_selection(&input, Some(&profile)).is_err());
+        input.sampler_name = "er_sde".into();
+        input.scheduler_name = "simple".into();
+        assert!(validate_model_sampling_selection(&input, Some(&profile)).is_ok());
         input.quality_preset = "extreme".into();
-        let real_skin = resolve_generation_parameters(&input, "anima", "miaomiaoRealskin_anima11.safetensors");
-        assert_eq!((real_skin.steps, real_skin.cfg, real_skin.sampler_name.as_str()), (45, 4.0, "euler_ancestral"));
+        let extreme = resolve_generation_parameters(&input, Some(&profile));
+        assert_eq!((extreme.steps, extreme.cfg, extreme.sampler_name.as_str()), (45, 4.0, "er_sde"));
+        let mut distilled = profile;
+        distilled.cfg = 1.0;
+        distilled.sampler = "euler_ancestral".into();
+        distilled.scheduler = "normal".into();
+        distilled.presets.quality = DesktopWebsiteModelPreset { steps: 12, aspect_adjusted_steps: 12, sampling_max_edge: 1536, sampling_pixel_budget: 1_350_000 };
         input.quality_preset = "quality".into();
-        let distilled = resolve_generation_parameters(&input, "anima", "miaomiaoHarem_anima8Step10.safetensors");
-        assert_eq!((distilled.steps, distilled.aspect_adjusted_steps, distilled.cfg, distilled.sampler_name.as_str(), distilled.scheduler_name.as_str()), (12, 12, 1.0, "euler_ancestral", "normal"));
+        let resolved_distilled = resolve_generation_parameters(&input, Some(&distilled));
+        assert_eq!((resolved_distilled.steps, resolved_distilled.aspect_adjusted_steps, resolved_distilled.cfg, resolved_distilled.sampler_name.as_str(), resolved_distilled.scheduler_name.as_str()), (12, 12, 1.0, "euler_ancestral", "normal"));
     }
 
     #[test]
@@ -929,13 +968,19 @@ mod tests {
                 vae_file_name: None,
                 vae_relative_path: None,
                 vae_sha256: None,
+                resource_group_id: None,
+                generation_profile_json: None,
             })
             .expect("登记模型");
         let lora_path = Path::new(&settings.model_root).join("loras").join("style.safetensors");
         fs::create_dir_all(lora_path.parent().expect("LoRA 父目录")).expect("创建 LoRA 目录");
         fs::write(&lora_path, b"registered-lora").expect("写入登记 LoRA");
         let lora_metadata = lora_path.metadata().expect("读取 LoRA 元数据");
-        let lora = state.register_local_lora(LocalLoraRegistration { title: "测试画风".into(), r#type: "style".into(), file_name: "style.safetensors".into(), relative_path: "loras/style.safetensors".into(), sha256: "b".repeat(64), byte_size: lora_metadata.len(), modified_ms: metadata_modified_ms(&lora_metadata).expect("读取 LoRA 修改时间"), trigger_words: vec!["test_style".into()] }).expect("登记 LoRA");
+        let lora = state.register_local_lora(LocalLoraRegistration { title: "测试画风".into(), r#type: "style".into(), file_name: "style.safetensors".into(), relative_path: "loras/style.safetensors".into(), sha256: "b".repeat(64), base_model_sha256: None, byte_size: lora_metadata.len(), modified_ms: metadata_modified_ms(&lora_metadata).expect("读取 LoRA 修改时间"), trigger_words: vec!["test_style".into()] }).expect("登记 LoRA");
+        let trained_path = Path::new(&settings.model_root).join("loras").join("trained.safetensors");
+        fs::write(&trained_path, b"trained-lora").expect("写入训练 LoRA");
+        let trained_metadata = trained_path.metadata().expect("读取训练 LoRA 元数据");
+        let trained = state.register_local_lora(LocalLoraRegistration { title: "其他底模训练角色".into(), r#type: "character".into(), file_name: "trained.safetensors".into(), relative_path: "loras/trained.safetensors".into(), sha256: "c".repeat(64), base_model_sha256: Some("d".repeat(64)), byte_size: trained_metadata.len(), modified_ms: metadata_modified_ms(&trained_metadata).expect("读取训练 LoRA 修改时间"), trigger_words: vec!["my_character".into()] }).expect("登记训练 LoRA");
         let input = DesktopLocalJobCreateInput {
             model_id: model.id,
             prompt: "subject".into(),
@@ -958,8 +1003,11 @@ mod tests {
             loras: vec![DesktopLocalLoraSelectionInput { id: lora.id, strength: 0.75, clip_strength: 0.6 }],
             privacy: "private".into(),
         };
+        let mut incompatible_input = input.clone();
+        incompatible_input.loras = vec![DesktopLocalLoraSelectionInput { id: trained.id, strength: 1.0, clip_strength: 1.0 }];
         let mut database = state.database.lock().expect("锁定数据库");
         let created = create_job(&mut database, &settings, input).expect("创建持久任务");
+        assert!(create_job(&mut database, &settings, incompatible_input).expect_err("拒绝错误底模 LoRA").contains("训练底模"));
         assert_eq!(created.status, "queued");
         assert_eq!(created.loras.len(), 1);
         assert_eq!(created.loras[0].title, "测试画风");
@@ -977,7 +1025,7 @@ mod tests {
         assert_eq!(created.parameters.upscale_method, "bicubic");
         assert!(!created.parameters.quality_prompt_enabled);
         assert!(created.parameters.default_negative_enabled);
-        assert_eq!(created.prompt, "subject");
+        assert_eq!(created.prompt, "subject, test_style");
         assert_eq!(created.negative_prompt.as_deref(), Some("bad anatomy"));
         assert_eq!(created.privacy, "private");
         let execution = {

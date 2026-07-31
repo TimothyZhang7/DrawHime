@@ -51,6 +51,9 @@ export function GenerationPage({ models, loras, websiteLoras, websiteLoraProgres
   const [busy, setBusy] = useState(false);
   const [loraDialogOpen, setLoraDialogOpen] = useState(false);
   const selectedModel = availableModels.find((model) => model.id === form.modelId) || null;
+  const compatibleLoras = useMemo(() => availableLoras.filter((lora) => !lora.baseModelSha256 || lora.baseModelSha256 === selectedModel?.modelSha256), [availableLoras, selectedModel?.modelSha256]);
+  const samplerOptions = useMemo(() => modelOptions(selectedModel?.generationProfile?.availableSamplers, form.samplerName), [form.samplerName, selectedModel?.generationProfile?.availableSamplers]);
+  const schedulerOptions = useMemo(() => modelOptions(selectedModel?.generationProfile?.availableSchedulers, form.schedulerName), [form.schedulerName, selectedModel?.generationProfile?.availableSchedulers]);
   const outputSize = Math.max(form.width, form.height);
   const aspectRatio = aspectRatioFromDimensions(form.width, form.height);
 
@@ -59,7 +62,7 @@ export function GenerationPage({ models, loras, websiteLoras, websiteLoraProgres
     const model = availableModels[0];
     setForm((current) => model ? applyPreset({ ...current, modelId: model.id }, "quality", model) : { ...current, modelId: "" });
   }, [availableModels, form.modelId]);
-  useEffect(() => { setForm((current) => ({ ...current, loras: current.loras.filter((selection) => availableLoras.some((lora) => lora.id === selection.id)) })); }, [availableLoras]);
+  useEffect(() => { setForm((current) => ({ ...current, loras: current.loras.filter((selection) => compatibleLoras.some((lora) => lora.id === selection.id)) })); }, [compatibleLoras]);
   useEffect(() => { setForm((current) => ({ ...current, privacy: defaultPrivacy })); }, [defaultPrivacy]);
 
   /** 预设同时刷新模型级采样器、CFG 和质量预算，后端仍会再次权威解析。 */
@@ -101,8 +104,8 @@ export function GenerationPage({ models, loras, websiteLoras, websiteLoraProgres
           <ParameterField label="画幅比例" help="独立选择横竖构图；默认 1:1，最终宽高会按所选尺寸和比例自动对齐到 8 像素。"><select value={aspectRatio} onChange={(event) => chooseOutput(outputSize, event.target.value as AspectRatioId)}>{ASPECT_RATIOS.map((ratio) => <option key={ratio.id} value={ratio.id}>{ratio.label}</option>)}</select></ParameterField>
           <ParameterField label="采样步数" help="扩散去噪迭代次数。更多步数通常增加细节，也会线性增加耗时。"><input type="number" min={1} max={80} value={form.steps} onChange={(event) => changeProfessional("steps", Number(event.target.value))} /></ParameterField>
           <ParameterField label="CFG 引导" help="提示词约束强度。过高可能产生高对比、烧色或结构僵硬；Anima 通常建议 4–5。"><input type="number" min={0.1} max={20} step={0.1} value={form.cfg} onChange={(event) => changeProfessional("cfg", Number(event.target.value))} /></ParameterField>
-          <ParameterField label="采样器" help="决定每一步如何更新噪声。ER-SDE 偏稳定细腻，Euler A 偏活跃和多样。"><select value={form.samplerName} onChange={(event) => changeProfessional("samplerName", event.target.value as DesktopLocalJobCreateInput["samplerName"])}><option value="er_sde">ER-SDE</option><option value="euler">Euler</option><option value="euler_ancestral">Euler Ancestral</option></select></ParameterField>
-          <ParameterField label="调度器" help="控制噪声在各采样步的分布。Simple 适合 ER-SDE，Normal 适合常规 Euler 系列。"><select value={form.schedulerName} onChange={(event) => changeProfessional("schedulerName", event.target.value as DesktopLocalJobCreateInput["schedulerName"])}><option value="simple">Simple</option><option value="normal">Normal</option></select></ParameterField>
+          <ParameterField label="采样器" help="决定每一步如何更新噪声；可选项由当前底模在线目录下发。"><select value={form.samplerName} onChange={(event) => changeProfessional("samplerName", event.target.value as DesktopLocalJobCreateInput["samplerName"])}>{samplerOptions.map((value) => <option key={value} value={value}>{samplingOptionLabel(value)}</option>)}</select></ParameterField>
+          <ParameterField label="调度器" help="控制噪声在各采样步的分布；可选项由当前底模在线目录下发。"><select value={form.schedulerName} onChange={(event) => changeProfessional("schedulerName", event.target.value as DesktopLocalJobCreateInput["schedulerName"])}>{schedulerOptions.map((value) => <option key={value} value={value}>{samplingOptionLabel(value)}</option>)}</select></ParameterField>
           <ParameterField label="随机种子" help="相同模型、参数与种子便于复现构图；留空时每个任务自动生成新种子。"><input type="number" min={0} max={2147483647} placeholder="留空随机" value={form.seed ?? ""} onChange={(event) => setForm((current) => ({ ...current, seed: event.target.value ? Number(event.target.value) : null }))} /></ParameterField>
           <ParameterField label="图库权限" help="登录且开启自动上传时，任务完成后按此权限同步到网页图库。"><select value={form.privacy} onChange={(event) => setForm((current) => ({ ...current, privacy: event.target.value as DesktopLocalJobCreateInput["privacy"] }))}><option value="public">公开</option><option value="private">私有</option></select></ParameterField>
         </div>
@@ -115,19 +118,29 @@ export function GenerationPage({ models, loras, websiteLoras, websiteLoraProgres
           <SwitchField label="模型质量前缀" help="自动补齐当前底模验证过的质量标签；已存在的标签不会重复。" checked={form.qualityPromptEnabled} onChange={(checked) => changeProfessional("qualityPromptEnabled", checked)} />
           <SwitchField label="默认负面词" help="仅在负面提示词留空时使用模型级默认内容，不覆盖你的手动输入。" checked={form.defaultNegativeEnabled} onChange={(checked) => changeProfessional("defaultNegativeEnabled", checked)} />
         </div></details>
-        <section className="generation-lora-summary"><header><div><strong>使用的 LoRA</strong><span>从完整仓库选择、下载并设置模型与 CLIP 权重</span></div><button type="button" onClick={() => setLoraDialogOpen(true)}><Layers3 />选择 LoRA</button></header>{form.loras.length ? <div>{form.loras.map((selection) => { const lora = availableLoras.find((item) => item.id === selection.id); return <button key={selection.id} type="button" onClick={() => setLoraDialogOpen(true)}><strong>{lora?.title || "LoRA"}</strong><span>模型 {selection.strength.toFixed(2)} · CLIP {selection.clipStrength.toFixed(2)}</span></button>; })}</div> : <p>当前未选择 LoRA</p>}</section>
+        <section className="generation-lora-summary"><header><div><strong>使用的 LoRA</strong><span>本机训练 LoRA 仅在其精确训练底模下可选，外部 LoRA 按仓库兼容范围使用</span></div><button type="button" onClick={() => setLoraDialogOpen(true)}><Layers3 />选择 LoRA</button></header>{form.loras.length ? <div>{form.loras.map((selection) => { const lora = compatibleLoras.find((item) => item.id === selection.id); return <button key={selection.id} type="button" onClick={() => setLoraDialogOpen(true)}><strong>{lora?.title || "LoRA"}</strong><span>模型 {selection.strength.toFixed(2)} · CLIP {selection.clipStrength.toFixed(2)}</span></button>; })}</div> : <p>当前未选择 LoRA</p>}</section>
         <label className="prompt-field"><span>提示词<HelpTip text="描述主体、画风、构图、光影和细节；开启质量前缀时只补齐缺失的模型标签。" /></span><textarea value={form.prompt} onChange={(event) => setForm((current) => ({ ...current, prompt: event.target.value }))} placeholder="支持 Anima 标签或自然语言" /></label>
         <label className="prompt-field negative"><span>负面提示词<HelpTip text="通过独立 negative conditioning 进入工作流，不会与正面提示词合并。" /></span><textarea value={form.negativePrompt || ""} onChange={(event) => setForm((current) => ({ ...current, negativePrompt: event.target.value || null }))} placeholder="可选；留空时可使用模型级默认负面词" /></label>
       </>}</div>
       {availableModels.length > 0 && <footer><div><strong>{presetLabel(form.qualityPreset)}</strong><span>{form.steps} 步 · CFG {form.cfg} · {form.samplerName} / {form.schedulerName}</span></div><button disabled={busy || !inferenceReady || !form.modelId || !form.prompt.trim()} onClick={() => void submit()}>{busy ? <LoaderCircle className="spin" /> : <Play />}{busy ? "正在创建任务" : inferenceReady ? "提交本地任务" : "等待环境就绪"}</button></footer>}
     </section>
     <GenerationPreview job={latestJob} />
-    {loraDialogOpen && <GenerationLoraDialog localLoras={availableLoras} websiteLoras={websiteLoras} selected={form.loras} progress={websiteLoraProgress} onToggle={toggleLora} onStrength={changeLoraStrength} onInstall={onInstallWebsiteLora} onClose={() => setLoraDialogOpen(false)} />}
+    {loraDialogOpen && <GenerationLoraDialog localLoras={compatibleLoras} websiteLoras={websiteLoras} selected={form.loras} progress={websiteLoraProgress} onToggle={toggleLora} onStrength={changeLoraStrength} onInstall={onInstallWebsiteLora} onClose={() => setLoraDialogOpen(false)} />}
   </div>;
 }
 
 /** 参数字段保持稳定标题列，并把长说明收纳到可访问悬浮提示中。 */
 function ParameterField({ label, help, children }: { label: string; help: string; children: ReactNode }) { return <label className="generation-parameter"><span>{label}<HelpTip text={help} /></span>{children}</label>; }
+
+/** 在线目录是可选采样参数的唯一事实源；无目录的手工模型只保留当前安全值。 */
+function modelOptions(values: string[] | undefined, current: string): string[] {
+  return [...new Set([...(values || []).filter(Boolean), current].filter(Boolean))];
+}
+
+/** 将目录机器值转换为稳定外显，不反向推断模型能力。 */
+function samplingOptionLabel(value: string): string {
+  return ({ er_sde: "ER-SDE", euler: "Euler", euler_ancestral: "Euler Ancestral", simple: "Simple", normal: "Normal", beta: "Beta" } as Record<string, string>)[value] || value;
+}
 
 /** 帮助内容通过根级浮层渲染，避免被滚动容器、图片或相邻帮助图标裁切遮挡。 */
 function HelpTip({ text }: { text: string }) {

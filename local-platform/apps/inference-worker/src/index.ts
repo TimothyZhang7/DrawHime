@@ -101,6 +101,7 @@ async function processJob(jobId: string): Promise<void> {
   try {
     const parameters = readParameters(job.parameters);
     const modelDefaults = readJsonObject(job.modelVersion.defaultParameters);
+    const sampling = parameters.samplingOverrides ?? modelDefaults;
     const loras = await resolveTaskLoras(parameters.loraVersionIds, parameters.loraStrengths, parameters.loraSnapshots);
     const submittedPrompt = appendLoraTriggerWords(job.effectivePrompt || job.requestedPrompt, loras);
     if (submittedPrompt !== job.effectivePrompt) {
@@ -118,19 +119,19 @@ async function processJob(jobId: string): Promise<void> {
       clientId: job.id,
       loras,
       // 底模各自使用目录固化的官方推荐采样参数，禁止所有模型套用 Anima Base 的 Turbo 参数。
-      steps: readBoundedInteger(modelDefaults.steps, 1, 50),
-      cfg: readBoundedNumber(modelDefaults.cfg, 0.1, 20),
-      samplerName: readOptionalString(modelDefaults.sampler),
-      scheduler: readOptionalString(modelDefaults.scheduler),
+      steps: readBoundedInteger(sampling.steps, 1, 80),
+      cfg: readBoundedNumber(sampling.cfg, 0.1, 20),
+      samplerName: readOptionalString(sampling.sampler),
+      scheduler: readOptionalString(sampling.scheduler),
       qualityPrefix: readOptionalString(modelDefaults.qualityPrefix),
       defaultNegativePrompt: readOptionalString(modelDefaults.defaultNegativePrompt),
       systemTurboLoraEnabled: modelDefaults.systemTurboLoraEnabled !== false,
       systemHighresLoraEnabled: modelDefaults.systemHighresLoraEnabled !== false,
-      samplingMaxEdge: readBoundedInteger(modelDefaults.samplingMaxEdge, 512, 2048),
-      samplingPixelBudget: readBoundedInteger(modelDefaults.samplingPixelBudget, 262_144, 4_194_304),
+      samplingMaxEdge: readBoundedInteger(sampling.samplingMaxEdge, 512, 2048),
+      samplingPixelBudget: readBoundedInteger(sampling.samplingPixelBudget, 262_144, 4_194_304),
       samplingPixelBudgetAspectSlope: readBoundedInteger(modelDefaults.samplingPixelBudgetAspectSlope, 0, 1_000_000),
-      aspectStepThreshold: readBoundedNumber(modelDefaults.aspectStepThreshold, 1, 4),
-      aspectAdjustedSteps: readBoundedInteger(modelDefaults.aspectAdjustedSteps, 1, 50),
+      aspectStepThreshold: readBoundedNumber(sampling.aspectStepThreshold, 1, 4),
+      aspectAdjustedSteps: readBoundedInteger(sampling.aspectAdjustedSteps, 1, 80),
       onSubmitted: async (runtimeJobId, requestJson) => {
         await database.inferenceAttempt.update({ where: { id: attempt.id }, data: { runtimeJobId, requestJson: requestJson as Prisma.InputJsonObject } });
       },
@@ -399,7 +400,7 @@ interface TaskLoraSnapshot {
 }
 
 /** 从任务 JSON 读取经过 API 校验的推理参数。 */
-function readParameters(value: unknown): { width: number; height: number; seed: number | null; loraVersionIds: string[]; loraStrengths: Record<string, number>; loraSnapshots: Record<string, TaskLoraSnapshot> } {
+function readParameters(value: unknown): { width: number; height: number; seed: number | null; samplingOverrides: Record<string, unknown> | null; loraVersionIds: string[]; loraStrengths: Record<string, number>; loraSnapshots: Record<string, TaskLoraSnapshot> } {
   const data = value && typeof value === "object" ? value as Record<string, unknown> : {};
   const loraSnapshots = Object.fromEntries((Array.isArray(data.loraSelections) ? data.loraSelections : []).flatMap((selection) => {
     if (!selection || typeof selection !== "object") return [];
@@ -415,7 +416,8 @@ function readParameters(value: unknown): { width: number; height: number; seed: 
     : {};
   // 主站旧请求只固化 loraSelections，新字段存在时仍以显式 loraStrengths 为最高优先级。
   const loraStrengths = { ...Object.fromEntries(Object.entries(loraSnapshots).flatMap(([id, snapshot]) => snapshot.strength === undefined ? [] : [[id, snapshot.strength]])), ...explicitStrengths };
-  return { width: Number(data.width), height: Number(data.height), seed: data.seed === null ? null : Number(data.seed), loraVersionIds: Array.isArray(data.loraVersionIds) ? data.loraVersionIds.filter((item): item is string => typeof item === "string") : [], loraStrengths, loraSnapshots };
+  const samplingOverrides = data.samplingOverrides && typeof data.samplingOverrides === "object" && !Array.isArray(data.samplingOverrides) ? data.samplingOverrides as Record<string, unknown> : null;
+  return { width: Number(data.width), height: Number(data.height), seed: data.seed === null ? null : Number(data.seed), samplingOverrides, loraVersionIds: Array.isArray(data.loraVersionIds) ? data.loraVersionIds.filter((item): item is string => typeof item === "string") : [], loraStrengths, loraSnapshots };
 }
 
 /** 把 Prisma JSON 读取为普通对象，供发布参数审计使用。 */
