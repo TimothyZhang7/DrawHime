@@ -32,7 +32,7 @@ impl DesktopState {
         let database_path = app_data_dir.join("desktop.sqlite3");
         let connection = Connection::open(&database_path).map_err(|error| format!("打开桌面数据库失败：{error}"))?;
         connection.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
-            CREATE TABLE IF NOT EXISTS desktop_settings (id INTEGER PRIMARY KEY CHECK(id=1), theme_mode TEXT NOT NULL DEFAULT 'system', font_scale REAL NOT NULL DEFAULT 1.1, dependency_source TEXT NOT NULL DEFAULT 'auto', default_privacy TEXT NOT NULL DEFAULT 'public', auto_upload INTEGER NOT NULL DEFAULT 1, model_root TEXT NOT NULL, output_root TEXT NOT NULL, runtime_root TEXT NOT NULL, upload_concurrency INTEGER NOT NULL, wifi_only INTEGER NOT NULL, bandwidth_limit_kib INTEGER, updated_at TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS desktop_settings (id INTEGER PRIMARY KEY CHECK(id=1), theme_mode TEXT NOT NULL DEFAULT 'system', font_scale REAL NOT NULL DEFAULT 1.1, dependency_source TEXT NOT NULL DEFAULT 'mirror', default_privacy TEXT NOT NULL DEFAULT 'public', auto_upload INTEGER NOT NULL DEFAULT 1, model_root TEXT NOT NULL, output_root TEXT NOT NULL, runtime_root TEXT NOT NULL, upload_concurrency INTEGER NOT NULL, wifi_only INTEGER NOT NULL, bandwidth_limit_kib INTEGER, updated_at TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS desktop_ai_settings (id INTEGER PRIMARY KEY CHECK(id=1), enabled INTEGER NOT NULL DEFAULT 0, endpoint_type TEXT NOT NULL DEFAULT 'openai_chat', base_url TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS environment_snapshots (id INTEGER PRIMARY KEY AUTOINCREMENT, report_json TEXT NOT NULL, checked_at TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS software_updates (version TEXT PRIMARY KEY, resource_id TEXT NOT NULL, file_name TEXT NOT NULL, sha256 TEXT NOT NULL, byte_size INTEGER NOT NULL, source TEXT NOT NULL, status TEXT NOT NULL, error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, applied_at TEXT);
@@ -68,7 +68,7 @@ impl DesktopState {
         connection.execute("UPDATE local_training_jobs SET status='queued',progress=0,current_epoch=0,started_at=NULL,error=NULL,suggestion_json=NULL,updated_at=?1 WHERE status='running' AND cancel_requested=0", [&recovery_time]).map_err(|error| format!("恢复中断的训练任务失败：{error}"))?;
         ensure_column(&connection, "desktop_settings", "theme_mode", "TEXT NOT NULL DEFAULT 'system'")?;
         ensure_column(&connection, "desktop_settings", "font_scale", "REAL NOT NULL DEFAULT 1.1")?;
-        ensure_column(&connection, "desktop_settings", "dependency_source", "TEXT NOT NULL DEFAULT 'auto'")?;
+        ensure_column(&connection, "desktop_settings", "dependency_source", "TEXT NOT NULL DEFAULT 'mirror'")?;
         ensure_column(&connection, "desktop_settings", "auto_upload", "INTEGER NOT NULL DEFAULT 1")?;
         ensure_column(&connection, "local_job_loras", "relative_path", "TEXT NOT NULL DEFAULT ''")?;
         ensure_column(&connection, "local_job_loras", "byte_size", "INTEGER NOT NULL DEFAULT 0")?;
@@ -99,7 +99,9 @@ impl DesktopState {
         let runtime_root = app_data_dir.join("runtime");
         let output_root = app_data_dir.join("outputs");
         for directory in [&model_root, &runtime_root, &output_root] { fs::create_dir_all(directory).map_err(|error| format!("创建本地目录失败：{error}"))?; }
-        connection.execute("INSERT OR IGNORE INTO desktop_settings (id, theme_mode, font_scale, dependency_source, default_privacy, auto_upload, model_root, output_root, runtime_root, upload_concurrency, wifi_only, bandwidth_limit_kib, updated_at) VALUES (1, 'system', 1.1, 'auto', 'public', 1, ?1, ?2, ?3, 2, 0, NULL, ?4)", params![path_text(&model_root), path_text(&output_root), path_text(&runtime_root), Utc::now().to_rfc3339()]).map_err(|error| format!("写入默认设置失败：{error}"))?;
+        connection.execute("INSERT OR IGNORE INTO desktop_settings (id, theme_mode, font_scale, dependency_source, default_privacy, auto_upload, model_root, output_root, runtime_root, upload_concurrency, wifi_only, bandwidth_limit_kib, updated_at) VALUES (1, 'system', 1.1, 'mirror', 'public', 1, ?1, ?2, ?3, 2, 0, NULL, ?4)", params![path_text(&model_root), path_text(&output_root), path_text(&runtime_root), Utc::now().to_rfc3339()]).map_err(|error| format!("写入默认设置失败：{error}"))?;
+        // 旧版本保存的自动或官方来源统一迁移为主站镜像，升级后不再向第三方下载资源。
+        connection.execute("UPDATE desktop_settings SET dependency_source='mirror' WHERE dependency_source<>'mirror'", []).map_err(|error| format!("迁移主站镜像下载来源失败：{error}"))?;
         connection.execute("INSERT OR IGNORE INTO desktop_ai_settings (id, enabled, endpoint_type, base_url, model, updated_at) VALUES (1, 0, 'openai_chat', '', '', ?1)", [Utc::now().to_rfc3339()]).map_err(|error| format!("写入默认 AI 设置失败：{error}"))?;
         Ok(Self { database: Mutex::new(connection), app_data_dir: app_data_dir.to_path_buf(), database_path, scheduler: None, caption_scheduler: None, training_scheduler: None, gallery_sync_scheduler: None, runtime: Arc::new(RuntimeController::initialize(app_data_dir)?), gpu_workload: GpuWorkloadCoordinator::new() })
     }
@@ -124,7 +126,8 @@ impl DesktopState {
     pub fn save_settings(&self, mut settings: DesktopSettings) -> Result<DesktopSettings, String> {
         if !matches!(settings.theme_mode.as_str(), "system" | "dark" | "light") { return Err("主题模式不正确".into()); }
         if !settings.font_scale.is_finite() || !(1.0..=1.3).contains(&settings.font_scale) || ((settings.font_scale * 20.0).round() - settings.font_scale * 20.0).abs() > 0.001 { return Err("字体大小必须是 100%–130% 的 5% 档位".into()); }
-        if !matches!(settings.dependency_source.as_str(), "auto" | "official" | "mirror") { return Err("依赖来源不正确".into()); }
+        // 下载来源不再由界面选择，后端始终固化为经过签名和哈希校验的主站镜像。
+        settings.dependency_source = "mirror".into();
         if !matches!(settings.default_privacy.as_str(), "public" | "private") { return Err("默认图库权限不正确".into()); }
         if !(1..=4).contains(&settings.upload_concurrency) { return Err("上传并发数必须是 1–4".into()); }
         // 存储目录固定跟随安装目录，前端传入的旧目录值不得把模型或作品重新写到其他磁盘位置。
@@ -462,7 +465,7 @@ mod tests {
         let mut settings = state.load_settings().expect("读取设置");
         assert_eq!(settings.theme_mode, "system");
         assert!((settings.font_scale - 1.1).abs() < f64::EPSILON);
-        assert_eq!(settings.dependency_source, "auto");
+        assert_eq!(settings.dependency_source, "mirror");
         assert_eq!(settings.default_privacy, "public");
         assert!(settings.auto_upload);
         settings.default_privacy = "public".into();

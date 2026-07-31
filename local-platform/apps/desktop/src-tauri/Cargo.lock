@@ -939,7 +939,7 @@ dependencies = [
 
 [[package]]
 name = "drawhime-desktop"
-version = "0.1.17"
+version = "0.1.22"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -960,6 +960,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tempfile",
  "uuid",
+ "winreg",
  "zip",
 ]
 

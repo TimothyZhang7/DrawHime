@@ -1,6 +1,6 @@
 //! 本模块读取主站底模仓库并把受保护封面缓存成本机文件，不直接暴露设备会话。
 
-use crate::{auth::{self, DesktopSessionError}, models::{DesktopWebsiteModelParameters, DesktopWebsiteModelView, DesktopWebsiteSourceLink}, website_media::{self, WebsiteImageRef}};
+use crate::{auth::{self, DesktopSessionError}, models::{DesktopWebsiteModelParameters, DesktopWebsiteModelView, DesktopWebsiteSourceLink}, network::online_client_builder, website_media::{self, WebsiteImageRef}};
 use reqwest::blocking::{Client, Response};
 use serde::{de::DeserializeOwned, Deserialize};
 use std::{path::Path, time::Duration};
@@ -32,7 +32,7 @@ pub fn load_catalog(app_data_dir: &Path, force_refresh: bool) -> Result<Vec<Desk
     }).collect())
 }
 
-fn network_client() -> Result<Client, String> { Client::builder().connect_timeout(Duration::from_secs(8)).timeout(Duration::from_secs(30)).user_agent("DrawHime-Desktop/0.1").build().map_err(|error| format!("创建网站底模客户端失败：{error}")) }
+fn network_client() -> Result<Client, String> { online_client_builder().connect_timeout(Duration::from_secs(8)).timeout(Duration::from_secs(30)).build().map_err(|error| format!("创建网站底模客户端失败：{error}")) }
 
 fn parse_json<T: DeserializeOwned>(result: Result<Response, reqwest::Error>) -> Result<T, String> {
     let response = result.map_err(|_| "网站底模服务连接失败".to_string())?;

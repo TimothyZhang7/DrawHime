@@ -3,6 +3,7 @@
 use crate::{
     auth::{self, DesktopSessionError},
     models::GallerySyncItem,
+    network::online_client_builder,
     process::hide_window,
 };
 use chrono::{Duration as ChronoDuration, Utc};
@@ -170,7 +171,7 @@ fn synchronize(database: &Connection, publication: &PendingPublication) -> Resul
         database.execute("UPDATE gallery_sync_queue SET owner_issuer=?2,owner_subject=?3,updated_at=?4 WHERE id=?1 AND owner_subject IS NULL", params![publication.id, session.identity.issuer, session.identity.subject, Utc::now().to_rfc3339()]).map_err(|error| SyncFailure::Retryable(format!("绑定图库账号失败：{error}")))?;
     }
     verify_artifact(publication)?;
-    let client = Client::builder().connect_timeout(Duration::from_secs(8)).timeout(Duration::from_secs(45)).user_agent("DrawHime-Desktop/0.1").build().map_err(|error| SyncFailure::Retryable(format!("创建图库网络客户端失败：{error}")))?;
+    let client = online_client_builder().connect_timeout(Duration::from_secs(8)).timeout(Duration::from_secs(45)).build().map_err(|error| SyncFailure::Retryable(format!("创建图库网络客户端失败：{error}")))?;
     let mut upload = if let Some(upload_id) = &publication.server_upload_id {
         request_upload(&client, "GET", &format!("/v1/desktop/gallery/uploads/{upload_id}"), &session.token, None)?
     } else {

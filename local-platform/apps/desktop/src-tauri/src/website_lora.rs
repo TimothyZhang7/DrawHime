@@ -1,7 +1,7 @@
 //! 本模块实现网站公开与本人私有 LoRA 的设备会话鉴权、断点下载和整体哈希校验。
 
 use crate::auth::{self, DesktopSessionError};
-use crate::{models::DesktopWebsiteLoraInstallProgress, website_media::{self, WebsiteImageRef}};
+use crate::{models::DesktopWebsiteLoraInstallProgress, network::online_client_builder, website_media::{self, WebsiteImageRef}};
 use chrono::Utc;
 use reqwest::{blocking::{Client, Response}, StatusCode};
 use serde::{de::DeserializeOwned, Deserialize};
@@ -109,7 +109,7 @@ fn authenticated_session() -> Result<auth::DesktopAuthenticatedSession, String> 
     }
 }
 
-fn network_client() -> Result<Client, String> { Client::builder().connect_timeout(Duration::from_secs(8)).timeout(Duration::from_secs(300)).user_agent("DrawHime-Desktop/0.1").build().map_err(|error| format!("创建网站资源客户端失败：{error}")) }
+fn network_client() -> Result<Client, String> { online_client_builder().connect_timeout(Duration::from_secs(8)).timeout(Duration::from_secs(300)).build().map_err(|error| format!("创建网站资源客户端失败：{error}")) }
 
 fn parse_json<T: DeserializeOwned>(result: Result<Response, reqwest::Error>) -> Result<T, String> {
     let response = result.map_err(|_| "网站 LoRA 服务连接失败".to_string())?;

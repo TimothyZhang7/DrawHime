@@ -62,7 +62,7 @@ try {
   await removeUserDataDirectory(userDataDirectory);
 }
 
-/** 通过真实 IPC 保存并恢复字体比例，确认设置、CSS 缩放与 SQLite 持久链路一致。 */
+/** 通过真实 IPC 逐档验证字体比例，确认设置、全宽布局与 SQLite 持久链路一致。 */
 async function captureFontSettings(client, directory) {
   const targetDirectory = path.resolve(directory);
   await mkdir(targetDirectory, { recursive: true });
@@ -79,28 +79,45 @@ async function captureFontSettings(client, directory) {
     const save = [...document.querySelectorAll('.settings-card footer button')].find((button) => button.textContent.includes('保存本地设置'));
     if (!select || !save) throw new Error('未找到字体大小设置');
     const original = Number(select.value);
-    const target = original === 1.3 ? 1.2 : 1.3;
-    select.value = String(target);
-    select.dispatchEvent(new Event('change', { bubbles: true }));
-    await delay(80);
-    save.click();
-    await delay(350);
-    const applied = Number(getComputedStyle(document.documentElement).getPropertyValue('--desktop-font-scale'));
-    const rootBounds = document.querySelector('#root')?.getBoundingClientRect();
-    const scaledWidthCoverage = rootBounds ? rootBounds.width / document.documentElement.clientWidth : 0;
-    select.value = String(original);
-    select.dispatchEvent(new Event('change', { bubbles: true }));
-    await delay(80);
-    save.click();
-    await delay(350);
+    const scales = [1, 1.1, 1.2, 1.3];
+    const samples = [];
+    const applyScale = async (scale) => {
+      select.value = String(scale);
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      await delay(80);
+      save.click();
+      await delay(350);
+    };
+    try {
+      for (const scale of scales) {
+        await applyScale(scale);
+        const viewportWidth = document.documentElement.clientWidth;
+        // 页面已固定预留滚动条槽位，根节点应覆盖的是 body 可用内容宽度，而不是包含槽位的 HTML 宽度。
+        const availableWidth = document.body.clientWidth || viewportWidth;
+        const rootBounds = document.querySelector('#root')?.getBoundingClientRect();
+        const mainBounds = document.querySelector('.desktop-main')?.getBoundingClientRect();
+        const pageBounds = document.querySelector('.desktop-main > .workspace-page:not([hidden])')?.getBoundingClientRect();
+        samples.push({
+          target: scale,
+          applied: Number(getComputedStyle(document.documentElement).getPropertyValue('--desktop-font-scale')),
+          rootWidthCoverage: rootBounds ? rootBounds.width / availableWidth : 0,
+          horizontalOverflow: document.documentElement.scrollWidth > viewportWidth,
+          mainInsideViewport: !mainBounds || (mainBounds.left >= -1 && mainBounds.right <= viewportWidth + 1),
+          pageInsideViewport: !pageBounds || (pageBounds.left >= -1 && pageBounds.right <= viewportWidth + 1),
+        });
+      }
+    } finally {
+      await applyScale(original);
+    }
     const restored = Number(getComputedStyle(document.documentElement).getPropertyValue('--desktop-font-scale'));
     const notice = document.querySelector('.desktop-notice');
     const noticePosition = notice ? getComputedStyle(notice).position : null;
     await delay(4_300);
     const noticeCleared = !document.querySelector('.desktop-notice');
-    return { original, target, applied, restored, scaledWidthCoverage, optionValues: [...select.options].map((option) => Number(option.value)), noticePosition, noticeCleared, horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth };
+    return { original, restored, samples, optionValues: [...select.options].map((option) => Number(option.value)), noticePosition, noticeCleared };
   })()`);
-  if (result.applied !== result.target || result.restored !== result.original || result.scaledWidthCoverage < 0.98 || JSON.stringify(result.optionValues) !== JSON.stringify([1, 1.1, 1.2, 1.3]) || result.noticePosition !== 'fixed' || !result.noticeCleared || result.horizontalOverflow) throw new Error(`字体与瞬时提示验收失败：${JSON.stringify(result)}`);
+  const invalidSample = result.samples.find((sample) => sample.applied !== sample.target || sample.rootWidthCoverage < 0.99 || sample.horizontalOverflow || !sample.mainInsideViewport || !sample.pageInsideViewport);
+  if (invalidSample || result.restored !== result.original || JSON.stringify(result.optionValues) !== JSON.stringify([1, 1.1, 1.2, 1.3]) || result.noticePosition !== 'fixed' || !result.noticeCleared) throw new Error(`字体与瞬时提示验收失败：${JSON.stringify(result)}`);
   const screenshot = "font-settings.png";
   await writeFile(path.join(targetDirectory, screenshot), Buffer.from(await client.captureScreenshot(), "base64"));
   return { ...result, screenshot };

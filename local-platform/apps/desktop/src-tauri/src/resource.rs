@@ -1,6 +1,7 @@
 //! 本模块负责拉取签名资源清单，并以断点、切源、哈希校验和原子落盘下载桌面依赖。
 
 use crate::models::{DesktopResourceCatalogItemView, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopResourceManifestEnvelope, DesktopResourceManifestItem, DesktopResourceManifestPayload, DesktopResourceSource, DesktopSettings};
+use crate::network::online_client_builder;
 use crate::storage::LocalModelRegistration;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
@@ -72,7 +73,7 @@ pub fn load_catalog(settings: &DesktopSettings, app_data_dir: &Path) -> Result<D
             downloaded: verified_marker_matches(&target, item),
             installed,
             install_path: installed.then(|| install_destination(item, settings).to_string_lossy().into_owned()),
-            source_kinds: ordered_sources(item, &settings.dependency_source).iter().map(|source| source.kind.clone()).collect(),
+            source_kinds: mirror_sources(item).iter().map(|source| source.kind.clone()).collect(),
             model_registration: item.model_registration.clone(),
         }
     }).collect();
@@ -173,13 +174,13 @@ fn ensure_sufficient_space(available: u64, required: u64) -> Result<(), String> 
 }
 
 /** 下载单个资源并保存断点；只有整体哈希匹配后才写入已验证标记。 */
-pub fn download_resource(settings: &DesktopSettings, app_data_dir: &Path, resource_id: &str, app: &tauri::AppHandle) -> Result<DesktopResourceDownloadView, String> {
+pub fn download_resource(_settings: &DesktopSettings, app_data_dir: &Path, resource_id: &str, app: &tauri::AppHandle) -> Result<DesktopResourceDownloadView, String> {
     clear_download_pause(resource_id);
     let Some((manifest_url, key_id, public_key)) = manifest_configuration() else { return Err("当前安装包尚未配置经过签名的资源发布通道".into()); };
     let (payload, _) = load_resource_manifest(manifest_url, key_id, public_key, app_data_dir)?;
     let item = payload.resources.into_iter().find(|candidate| candidate.id == resource_id && resource_matches_current_platform(candidate)).ok_or_else(|| "资源不存在或不适用于当前系统".to_string())?;
-    let sources = ordered_sources(&item, &settings.dependency_source);
-    if sources.is_empty() { return Err("当前依赖来源设置下没有可用下载地址".into()); }
+    let sources = mirror_sources(&item);
+    if sources.is_empty() { return Err("签名清单没有可用的主站镜像地址".into()); }
     let cache_dir = resource_cache_dir(app_data_dir);
     fs::create_dir_all(&cache_dir).map_err(|error| format!("创建资源缓存目录失败：{error}"))?;
     let target = cache_dir.join(&item.file_name);
@@ -192,7 +193,7 @@ pub fn download_resource(settings: &DesktopSettings, app_data_dir: &Path, resour
     if partial.metadata().map(|metadata| metadata.len() > item.byte_size).unwrap_or(false) { fs::remove_file(&partial).map_err(|error| format!("清理超长下载断点失败：{error}"))?; }
     let session_start_bytes = partial.metadata().map(|metadata| metadata.len()).unwrap_or(0);
     emit_progress(app, progress_view(&item, "queued", None, session_start_bytes, 0, None, None, None));
-    let client = Client::builder().connect_timeout(Duration::from_secs(4)).timeout(Duration::from_secs(20)).user_agent("DrawHime-Desktop/0.1").build().map_err(|error| format!("创建资源下载客户端失败：{error}"))?;
+    let client = online_client_builder().connect_timeout(Duration::from_secs(4)).timeout(Duration::from_secs(20)).build().map_err(|error| format!("创建资源下载客户端失败：{error}"))?;
     // 续传测速只统计本次会话新增字节，历史断点不得参与速度和剩余时间计算。
     let session_started_at = Instant::now();
     let mut errors = Vec::new();
@@ -366,7 +367,7 @@ fn read_cached_resource_manifest(app_data_dir: &Path) -> Result<DesktopResourceM
 fn fetch_manifest_envelope(manifest_url: &str) -> Result<DesktopResourceManifestEnvelope, String> {
     let url = Url::parse(manifest_url).map_err(|_| "资源清单地址格式不正确".to_string())?;
     if url.scheme() != "https" { return Err("资源清单必须使用 HTTPS".into()); }
-    let client = Client::builder().connect_timeout(Duration::from_secs(5)).timeout(Duration::from_secs(12)).user_agent("DrawHime-Desktop/0.1").build().map_err(|error| format!("创建清单客户端失败：{error}"))?;
+    let client = online_client_builder().connect_timeout(Duration::from_secs(5)).timeout(Duration::from_secs(12)).build().map_err(|error| format!("创建清单客户端失败：{error}"))?;
     let response = client.get(url).send().map_err(|error| format!("获取资源清单失败：{}", network_error(&error)))?;
     if !response.status().is_success() { return Err(format!("资源清单返回 HTTP {}", response.status().as_u16())); }
     if response.content_length().is_some_and(|length| length > MAX_MANIFEST_BYTES) { return Err("资源清单超过大小限制".into()); }
@@ -475,14 +476,11 @@ fn semantic_version(value: &str) -> Option<(u64, u64, u64)> {
     (values.len() == 3).then_some((values[0], values[1], values[2]))
 }
 
-fn ordered_sources<'a>(item: &'a DesktopResourceManifestItem, preference: &str) -> Vec<&'a DesktopResourceSource> {
-    let mut sources: Vec<_> = item.sources.iter().filter(|source| match preference { "official" => source.kind == "official", "mirror" => source.kind == "mirror", _ => true }).collect();
-    if preference == "auto" {
-        sources.sort_by_key(|source| if source.kind == "official" { 0 } else { 1 });
-        let healthy: Vec<_> = sources.iter().copied().filter(|source| !source_circuit_open(source)).collect();
-        if !healthy.is_empty() { return healthy; }
-    }
-    sources
+/** 客户端只使用主站镜像；旧签名清单中的官方来源仅为兼容验签保留，不进入下载候选。 */
+fn mirror_sources(item: &DesktopResourceManifestItem) -> Vec<&DesktopResourceSource> {
+    let sources: Vec<_> = item.sources.iter().filter(|source| source.kind == "mirror").collect();
+    let healthy: Vec<_> = sources.iter().copied().filter(|source| !source_circuit_open(source)).collect();
+    if healthy.is_empty() { sources } else { healthy }
 }
 
 fn download_from_source<F: Fn(DesktopResourceDownloadView)>(client: &Client, item: &DesktopResourceManifestItem, source: &DesktopResourceSource, partial: &Path, session_started_at: Instant, session_start_bytes: u64, notify: &F) -> Result<(), String> {
@@ -573,7 +571,8 @@ fn record_source_success(source: &DesktopResourceSource) {
     source_failures().lock().unwrap_or_else(|poisoned| poisoned.into_inner()).remove(&source.url);
 }
 
-fn source_kind_name(kind: &str) -> &'static str { if kind == "official" { "官方" } else { "主站镜像" } }
+/** 下载进度只展示主站镜像，旧清单的官方来源不会进入真实传输链路。 */
+fn source_kind_name(_kind: &str) -> &'static str { "主站镜像" }
 
 fn resource_matches_current_platform(item: &DesktopResourceManifestItem) -> bool { item.os == "windows" && item.arch == std::env::consts::ARCH }
 fn resource_cache_dir(app_data_dir: &Path) -> PathBuf { app_data_dir.join("resource-cache") }
@@ -915,11 +914,9 @@ mod tests {
     }
 
     #[test]
-    fn source_preference_obeys_user_setting() {
+    fn client_only_selects_main_site_mirror() {
         let item = item();
-        assert_eq!(ordered_sources(&item, "auto").iter().map(|source| source.kind.as_str()).collect::<Vec<_>>(), vec!["official", "mirror"]);
-        assert_eq!(ordered_sources(&item, "official").len(), 1);
-        assert_eq!(ordered_sources(&item, "mirror")[0].kind, "mirror");
+        assert_eq!(mirror_sources(&item).iter().map(|source| source.kind.as_str()).collect::<Vec<_>>(), vec!["mirror"]);
     }
 
     #[test]
@@ -937,16 +934,14 @@ mod tests {
     }
 
     #[test]
-    fn auto_source_skips_open_circuit_while_fixed_source_stays_selected() {
+    fn mirror_source_remains_retryable_after_circuit_failure() {
         let mut item = item();
         item.sources[0].url = "https://mirror.example/circuit-runtime.zip".into();
         item.sources[1].url = "https://official.example/circuit-runtime.zip".into();
-        let official = item.sources.iter().find(|source| source.kind == "official").expect("找到官方测试来源");
-        record_source_failure(official);
-        assert_eq!(ordered_sources(&item, "auto").iter().map(|source| source.kind.as_str()).collect::<Vec<_>>(), vec!["mirror"]);
-        assert_eq!(ordered_sources(&item, "official")[0].kind, "official");
-        record_source_success(official);
-        assert_eq!(ordered_sources(&item, "auto")[0].kind, "official");
+        let mirror = item.sources.iter().find(|source| source.kind == "mirror").expect("找到主站镜像测试来源");
+        record_source_failure(mirror);
+        assert_eq!(mirror_sources(&item).iter().map(|source| source.kind.as_str()).collect::<Vec<_>>(), vec!["mirror"]);
+        record_source_success(mirror);
     }
 
     #[test]

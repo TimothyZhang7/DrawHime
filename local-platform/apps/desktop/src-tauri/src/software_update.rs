@@ -13,6 +13,8 @@ use std::{
     fs,
     path::Path,
     process::{Command, Stdio},
+    thread,
+    time::Duration,
 };
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -26,7 +28,9 @@ title DrawHime 更新助手
 set "INSTALLER=%DRAWHIME_UPDATE_INSTALLER%"
 set "EXPECTED_HASH=%DRAWHIME_UPDATE_SHA256%"
 set "RESULT_PATH=%DRAWHIME_UPDATE_RESULT%"
+set "STARTED_PATH=%DRAWHIME_UPDATE_STARTED%"
 set "RELAUNCH_PATH=%DRAWHIME_UPDATE_RELAUNCH%"
+> "%STARTED_PATH%" echo started
 echo.
 echo [DrawHime] 正在准备软件更新，请保留此窗口。
 echo [1/4] 重新校验安装包...
@@ -283,11 +287,16 @@ fn launch_record(
     }
     let helper = app_data_dir.join(format!("apply-update-{}.cmd", record.version));
     let result_path = apply_result_path(app_data_dir, &record.version);
+    let started_path = apply_started_path(app_data_dir, &record.version);
     fs::write(&helper, windows_update_helper_script())
         .map_err(|error| format!("写入更新辅助脚本失败：{error}"))?;
     if result_path.exists() {
         fs::remove_file(&result_path)
             .map_err(|error| format!("清理旧更新结果失败：{error}"))?;
+    }
+    if started_path.exists() {
+        fs::remove_file(&started_path)
+            .map_err(|error| format!("清理旧更新启动标记失败：{error}"))?;
     }
     database
         .execute(
@@ -297,22 +306,21 @@ fn launch_record(
         .map_err(|error| format!("保存更新应用状态失败：{error}"))?;
     let mut command = Command::new("cmd.exe");
     #[cfg(target_os = "windows")]
-    command.creation_flags(0x00000010);
+    // 更新助手必须脱离 Tauri/WebView 验收进程所在的 Job，否则主程序退出时会连带终止安装。
+    command.creation_flags(0x01000210);
     command
-        .args([
-            "/D",
-            "/S",
-            "/C",
-        ])
-        .arg(format!("call \"{}\"", helper.display()))
+        // 脚本路径作为独立参数交给 cmd，避免 /S 与 call 对含空格路径做二次引号剥离。
+        .args(["/D", "/C"])
+        .arg(&helper)
         .env("DRAWHIME_UPDATE_INSTALLER", &installer)
         .env("DRAWHIME_UPDATE_SHA256", &record.sha256)
         .env("DRAWHIME_UPDATE_RESULT", &result_path)
+        .env("DRAWHIME_UPDATE_STARTED", &started_path)
         .env("DRAWHIME_UPDATE_RELAUNCH", relaunch_path)
         .stdin(Stdio::null())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
-    command.spawn().map_err(|error| {
+    let mut helper_process = command.spawn().map_err(|error| {
         let message = format!("启动更新程序失败：{error}");
         let _ = database.execute(
             "UPDATE software_updates SET status='failed',error=?2,updated_at=?3 WHERE version=?1",
@@ -320,7 +328,34 @@ fn launch_record(
         );
         message
     })?;
-    Ok(())
+    // 只有助手实际进入脚本后才允许主程序退出，避免系统策略拦截子进程时留下无反馈的假 applying 状态。
+    for _ in 0..60 {
+        if started_path.exists() {
+            return Ok(());
+        }
+        if let Some(status) = helper_process
+            .try_wait()
+            .map_err(|error| format!("检查更新助手状态失败：{error}"))?
+        {
+            let message = format!("更新助手启动后提前退出：{status}");
+            database
+                .execute(
+                    "UPDATE software_updates SET status='failed',error=?2,updated_at=?3 WHERE version=?1",
+                    params![record.version, message, Utc::now().to_rfc3339()],
+                )
+                .map_err(|error| format!("保存更新助手失败状态失败：{error}"))?;
+            return Err(message);
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    let message = "更新助手未在 3 秒内完成启动握手".to_string();
+    database
+        .execute(
+            "UPDATE software_updates SET status='failed',error=?2,updated_at=?3 WHERE version=?1",
+            params![record.version, message, Utc::now().to_rfc3339()],
+        )
+        .map_err(|error| format!("保存更新助手超时状态失败：{error}"))?;
+    return Err(message);
 }
 
 fn latest_online_update() -> Result<Option<DesktopResourceManifestItem>, String> {
@@ -477,6 +512,10 @@ fn apply_result_path(app_data_dir: &Path, version: &str) -> std::path::PathBuf {
     app_data_dir.join(format!("apply-update-{version}.result"))
 }
 
+fn apply_started_path(app_data_dir: &Path, version: &str) -> std::path::PathBuf {
+    app_data_dir.join(format!("apply-update-{version}.started"))
+}
+
 fn partial_bytes(app_data_dir: &Path, item: &DesktopResourceManifestItem) -> u64 {
     let target = resource::cached_resource_path(app_data_dir, item);
     target
@@ -625,6 +664,8 @@ mod tests {
         assert!(UPDATE_HELPER_SCRIPT.contains("title DrawHime 更新助手"));
         assert!(UPDATE_HELPER_SCRIPT.contains("[1/4]"));
         assert!(UPDATE_HELPER_SCRIPT.contains("System.Security.Cryptography.SHA256"));
+        assert!(UPDATE_HELPER_SCRIPT.contains("DRAWHIME_UPDATE_STARTED"));
+        assert!(UPDATE_HELPER_SCRIPT.contains("> \"%STARTED_PATH%\" echo started"));
         assert!(!UPDATE_HELPER_SCRIPT.contains("Get-FileHash"));
         let windows_script = windows_update_helper_script();
         assert!(windows_script.contains("\r\n"));

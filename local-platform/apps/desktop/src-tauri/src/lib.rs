@@ -8,6 +8,7 @@ mod generation;
 mod gallery_sync;
 mod local_model;
 mod models;
+mod network;
 mod process;
 mod resource;
 mod runtime;

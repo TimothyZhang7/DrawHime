@@ -3,8 +3,9 @@
 use crate::{
     auth::{self, DesktopSessionError},
     models::{DesktopTrainingTagTranslationInput, DesktopTrainingTagTranslationView},
+    network::online_client_builder,
 };
-use reqwest::blocking::{Client, Response};
+use reqwest::blocking::Response;
 use serde::Deserialize;
 use std::{collections::HashSet, time::Duration};
 
@@ -37,10 +38,9 @@ pub fn translate(input: DesktopTrainingTagTranslationInput) -> Result<DesktopTra
         Err(DesktopSessionError::Network) => return Err("标签翻译服务当前不可达".into()),
         Err(DesktopSessionError::Service(message)) => return Err(message),
     };
-    let client = Client::builder()
+    let client = online_client_builder()
         .connect_timeout(Duration::from_secs(8))
         .timeout(Duration::from_secs(180))
-        .user_agent("DrawHime-Desktop/0.1")
         .build()
         .map_err(|error| format!("创建标签翻译客户端失败：{error}"))?;
     let response = client

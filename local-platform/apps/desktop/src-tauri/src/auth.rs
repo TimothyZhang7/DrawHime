@@ -1,5 +1,6 @@
 //! 本模块实现主站浏览器设备授权，并把独立会话密钥保存到 Windows Credential Manager。
 
+use crate::network::online_client_builder;
 use keyring::{Entry, Error as KeyringError};
 use reqwest::{blocking::Client, StatusCode};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -160,7 +161,7 @@ pub fn sign_out() -> Result<DesktopAccountView, String> {
 
 /** 使用固定超时创建桌面联网客户端，禁止请求无限挂起。 */
 fn api_client() -> Result<Client, String> {
-    Client::builder().connect_timeout(Duration::from_secs(5)).timeout(Duration::from_secs(15)).user_agent("DrawHime-Desktop/0.1").build().map_err(|_| "创建账号网络客户端失败".into())
+    online_client_builder().connect_timeout(Duration::from_secs(5)).timeout(Duration::from_secs(15)).build().map_err(|_| "创建账号网络客户端失败".into())
 }
 
 /** 调用设备授权 JSON 接口，公开错误不会包含密钥或服务端路径。 */

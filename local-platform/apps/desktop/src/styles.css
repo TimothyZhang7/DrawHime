@@ -87,9 +87,9 @@ body,
 }
 
 #root {
-  /* CSS zoom 会同步放大布局盒；反向收敛根宽度后，放大字体也不会把内容推出原生窗口。 */
-  width: calc(100% / var(--desktop-font-scale));
-  min-height: calc(100vh / var(--desktop-font-scale));
+  /* WebView 会把 CSS zoom 纳入逻辑视口，根节点直接占满视口，避免再次除以缩放值后右侧留白。 */
+  width: 100%;
+  min-height: 100vh;
   zoom: var(--desktop-font-scale);
 }
 
@@ -138,7 +138,7 @@ select:focus-visible {
 }
 
 .desktop-loading {
-  min-height: calc(100vh / var(--desktop-font-scale));
+  min-height: 100vh;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -163,7 +163,7 @@ select:focus-visible {
 }
 
 .desktop-shell {
-  min-height: calc(100vh / var(--desktop-font-scale));
+  min-height: 100vh;
   display: grid;
   grid-template-columns: 214px minmax(0, 1fr);
 }
@@ -4166,7 +4166,7 @@ select:focus-visible {
 
 /* 生成页使用固定双栏工作台，左侧参数独立滚动，右侧预览保持稳定。 */
 .generate-layout {
-  height: calc(100vh / var(--desktop-font-scale) - 98px);
+  height: calc(100vh - 98px);
   min-height: 560px;
   /* 不使用会在 120%–130% 字体下挤出窗口的刚性左栏最小宽度。 */
   grid-template-columns: minmax(0, 1.45fr) minmax(260px, .75fr);
@@ -4494,14 +4494,14 @@ select:focus-visible {
 .generation-lora-dialog > footer span { color: var(--muted); font-size: 7px; }
 .generation-lora-dialog > footer button { min-height: 32px; padding: 0 13px; border: 1px solid var(--accent-border); background: var(--accent); color: #fff; font-size: 8px; font-weight: 800; }
 
-/* 固定浮层按反向缩放后的逻辑视口计算，所有边缘始终保留可点击安全区。 */
+/* 固定浮层直接覆盖缩放后的逻辑视口，四边安全区不随字体倍率重复缩小。 */
 .job-detail-backdrop,
 .resource-dialog-backdrop,
 .generation-lora-backdrop {
-  inset: 0 auto auto 0;
-  width: calc(100vw / var(--desktop-font-scale));
-  height: calc(100vh / var(--desktop-font-scale));
-  padding: calc(18px / var(--desktop-font-scale));
+  inset: 0;
+  width: auto;
+  height: auto;
+  padding: 18px;
   overflow: hidden;
 }
 

@@ -1,9 +1,9 @@
 //! 本模块管理桌面 AI 辅助凭据，并调用真实 OpenAI Chat Completions 或 Responses 多模态端点。
 
-use crate::models::{DesktopAiAnalyzeInput, DesktopAiAnalyzeView, DesktopAiSettings, DesktopAiSettingsUpdate};
+use crate::{models::{DesktopAiAnalyzeInput, DesktopAiAnalyzeView, DesktopAiSettings, DesktopAiSettingsUpdate}, network::online_client_builder};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use keyring::{Entry, Error as KeyringError};
-use reqwest::blocking::{Client, Response};
+use reqwest::blocking::Response;
 use serde_json::{json, Value};
 use std::{fs, path::Path, time::Duration};
 
@@ -55,7 +55,7 @@ pub fn analyze_image(settings: &DesktopAiSettings, input: DesktopAiAnalyzeInput)
 
 fn call_endpoint(settings: &DesktopAiSettings, api_key: &str, prompt: &str, image: Option<&str>) -> Result<String, String> {
     if settings.base_url.trim().is_empty() || settings.model.trim().is_empty() { return Err("AI 端点或模型尚未配置".into()); }
-    let client = Client::builder().connect_timeout(Duration::from_secs(8)).timeout(Duration::from_secs(120)).user_agent("DrawHime-Desktop/0.1").build().map_err(|error| format!("创建 AI 客户端失败：{error}"))?;
+    let client = online_client_builder().connect_timeout(Duration::from_secs(8)).timeout(Duration::from_secs(120)).build().map_err(|error| format!("创建 AI 客户端失败：{error}"))?;
     let (url, body) = if settings.endpoint_type == "openai_chat" {
         let mut content = vec![json!({ "type": "text", "text": prompt })];
         if let Some(data_url) = image { content.push(json!({ "type": "image_url", "image_url": { "url": data_url } })); }

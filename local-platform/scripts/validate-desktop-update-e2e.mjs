@@ -21,8 +21,9 @@ let applying;
 let applyRequested = false;
 try {
   available = await invoke(first.client, "desktop_software_update_status");
-  if (available.currentVersion !== fromVersion || available.latestVersion !== toVersion || available.status !== "available") throw new Error(`稳定通道未返回目标更新：${JSON.stringify(available)}`);
-  downloaded = await invoke(first.client, "desktop_download_software_update");
+  if (available.currentVersion !== fromVersion || available.latestVersion !== toVersion || !["available", "downloaded"].includes(available.status)) throw new Error(`稳定通道未返回目标更新：${JSON.stringify(available)}`);
+  // 前一次验收若已完成签名下载，直接复用完整缓存继续验证安装，避免重复传输 200 MiB 安装包。
+  downloaded = available.status === "downloaded" ? available : await invoke(first.client, "desktop_download_software_update");
   if (downloaded.currentVersion !== fromVersion || downloaded.latestVersion !== toVersion || downloaded.status !== "downloaded" || downloaded.downloadedBytes !== downloaded.byteSize) throw new Error(`在线更新下载未完成：${JSON.stringify(downloaded)}`);
   applying = await invoke(first.client, "desktop_apply_software_update");
   if (applying.status !== "applying" || applying.latestVersion !== toVersion) throw new Error(`更新没有进入应用状态：${JSON.stringify(applying)}`);
@@ -131,20 +132,25 @@ async function launchAndConnect(executable) {
 /** 页面导航完成后再开放 IPC，避免 WebView 初始重载期间取得空上下文。 */
 async function waitForTauriReady(client) {
   const deadline = Date.now() + 45_000;
+  let lastState = null;
   while (Date.now() < deadline) {
     try {
-      if (await client.evaluate("typeof window.__TAURI_INTERNALS__?.invoke === 'function' && Boolean(document.querySelector('.desktop-shell'))")) return;
+      lastState = await client.evaluate("({ url: location.href, title: document.title, hasInvoke: typeof window.__TAURI_INTERNALS__?.invoke === 'function', hasShell: Boolean(document.querySelector('.desktop-shell')), bodyLength: document.body?.innerText?.length || 0 })");
+      if (lastState.hasInvoke && lastState.hasShell) return;
     } catch {
       // 首次 WebView 导航销毁执行上下文时继续等待新页面。
     }
     await delay(500);
   }
-  throw new Error("45 秒内桌面 IPC 未就绪");
+  throw new Error(`45 秒内桌面 IPC 未就绪：${JSON.stringify(lastState)}`);
 }
 
 /** 通过页面内 Tauri IPC 调用真实桌面命令。 */
 async function invoke(client, command) {
-  return client.evaluate(`window.__TAURI_INTERNALS__.invoke(${JSON.stringify(command)})`);
+  // Tauri IPC 拒绝值不会稳定出现在 CDP exceptionDetails 中，先转为可序列化结果以保留真实错误。
+  const result = await client.evaluate(`window.__TAURI_INTERNALS__.invoke(${JSON.stringify(command)}).then(value => ({ ok: true, value }), error => ({ ok: false, error: String(error) }))`);
+  if (!result?.ok) throw new Error(result?.error || `桌面命令 ${command} 执行失败`);
+  return result.value;
 }
 
 /** 临时分配本机调试端口。 */

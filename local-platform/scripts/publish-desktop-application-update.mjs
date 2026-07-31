@@ -17,7 +17,7 @@ const command = options.positionals[0];
 const dryRun = options.flags.has("dry-run");
 
 if (!new Set(["prepare", "deploy", "publish"]).has(command)) {
-  throw new Error("用法：prepare|deploy|publish --installer EXE --version X.Y.Z --minimum-version X.Y.Z --release-notes TEXT [--mandatory true|false] [--official-url HTTPS_URL] [--dry-run]");
+  throw new Error("用法：prepare|deploy|publish --installer EXE --version X.Y.Z --minimum-version X.Y.Z --release-notes TEXT [--mandatory true|false] [--dry-run]");
 }
 
 const paths = publicationPaths(options.values);
@@ -74,8 +74,6 @@ async function preparePublication(paths, values, isDryRun) {
   const releaseNotes = requiredValue(values, "release-notes").trim();
   if (!releaseNotes || releaseNotes.length > 20_000) throw new Error("版本说明长度必须为 1–20000 字符");
   const mandatory = parseBoolean(values.get("mandatory") || "false", "mandatory");
-  const officialUrl = values.get("official-url")?.trim();
-  if (officialUrl && new URL(officialUrl).protocol !== "https:") throw new Error("官方更新地址必须使用 HTTPS");
   const sha256 = await sha256File(installerPath);
   const currentPayload = JSON.parse(await readFile(paths.payloadPath, "utf8"));
   const currentEnvelope = JSON.parse(await readFile(paths.envelopePath, "utf8"));
@@ -85,10 +83,8 @@ async function preparePublication(paths, values, isDryRun) {
   const minimumExpiry = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
   const expiresAt = currentExpiry > minimumExpiry ? currentExpiry.toISOString() : minimumExpiry.toISOString();
   const mirrorUrl = `https://www.xanime.ink/local-model-api/v1/desktop/resources/${paths.resourceId}/content`;
-  const sources = [
-    ...(officialUrl ? [{ kind: "official", url: officialUrl }] : []),
-    { kind: "mirror", url: mirrorUrl },
-  ];
+  // 应用更新与运行资源统一经主站镜像分发，避免第三方下载源导致版本和网络行为不一致。
+  const sources = [{ kind: "mirror", url: mirrorUrl }];
   const item = {
     id: paths.resourceId,
     kind: "application",

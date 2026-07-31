@@ -567,13 +567,13 @@
 .repository-dialog-backdrop {
   position: fixed;
   z-index: 120;
-  inset: 0 auto auto 0;
-  width: calc(100vw / var(--desktop-font-scale));
-  height: calc(100vh / var(--desktop-font-scale));
+  inset: 0;
+  width: auto;
+  height: auto;
   display: grid;
   place-items: center;
-  /* 弹窗跟随字体缩放后的逻辑视口，并在四边保留同等可点击距离。 */
-  padding: calc(18px / var(--desktop-font-scale));
+  /* 弹窗直接使用缩放后的逻辑视口，并在四边保留稳定的可点击距离。 */
+  padding: 18px;
   overflow: hidden;
   background: rgba(5, 8, 12, .7);
   backdrop-filter: blur(10px);

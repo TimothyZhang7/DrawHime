@@ -161,7 +161,8 @@ function ResourceIcon({ installed }: { installed: boolean }) { return installed 
 function SummaryItem({ tone, label, value }: { tone: string; label: string; value: number }) { return <article className={`is-${tone}`}><span>{label}</span><strong>{value}</strong><small>项</small></article>; }
 function UnconfiguredCatalog({ message }: { message: string }) { return <div className="resource-unconfigured"><AlertTriangle /><div><strong>资源发布通道尚未配置</strong><span>{message}</span><small>安装入口保持关闭，避免下载未登记或未签名的文件。</small></div></div>; }
 function resourceKindLabel(kind: string): string { return { runtime: "运行环境", model: "底模组件", captioner: "打标模型", trainer: "训练组件" }[kind] || kind; }
-function sourceKindLabel(kind: string): string { return { official: "官方", mirror: "主站镜像" }[kind] || kind; }
+/** 资源清单只保留主站镜像，本标签用于展示实际下载通道。 */
+function sourceKindLabel(kind: string): string { return kind === "mirror" ? "主站镜像" : kind; }
 function downloadStatusLabel(status: DesktopResourceDownloadView["status"]): string { return { queued: "排队中", downloading: "下载中", paused: "已暂停", verifying: "校验中", downloaded: "下载完成", failed: "下载失败" }[status]; }
 function installStatusLabel(status: DesktopResourceInstallView["status"]): string { return { verifying: "校验缓存", installing: "安装中", switching: "切换版本", installed: "已安装", rolled_back: "已回滚", failed: "安装失败" }[status]; }
 /** 字节格式化保留真实零值，小文件不再被误报成已经下载 1 KiB。 */
