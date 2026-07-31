@@ -160,24 +160,34 @@ if ($ValidateUninstall.IsPresent) {
   if (Get-DrawHimeInstallation) { throw "保留数据卸载后安装登记仍然存在" }
 
   $reinstallProcess = Start-Process -FilePath $resolvedInstaller -ArgumentList "/S" -PassThru -Wait -WindowStyle Hidden
-  if ($reinstallProcess.ExitCode -ne 0) { throw "默认清理门禁前重新安装失败，退出码 $($reinstallProcess.ExitCode)" }
+  if ($reinstallProcess.ExitCode -ne 0) { throw "默认保留门禁前重新安装失败，退出码 $($reinstallProcess.ExitCode)" }
+  $installationForDefault = Get-DrawHimeInstallation
+  if (-not $installationForDefault) { throw "默认保留门禁前未找到安装登记" }
+  $defaultUninstaller = Join-Path (([string]$installationForDefault.InstallLocation).Trim('"')) "uninstall.exe"
+  $defaultProcess = Start-Process -FilePath $defaultUninstaller -ArgumentList "/S" -PassThru -Wait -WindowStyle Hidden
+  if ($defaultProcess.ExitCode -ne 0) { throw "默认保留卸载失败，退出码 $($defaultProcess.ExitCode)" }
+  if (-not (Test-Path -LiteralPath $sentinel -PathType Leaf)) { throw "默认卸载删除了验收文件" }
+  if (Get-DrawHimeInstallation) { throw "默认保留卸载后安装登记仍然存在" }
+
+  $deleteInstallProcess = Start-Process -FilePath $resolvedInstaller -ArgumentList "/S" -PassThru -Wait -WindowStyle Hidden
+  if ($deleteInstallProcess.ExitCode -ne 0) { throw "显式清理门禁前重新安装失败，退出码 $($deleteInstallProcess.ExitCode)" }
   $installationForDelete = Get-DrawHimeInstallation
-  if (-not $installationForDelete) { throw "默认清理门禁前未找到安装登记" }
+  if (-not $installationForDelete) { throw "显式清理门禁前未找到安装登记" }
   $deleteUninstaller = Join-Path (([string]$installationForDelete.InstallLocation).Trim('"')) "uninstall.exe"
-  $deleteProcess = Start-Process -FilePath $deleteUninstaller -ArgumentList "/S" -PassThru -Wait -WindowStyle Hidden
-  if ($deleteProcess.ExitCode -ne 0) { throw "默认清理卸载失败，退出码 $($deleteProcess.ExitCode)" }
+  $deleteProcess = Start-Process -FilePath $deleteUninstaller -ArgumentList @("/S", "/DELETEDATA") -PassThru -Wait -WindowStyle Hidden
+  if ($deleteProcess.ExitCode -ne 0) { throw "显式清理卸载失败，退出码 $($deleteProcess.ExitCode)" }
   foreach ($attempt in 1..50) {
     if (-not (Test-Path -LiteralPath $businessRoot)) { break }
     Start-Sleep -Milliseconds 100
   }
-  if (Test-Path -LiteralPath $businessRoot) { throw "默认清理卸载未及时移出应用数据目录" }
-  if (Get-DrawHimeInstallation) { throw "默认清理卸载后安装登记仍然存在" }
+  if (Test-Path -LiteralPath $businessRoot) { throw "显式清理卸载未及时移出应用数据目录" }
+  if (Get-DrawHimeInstallation) { throw "显式清理卸载后安装登记仍然存在" }
 
   # 恢复安装供同一 Runner 的后续 WebView 门禁使用，重新安装不得创建业务数据。
   $finalInstallProcess = Start-Process -FilePath $resolvedInstaller -ArgumentList "/S" -PassThru -Wait -WindowStyle Hidden
   if ($finalInstallProcess.ExitCode -ne 0) { throw "卸载门禁后恢复安装失败，退出码 $($finalInstallProcess.ExitCode)" }
   if (-not (Get-DrawHimeInstallation)) { throw "卸载门禁后安装登记未恢复" }
-  $uninstallValidation = [ordered]@{ preserveOptionKeepsData = $true; defaultRemovesData = $true; uninstallReturnsWithoutDirectoryWalk = $true; installationRestored = $true }
+  $uninstallValidation = [ordered]@{ preserveOptionKeepsData = $true; defaultKeepsData = $true; explicitDeleteRemovesData = $true; uninstallReturnsWithoutDirectoryWalk = $true; installationRestored = $true }
 }
 
 $result = [ordered]@{

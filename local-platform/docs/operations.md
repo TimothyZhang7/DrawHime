@@ -86,7 +86,7 @@ pnpm --filter @drawhime/desktop tauri build --no-bundle
 pnpm desktop:validate-windows-host --ExpectedVersion X.Y.Z --Installer INSTALLER.exe
 ```
 
-图形卸载页默认不勾选“保留模型和本地数据”，因此普通卸载会快速移出数据目录并后台清理；需要保留数据的自动化卸载必须显式传入 `/KEEPDATA`。发布工作流在一次性 Runner 上使用 `-ValidateUninstall` 依次验证保留、默认清理和恢复安装，已有业务文件的主机禁止执行该破坏性门禁。
+图形卸载页默认不勾选“删除已下载模型和本地数据”，因此普通卸载与静默卸载都会保留数据；只有用户明确勾选删除或自动化卸载显式传入 `/DELETEDATA` 才会快速移出数据目录并后台清理。旧版 `/KEEPDATA` 参数继续兼容且优先级最高。发布工作流在一次性 Runner 上使用 `-ValidateUninstall` 依次验证兼容保留、默认保留、显式清理和恢复安装，已有业务文件的主机禁止执行该破坏性门禁。
 
 发布脚本固定执行安装包大小/SHA-256、共享契约、Ed25519 私钥与桌面内置公钥一致性检查；生产端先上传临时文件并备份旧信封，只在资源落盘后原子切换清单，回环 API 未读到新资源时自动恢复旧信封。应用更新资源发布不重启 API，也不接触数据库、模型、LoRA、训练集、任务、媒体或钱包。
 
