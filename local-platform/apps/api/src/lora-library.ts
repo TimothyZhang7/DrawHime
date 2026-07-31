@@ -14,7 +14,8 @@ import sharp from "sharp";
 
 const maximumLoraBytes = 512 * 1024 * 1024;
 const maximumExampleBytes = 12 * 1024 * 1024;
-const loraChunkBytes = 4 * 1024 * 1024;
+// 公网慢上行下 4 MiB 分片可能超过代理响应窗口；1 MiB 兼顾吞吐和可恢复性。
+const loraChunkBytes = 1024 * 1024;
 const uploadLocks = new Map<string, Promise<void>>();
 
 type SessionRecord = { externalIdentity: ExternalIdentity };

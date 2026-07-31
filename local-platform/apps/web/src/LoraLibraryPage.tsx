@@ -97,6 +97,7 @@ function LoraCreateDialog({ session, entries, families, onClose, onCompleted }: 
   const [type, setType] = useState<LoraLibraryEntryView["type"]>("style"); const [family, setFamily] = useState(families[0] || "anima");
   const [triggerWords, setTriggerWords] = useState(""); const [isPrivate, setPrivate] = useState(false);
   const [modelFile, setModelFile] = useState<File | null>(null); const [examples, setExamples] = useState<File[]>([]);
+  const [createdEntry, setCreatedEntry] = useState<LoraLibraryEntryView | null>(null);
   const [busy, setBusy] = useState(false); const [message, setMessage] = useState("");
   const allFamilies = [...new Set([...families, ...entries.map((entry) => entry.modelFamilyName)])];
   const informationReady = Boolean(title.trim() && description.trim() && family.trim());
@@ -108,8 +109,13 @@ function LoraCreateDialog({ session, entries, families, onClose, onCompleted }: 
     if (!modelFile || examples.length === 0) return setMessage("请选择 safetensors 模型文件和至少一张封面图片");
     setBusy(true);
     try {
-      setMessage("正在创建 LoRA");
-      const entry = await loraJson<LoraLibraryEntryView>("/v1/lora-library", session.sessionToken, { method: "POST", body: JSON.stringify({ title: title.trim(), description: description.trim(), type, modelFamily: family.trim(), triggerWords: splitTriggerWords(triggerWords), isPrivate }) });
+      const metadata = { title: title.trim(), description: description.trim(), type, modelFamily: family.trim(), triggerWords: splitTriggerWords(triggerWords), isPrivate };
+      setMessage(createdEntry ? "正在恢复 LoRA 上传" : "正在创建 LoRA");
+      // 上传失败后复用已创建条目并同步最新表单，避免每次重试产生新的空 LoRA 和上传会话。
+      const entry = createdEntry
+        ? await loraJson<LoraLibraryEntryView>(`/v1/lora-library/${createdEntry.id}`, session.sessionToken, { method: "PATCH", body: JSON.stringify(metadata) })
+        : await loraJson<LoraLibraryEntryView>("/v1/lora-library", session.sessionToken, { method: "POST", body: JSON.stringify(metadata) });
+      setCreatedEntry(entry);
       setMessage("正在上传并校验模型文件");
       await uploadLoraFileChunked(entry.id, modelFile, session.sessionToken, (received, total) => setMessage(`正在上传模型文件 ${Math.round(received / total * 100)}%`));
       await uploadExamples(entry.id, examples, session.sessionToken, (current, total) => setMessage(`正在处理示例图 ${current}/${total}`));
@@ -302,19 +308,57 @@ async function uploadExamples(entryId: string, files: File[], token: string, onP
 /** 以服务端偏移分片续传 LoRA，刷新后重选同一文件可继续。 */
 async function uploadLoraFileChunked(entryId: string, file: File, token: string, onProgress: (received: number, total: number) => void): Promise<LoraLibraryEntryView> {
   const storageKey = `drawhime_lora_upload_${entryId}`; let upload: LoraUploadSessionView | null = null; const existingId = localStorage.getItem(storageKey);
-  if (existingId) { try { const current = await loraJson<LoraUploadSessionView>(`/v1/lora-library/${entryId}/uploads/${existingId}`, token); if (current.totalBytes === file.size && current.fileName === file.name) upload = current; else localStorage.removeItem(storageKey); } catch { localStorage.removeItem(storageKey); } }
+  if (existingId) { try { const current = await loraJson<LoraUploadSessionView>(`/v1/lora-library/${entryId}/uploads/${existingId}`, token); if (current.totalBytes === file.size && current.fileName === file.name && current.status === "uploading" && Date.parse(current.expiresAt) > Date.now()) upload = current; else localStorage.removeItem(storageKey); } catch { localStorage.removeItem(storageKey); } }
   if (!upload) { const created = await loraJson<LoraUploadSessionView>(`/v1/lora-library/${entryId}/uploads`, token, { method: "POST", body: JSON.stringify({ fileName: file.name, totalBytes: file.size }) }); upload = created; localStorage.setItem(storageKey, created.id); }
   if (!upload) throw new Error("LoRA 上传会话创建失败");
   const activeUpload = upload;
   let offset = activeUpload.receivedBytes; onProgress(offset, file.size);
-  while (offset < file.size) { const chunk = file.slice(offset, Math.min(file.size, offset + activeUpload.chunkSizeBytes)); const updated = await loraBinary<{ receivedBytes: number }>(`/v1/lora-library/${entryId}/uploads/${activeUpload.id}`, token, chunk, "PUT", { "x-upload-offset": String(offset) }); offset = updated.receivedBytes; onProgress(offset, file.size); }
+  while (offset < file.size) {
+    const chunkEnd = Math.min(file.size, offset + activeUpload.chunkSizeBytes);
+    const chunk = file.slice(offset, chunkEnd);
+    let advanced = false;
+    let lastError: unknown = null;
+    for (let attempt = 1; attempt <= 5 && !advanced; attempt += 1) {
+      try {
+        const updated = await loraBinary<{ receivedBytes: number }>(`/v1/lora-library/${entryId}/uploads/${activeUpload.id}`, token, chunk, "PUT", { "x-upload-offset": String(offset) });
+        if (updated.receivedBytes <= offset || updated.receivedBytes > chunkEnd) throw new Error("LoRA 上传服务返回了异常偏移");
+        offset = updated.receivedBytes;
+        advanced = true;
+      } catch (error) {
+        lastError = error;
+        if (!isRecoverableUploadError(error)) throw error;
+        // 响应丢失时源站可能已经写入分片，以服务端文件长度为准，禁止盲目重复追加。
+        await waitForUploadRetry(attempt);
+        const current = await loraJson<LoraUploadSessionView>(`/v1/lora-library/${entryId}/uploads/${activeUpload.id}`, token);
+        if (current.receivedBytes > offset && current.receivedBytes <= chunkEnd) { offset = current.receivedBytes; advanced = true; }
+        else if (current.receivedBytes !== offset) throw new Error(`LoRA 续传偏移异常：服务端为 ${current.receivedBytes}`);
+      }
+    }
+    if (!advanced) throw lastError instanceof Error ? lastError : new Error("LoRA 分片上传重试失败");
+    onProgress(offset, file.size);
+  }
   try { return await loraJson(`/v1/lora-library/${entryId}/uploads/${activeUpload.id}/complete`, token, { method: "POST", body: "{}" }); } finally { localStorage.removeItem(storageKey); }
 }
 
 /** 带独立会话调用 LoRA JSON 接口。 */
-async function loraJson<T>(path: string, token: string, init: RequestInit = {}): Promise<T> { const response = await fetch(`${apiBase}${path}`, { ...init, headers: { "content-type": "application/json", authorization: `Bearer ${token}`, ...(init.headers || {}) }, cache: "no-store" }); const payload = await response.json() as { ok?: boolean; data?: T; message?: string }; if (!response.ok || payload.ok !== true || payload.data === undefined) throw new Error(payload.message || `请求失败：HTTP ${response.status}`); return payload.data; }
+async function loraJson<T>(path: string, token: string, init: RequestInit = {}): Promise<T> { const response = await fetch(`${apiBase}${path}`, { ...init, headers: { "content-type": "application/json", authorization: `Bearer ${token}`, ...(init.headers || {}) }, cache: "no-store" }); return readLoraResponse<T>(response, "请求失败"); }
 /** 上传 LoRA 二进制分片或示例图。 */
-async function loraBinary<T>(path: string, token: string, body: Blob, method: "PUT" | "POST", headers: Record<string, string> = {}): Promise<T> { const response = await fetch(`${apiBase}${path}`, { method, headers: { authorization: `Bearer ${token}`, "content-type": body.type || "application/octet-stream", ...headers }, body }); const payload = await response.json() as { ok?: boolean; data?: T; message?: string }; if (!response.ok || payload.ok !== true || payload.data === undefined) throw new Error(payload.message || `上传失败：HTTP ${response.status}`); return payload.data; }
+async function loraBinary<T>(path: string, token: string, body: Blob, method: "PUT" | "POST", headers: Record<string, string> = {}): Promise<T> { const response = await fetch(`${apiBase}${path}`, { method, headers: { authorization: `Bearer ${token}`, "content-type": body.type || "application/octet-stream", ...headers }, body }); return readLoraResponse<T>(response, "上传失败"); }
+
+class LoraHttpError extends Error { constructor(message: string, readonly status: number) { super(message); } }
+
+/** 同时解析标准 JSON 与代理错误页，避免把 HTML 解析异常直接展示给用户。 */
+async function readLoraResponse<T>(response: Response, fallback: string): Promise<T> {
+  const text = await response.text();
+  let payload: { ok?: boolean; data?: T; message?: string } = {};
+  try { payload = text ? JSON.parse(text) as typeof payload : {}; } catch { payload = {}; }
+  if (!response.ok || payload.ok !== true || payload.data === undefined) throw new LoraHttpError(payload.message || `${fallback}：HTTP ${response.status}`, response.status);
+  return payload.data;
+}
+
+/** 网络中断、偏移冲突和代理 5xx 可通过服务端真实偏移恢复，其余业务错误立即返回。 */
+function isRecoverableUploadError(error: unknown): boolean { return error instanceof TypeError || (error instanceof LoraHttpError && (error.status === 408 || error.status === 409 || error.status === 425 || error.status === 429 || error.status >= 500)); }
+function waitForUploadRetry(attempt: number): Promise<void> { return new Promise((resolveRetry) => window.setTimeout(resolveRetry, Math.min(8000, 750 * 2 ** (attempt - 1)))); }
 function readDetailId(): string { return new URLSearchParams(window.location.search).get("lora") || ""; }
 function splitTriggerWords(value: string): string[] { return [...new Set(value.split(/[,，\n]/).map((item) => item.trim()).filter(Boolean))].slice(0, 32); }
 function typeLabel(type: LoraLibraryEntryView["type"]): string { return Object.fromEntries(loraTypes)[type]; }
