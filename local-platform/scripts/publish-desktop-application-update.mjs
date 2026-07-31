@@ -16,17 +16,22 @@ const options = parseArguments(process.argv.slice(2));
 const command = options.positionals[0];
 const dryRun = options.flags.has("dry-run");
 
-if (!new Set(["prepare", "deploy", "publish"]).has(command)) {
-  throw new Error("用法：prepare|deploy|publish --installer EXE --version X.Y.Z --minimum-version X.Y.Z --release-notes TEXT [--mandatory true|false] [--dry-run]");
+if (!new Set(["prepare", "deploy", "publish", "publish-url"]).has(command)) {
+  throw new Error("用法：prepare|deploy|publish --installer EXE；或 publish-url --installer-url URL --installer-sha256 HASH --installer-bytes BYTES；两种模式都需要 --version X.Y.Z --minimum-version X.Y.Z --release-notes TEXT [--mandatory true|false] [--dry-run]");
 }
 
 const paths = publicationPaths(options.values);
-let prepared;
-if (command === "prepare" || command === "publish") prepared = await preparePublication(paths, options.values, dryRun);
-if (command === "deploy" || command === "publish") {
-  const publication = prepared || await loadPublication(paths, options.values);
-  if (dryRun) printSummary(publication, "dry-run");
-  else await deployPublication(publication);
+if (command === "prepare") await preparePublication(paths, options.values, dryRun);
+else if (command === "deploy") {
+  const publication = await loadPublication(paths, options.values);
+  if (dryRun) printSummary(publication, "dry-run"); else await deployPublication(publication);
+} else if (command === "publish") {
+  const publication = await preparePublication(paths, options.values, dryRun);
+  if (!dryRun) await deployPublication(publication);
+} else {
+  const stagedAsset = await stageRemoteInstaller(paths, options.values);
+  const publication = await prepareRemotePublication(paths, options.values, dryRun, stagedAsset);
+  if (!dryRun) await deployRemotePublication(publication, stagedAsset);
 }
 
 /** 解析位置参数、布尔标记和成对选项，拒绝重复键。 */
@@ -69,12 +74,21 @@ async function preparePublication(paths, values, isDryRun) {
   const installerPath = resolve(requiredValue(values, "installer"));
   const installer = await stat(installerPath).catch(() => null);
   if (!installer?.isFile() || installer.size <= 0) throw new Error("NSIS 安装包不存在或为空");
+  return preparePublicationMetadata(paths, values, isDryRun, { installerPath, byteSize: installer.size, sha256: await sha256File(installerPath) });
+}
+
+/** 使用主站已验真的远端安装包元数据生成签名清单，不把安装包回传本机。 */
+async function prepareRemotePublication(paths, values, isDryRun, stagedAsset) {
+  return preparePublicationMetadata(paths, values, isDryRun, { installerPath: null, byteSize: stagedAsset.byteSize, sha256: stagedAsset.sha256 });
+}
+
+/** 统一构造 application 资源并签名，本地与主站拉取模式只在安装包来源上不同。 */
+async function preparePublicationMetadata(paths, values, isDryRun, installer) {
   const minimumVersion = requiredVersion(values, "minimum-version");
   if (compareVersions(minimumVersion, paths.version) > 0) throw new Error("最低直接升级版本不得高于目标版本");
   const releaseNotes = requiredValue(values, "release-notes").trim();
   if (!releaseNotes || releaseNotes.length > 20_000) throw new Error("版本说明长度必须为 1–20000 字符");
   const mandatory = parseBoolean(values.get("mandatory") || "false", "mandatory");
-  const sha256 = await sha256File(installerPath);
   const currentPayload = JSON.parse(await readFile(paths.payloadPath, "utf8"));
   const currentEnvelope = JSON.parse(await readFile(paths.envelopePath, "utf8"));
   await verifyEnvelope(currentPayload, currentEnvelope, paths);
@@ -92,9 +106,9 @@ async function preparePublication(paths, values, isDryRun) {
     os: "windows",
     arch: "x86_64",
     fileName: paths.fileName,
-    byteSize: installer.size,
-    installedSize: installer.size,
-    sha256,
+    byteSize: installer.byteSize,
+    installedSize: installer.byteSize,
+    sha256: installer.sha256,
     archive: "raw",
     rootDirectory: null,
     installDirectory: null,
@@ -104,24 +118,67 @@ async function preparePublication(paths, values, isDryRun) {
     sources,
   };
   const existingItem = currentPayload.resources.find((resource) => resource.id === item.id);
-  if (existingItem && JSON.stringify(existingItem) !== JSON.stringify(item)) {
-    throw new Error(`版本 ${paths.version} 已登记为其他不可变内容；请提升版本号，禁止覆盖既有安装包或元数据`);
-  }
+  if (existingItem && JSON.stringify(existingItem) !== JSON.stringify(item)) await assertVersionNotPublished(item.id, paths.version);
   const resources = currentPayload.resources.filter((resource) => resource.id !== item.id);
   const parsedPayload = desktopResourceManifestPayloadSchema.safeParse({ ...currentPayload, channel: "stable", generatedAt, expiresAt, resources: [...resources, item] });
   if (!parsedPayload.success) throw new Error(`应用更新资源未通过共享契约：${parsedPayload.error.issues[0]?.message || "未知错误"}`);
   const signed = await signPayload(parsedPayload.data, paths, currentEnvelope.keyId);
-  const publication = { ...paths, installerPath, item, payload: parsedPayload.data, envelope: signed };
+  const publication = { ...paths, installerPath: installer.installerPath, item, payload: parsedPayload.data, envelope: signed };
   if (isDryRun) { printSummary(publication, "dry-run"); return publication; }
-  await mkdir(dirname(paths.assetPath), { recursive: true });
-  const temporaryAsset = `${paths.assetPath}.incoming`;
-  await copyFile(installerPath, temporaryAsset);
-  if (await sha256File(temporaryAsset) !== sha256) throw new Error("复制后的安装包 SHA-256 发生变化");
-  await rename(temporaryAsset, paths.assetPath);
+  if (installer.installerPath) {
+    await mkdir(dirname(paths.assetPath), { recursive: true });
+    const temporaryAsset = `${paths.assetPath}.incoming`;
+    await copyFile(installer.installerPath, temporaryAsset);
+    if (await sha256File(temporaryAsset) !== installer.sha256) throw new Error("复制后的安装包 SHA-256 发生变化");
+    await rename(temporaryAsset, paths.assetPath);
+  }
   await writeJsonAtomically(paths.payloadPath, parsedPayload.data);
   await writeJsonAtomically(paths.envelopePath, signed);
   printSummary(publication, "prepared");
   return publication;
+}
+
+/** 仅允许修复尚未发布的本地准备状态；生产已经登记的版本始终不可覆盖。 */
+async function assertVersionNotPublished(resourceId, version) {
+  const response = await fetch("https://www.xanime.ink/local-model-api/v1/desktop/resources/manifest", { signal: AbortSignal.timeout(20_000) });
+  if (!response.ok) throw new Error(`无法确认版本 ${version} 的生产发布状态：HTTP ${response.status}`);
+  const wrapper = await response.json();
+  const livePayload = desktopResourceManifestPayloadSchema.parse(JSON.parse(wrapper.data?.payload || "null"));
+  if (livePayload.resources.some((resource) => resource.id === resourceId)) throw new Error(`版本 ${version} 已在生产登记为其他不可变内容；请提升版本号，禁止覆盖`);
+}
+
+/** 让主站直接拉取本项目 GitHub Release，并在签名前核对完整大小和 SHA-256。 */
+async function stageRemoteInstaller(paths, values) {
+  const installerUrl = new URL(requiredValue(values, "installer-url"));
+  if (installerUrl.protocol !== "https:" || installerUrl.hostname !== "github.com" || !installerUrl.pathname.startsWith("/Yukino12333/DrawHime/releases/download/")) throw new Error("installer-url 必须是本项目 GitHub Release 的 HTTPS 地址");
+  const sha256 = requiredValue(values, "installer-sha256").toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(sha256)) throw new Error("installer-sha256 必须是 64 位十六进制摘要");
+  const byteSize = Number(requiredValue(values, "installer-bytes"));
+  if (!Number.isSafeInteger(byteSize) || byteSize <= 0 || byteSize > 1024 * 1024 * 1024) throw new Error("installer-bytes 必须是 1GB 以内的正整数");
+  const { sshArguments } = productionSsh();
+  const remoteAsset = `/tmp/${paths.resourceId}.staged.exe`;
+  run("ssh", [...sshArguments, "bash", "-s", "--", installerUrl.href, remoteAsset, sha256, String(byteSize)], remoteStageScript(), 1);
+  return { path: remoteAsset, sha256, byteSize };
+}
+
+/** 主站拉取脚本只复用已完整验真的暂存文件，失败片段不会被当作成功资源。 */
+function remoteStageScript() {
+  return `set -euo pipefail
+URL="$1"
+TARGET="$2"
+EXPECTED_SHA256="$3"
+EXPECTED_SIZE="$4"
+valid=0
+if [ -f "$TARGET" ] && [ "$(stat -c %s "$TARGET")" = "$EXPECTED_SIZE" ] && [ "$(sha256sum "$TARGET" | awk '{print $1}')" = "$EXPECTED_SHA256" ]; then valid=1; fi
+if [ "$valid" != 1 ]; then
+  rm -f "$TARGET" "$TARGET.incoming"
+  curl --proto '=https' --tlsv1.2 -fL --retry 4 --retry-all-errors --connect-timeout 20 --max-time 3600 -o "$TARGET.incoming" "$URL"
+  test "$(stat -c %s "$TARGET.incoming")" = "$EXPECTED_SIZE"
+  test "$(sha256sum "$TARGET.incoming" | awk '{print $1}')" = "$EXPECTED_SHA256"
+  mv "$TARGET.incoming" "$TARGET"
+fi
+echo '主站 GitHub Release 安装包暂存验证完成'
+`;
 }
 
 /** 读取已经准备的私有发布文件，并再次校验契约、签名、大小和哈希。 */
@@ -163,6 +220,31 @@ async function verifyEnvelope(payload, envelope, paths) {
 
 /** 先上传临时文件，再由远端脚本核验并原子切换资源和信封。 */
 async function deployPublication(publication) {
+  const { sshArguments } = productionSsh();
+  const nonce = `${Date.now()}-${process.pid}`;
+  const remoteAsset = `/tmp/drawhime-application-${nonce}.exe`;
+  const remoteEnvelope = `/tmp/drawhime-application-${nonce}.json`;
+  run("ssh", [...sshArguments, `cat > '${remoteAsset}'`], readFileSync(publication.assetPath));
+  await deployPreparedPublication(publication, sshArguments, remoteAsset, remoteEnvelope);
+}
+
+/** 发布已由主站直接拉取并验真的安装包，本机只传输签名信封。 */
+async function deployRemotePublication(publication, stagedAsset) {
+  const { sshArguments } = productionSsh();
+  const remoteEnvelope = `/tmp/drawhime-application-envelope-${Date.now()}-${process.pid}.json`;
+  await deployPreparedPublication(publication, sshArguments, stagedAsset.path, remoteEnvelope);
+}
+
+/** 上传小型信封并原子切换已验真的安装包与资源清单。 */
+async function deployPreparedPublication(publication, sshArguments, remoteAsset, remoteEnvelope) {
+  run("ssh", [...sshArguments, `cat > '${remoteEnvelope}'`], readFileSync(publication.envelopePath));
+  run("ssh", [...sshArguments, "bash", "-s", "--", publication.resourceId, publication.fileName, publication.item.sha256, String(publication.item.byteSize), remoteAsset, remoteEnvelope], remotePublishScript(), 1);
+  await verifyPublicPublication(publication);
+  printSummary(publication, "published");
+}
+
+/** 构造生产 SSH 参数，所有远端拉取和发布操作使用同一受控主机。 */
+function productionSsh() {
   loadPrivateEnvironment(resolve(root, ".private", "production.env"));
   const host = requirePrivateEnvironment("LOCAL_PLATFORM_DEPLOY_HOST");
   const port = process.env.LOCAL_PLATFORM_DEPLOY_PORT || "22";
@@ -173,12 +255,11 @@ async function deployPublication(publication) {
     "-o", "BatchMode=yes", "-o", "ConnectTimeout=20", "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=120",
     ...(proxyJump ? ["-J", proxyJump] : []), "-p", port, host,
   ];
-  const nonce = `${Date.now()}-${process.pid}`;
-  const remoteAsset = `/tmp/drawhime-application-${nonce}.exe`;
-  const remoteEnvelope = `/tmp/drawhime-application-${nonce}.json`;
-  run("ssh", [...sshArguments, `cat > '${remoteAsset}'`], readFileSync(publication.assetPath));
-  run("ssh", [...sshArguments, `cat > '${remoteEnvelope}'`], readFileSync(publication.envelopePath));
-  run("ssh", [...sshArguments, "bash", "-s", "--", publication.resourceId, publication.fileName, publication.item.sha256, String(publication.item.byteSize), remoteAsset, remoteEnvelope], remotePublishScript(), 1);
+  return { sshArguments };
+}
+
+/** 通过公网清单确认客户端已经读取到本次 application 摘要。 */
+async function verifyPublicPublication(publication) {
   let publicVerified = false;
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
@@ -193,7 +274,6 @@ async function deployPublication(publication) {
     if (attempt < 3) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, attempt * 2_000);
   }
   if (!publicVerified) throw new Error("公网签名清单未收敛到本次应用更新");
-  printSummary(publication, "published");
 }
 
 /** 远端脚本只读取生产私有路径，切换失败时恢复上一签名信封。 */

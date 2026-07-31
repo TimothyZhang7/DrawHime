@@ -57,6 +57,13 @@ node scripts/publish-desktop-application-update.mjs prepare --installer INSTALLE
 node scripts/publish-desktop-application-update.mjs publish --installer INSTALLER.exe --version X.Y.Z --minimum-version X.Y.Z --release-notes "版本说明"
 ```
 
+本机到主站的大文件上行不可用时，安装包应由已通过 Windows 验收的 GitHub Release 提供。主站直接拉取公开 Release，先核对 Actions 返回的大小和 SHA-256，再由本机签署并上传小型清单信封；GPU 主机不参与传输：
+
+```powershell
+node scripts/publish-desktop-application-update.mjs publish-url --installer-url RELEASE_URL --installer-sha256 SHA256 --installer-bytes BYTES --version X.Y.Z --minimum-version X.Y.Z --release-notes "版本说明" --dry-run
+node scripts/publish-desktop-application-update.mjs publish-url --installer-url RELEASE_URL --installer-sha256 SHA256 --installer-bytes BYTES --version X.Y.Z --minimum-version X.Y.Z --release-notes "版本说明"
+```
+
 发布到稳定通道后，必须从仍安装的上一版本执行一次真实在线升级，不以直接安装新包替代更新链路；验收脚本通过客户端自身 Tauri IPC 完成检查、下载、应用与重启确认，并核对模型、Runtime、作品和训练数据统计保持一致：
 
 ```powershell
