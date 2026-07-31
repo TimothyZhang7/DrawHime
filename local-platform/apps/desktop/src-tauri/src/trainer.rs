@@ -24,6 +24,8 @@ use tauri::AppHandle;
 
 const MAX_RUNNER_LINE_BYTES: usize = 256 * 1024;
 const MAX_RUNNER_ERROR_BYTES: usize = 32 * 1024;
+const TRAINER_RESOURCE_ID: &str = "trainer.anima-sd-scripts";
+const MINIMUM_TRAINER_PROTOCOL_VERSION: u32 = 2;
 
 /** 应用生命周期内唯一的本地 LoRA 训练 Worker。 */
 pub struct TrainingScheduler {
@@ -36,6 +38,14 @@ struct TrainerComponent {
     python: PathBuf,
     root: PathBuf,
     runner: PathBuf,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TrainerInstallMarker {
+    resource_id: String,
+    version: String,
+    sha256: String,
 }
 
 #[derive(Serialize)]
@@ -150,7 +160,7 @@ fn execute_runner(database: &Connection, app_data_dir: &Path, runtime: &RuntimeC
     };
     write_request(&request_path, &request).map_err(failed)?;
     let mut command = Command::new(&component.python);
-    command.args(["-I", component.runner.to_string_lossy().as_ref(), "--request", request_path.to_string_lossy().as_ref()]).current_dir(&component.root).env("PYTHONUTF8", "1").env("PYTHONNOUSERSITE", "1").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    command.args(["-I", component.runner.to_string_lossy().as_ref(), "--request", request_path.to_string_lossy().as_ref()]).current_dir(&component.root).env("PYTHONUTF8", "1").env("PYTHONIOENCODING", "utf-8:replace").env("PYTHONNOUSERSITE", "1").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     hide_window(&mut command);
     let mut child = command.spawn().map_err(|error| failed(format!("启动本地 Trainer 失败：{error}")))?;
     let stderr = child.stderr.take();
@@ -222,16 +232,32 @@ fn find_trainer_component(runtime_root: &str) -> Result<TrainerComponent, String
     let runtime_root = Path::new(runtime_root);
     let python = runtime_root.join("current").join("python_embeded").join("python.exe");
     if !python.is_file() { return Err("本地 Runtime 的私有 Python 尚未安装".into()); }
-    let root = runtime_root.join("components").join("trainer");
-    let mut candidates = fs::read_dir(root).map_err(|_| "签名 Trainer 组件尚未安装".to_string())?.filter_map(Result::ok).filter(|entry| entry.path().is_dir()).collect::<Vec<_>>();
-    candidates.sort_by_key(|entry| entry.metadata().and_then(|value| value.modified()).ok());
-    for entry in candidates.into_iter().rev() {
-        let root = entry.path();
-        if root.join(".drawhime-resource.json").is_file() && root.join("runner.py").is_file() && root.join("sd-scripts").join("anima_train_network.py").is_file() && root.join("site-packages").join("accelerate").is_dir() {
-            return Ok(TrainerComponent { python, runner: root.join("runner.py"), root });
-        }
-    }
-    Err("Trainer 组件文件不完整，请在资源安装页执行修复".into())
+    let root = find_compatible_trainer_root(runtime_root)?;
+    Ok(TrainerComponent { python, runner: root.join("runner.py"), root })
+}
+
+/** 环境检测与任务执行共用同一 Trainer 协议门禁，避免界面显示可用后才在子进程中失败。 */
+pub(crate) fn has_compatible_component(runtime_root: &str) -> bool {
+    find_compatible_trainer_root(Path::new(runtime_root)).is_ok()
+}
+
+fn find_compatible_trainer_root(runtime_root: &Path) -> Result<PathBuf, String> {
+    let components_root = runtime_root.join("components").join("trainer");
+    let candidates = fs::read_dir(&components_root).map_err(|_| "签名 Trainer 组件尚未安装".to_string())?.filter_map(Result::ok).map(|entry| entry.path()).filter(|path| trainer_component_complete(path)).collect::<Vec<_>>();
+    let selected = candidates.iter().filter_map(|path| trainer_protocol_version(path).map(|protocol| (protocol, path))).max_by_key(|(protocol, _)| *protocol);
+    if let Some((_, root)) = selected { return Ok(root.clone()); }
+    if candidates.is_empty() { Err("Trainer 组件文件不完整，请在资源安装页执行修复".into()) } else { Err(format!("Trainer 组件协议版本过旧，请在资源安装页修复并安装 v{MINIMUM_TRAINER_PROTOCOL_VERSION} 或更高版本")) }
+}
+
+fn trainer_component_complete(root: &Path) -> bool {
+    root.join(".drawhime-resource.json").is_file() && root.join("runner.py").is_file() && root.join("sd-scripts").join("anima_train_network.py").is_file() && root.join("site-packages").join("accelerate").is_dir()
+}
+
+fn trainer_protocol_version(root: &Path) -> Option<u32> {
+    let marker = fs::read(root.join(".drawhime-resource.json")).ok().and_then(|content| serde_json::from_slice::<TrainerInstallMarker>(&content).ok())?;
+    if marker.resource_id != TRAINER_RESOURCE_ID || marker.sha256.len() != 64 || !marker.sha256.chars().all(|character| character.is_ascii_hexdigit()) { return None; }
+    let protocol = marker.version.rsplit_once("-v")?.1.parse::<u32>().ok()?;
+    (protocol >= MINIMUM_TRAINER_PROTOCOL_VERSION).then_some(protocol)
 }
 
 fn validate_output_path(workspace: &Path, output: &Path) -> Result<(), String> {
@@ -287,7 +313,10 @@ fn read_runner_lines(stdout: impl Read, sender: mpsc::SyncSender<Result<String, 
         let text = String::from_utf8_lossy(&bytes);
         let Some(start) = text.find('{') else { continue; };
         let Some(end) = text.rfind('}') else { continue; };
-        if sender.send(Ok(text[start..=end].to_string())).is_err() { break; }
+        let candidate = &text[start..=end];
+        // 原生依赖可能输出带花括号的本地代码页日志；只把完整协议事件交给任务状态机。
+        if serde_json::from_str::<TrainerEvent>(candidate).is_err() { continue; }
+        if sender.send(Ok(candidate.to_string())).is_err() { break; }
     }
 }
 
@@ -323,7 +352,7 @@ mod tests {
 
     #[test]
     fn trainer_progress_ignores_non_utf8_noise_and_keeps_json_event() {
-        let input = b"\xff\xfe native progress\r\nlog: {\"kind\":\"progress\",\"progress\":42}\r\n";
+        let input = b"\xff\xfe native {progress} noise\r\nlog: {\"kind\":\"progress\",\"progress\":42}\r\n";
         let (sender, receiver) = mpsc::sync_channel(4);
         read_runner_lines(input.as_slice(), sender);
         let line = receiver.recv().expect("读取 Trainer JSON 事件").expect("事件解析前读取成功");
@@ -331,6 +360,24 @@ mod tests {
         assert_eq!(event.kind, "progress");
         assert_eq!(event.progress, Some(42));
         assert!(receiver.try_recv().is_err());
+    }
+
+    #[test]
+    fn trainer_selects_compatible_protocol_instead_of_directory_time() {
+        let temporary = tempfile::tempdir().expect("创建 Trainer 选择测试目录");
+        let components = temporary.path().join("components/trainer");
+        write_test_component(&components.join("legacy"), "anima-sd-scripts-test-py312-v1");
+        let compatible = components.join("current");
+        write_test_component(&compatible, "anima-sd-scripts-test-py312-v2");
+        assert_eq!(find_compatible_trainer_root(temporary.path()).expect("选择兼容 Trainer"), compatible);
+    }
+
+    fn write_test_component(root: &Path, version: &str) {
+        fs::create_dir_all(root.join("sd-scripts")).expect("创建 sd-scripts 测试目录");
+        fs::create_dir_all(root.join("site-packages/accelerate")).expect("创建 accelerate 测试目录");
+        fs::write(root.join("runner.py"), b"# test").expect("写入 Trainer 测试入口");
+        fs::write(root.join("sd-scripts/anima_train_network.py"), b"# test").expect("写入训练测试入口");
+        fs::write(root.join(".drawhime-resource.json"), serde_json::to_vec(&serde_json::json!({ "resourceId": TRAINER_RESOURCE_ID, "version": version, "sha256": "a".repeat(64) })).expect("生成 Trainer 测试标记")).expect("写入 Trainer 测试标记");
     }
 
     #[test]
