@@ -152,9 +152,38 @@ pub struct DesktopTrainingAssetView {
     pub available: bool,
     pub caption: Option<String>,
     pub caption_source: Option<String>,
+    pub tags: Vec<DesktopTrainingTagView>,
+    pub derivatives: Vec<DesktopTrainingAssetDerivativeView>,
+    pub selected_derivative_id: Option<String>,
     pub confirmed: bool,
     pub created_at: String,
     pub updated_at: String,
+}
+
+/** 训练图片的透明 PNG 派生版本；原图不会被覆盖。 */
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopTrainingAssetDerivativeView {
+    pub id: String,
+    pub kind: String,
+    pub source: String,
+    pub path: String,
+    pub sha256: String,
+    pub byte_size: u64,
+    pub width: u32,
+    pub height: u32,
+    pub available: bool,
+    pub created_at: String,
+}
+
+/** 单个训练标签的稳定文本、规范键、来源和显示顺序。 */
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopTrainingTagView {
+    pub value: String,
+    pub normalized_value: String,
+    pub source: String,
+    pub position: u32,
 }
 
 /** 本地训练集及当前人工确认阶段。 */
@@ -175,6 +204,50 @@ pub struct DesktopTrainingDatasetView {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DesktopTrainingDatasetCreateInput {
+    pub title: String,
+    pub r#type: String,
+    pub trigger_words: Vec<String>,
+}
+
+/** 选择训练集目录或压缩包后的预检输入。 */
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopTrainingDatasetImportPreviewInput {
+    pub source_path: String,
+}
+
+/** 训练集导入预检发现的可展示异常。 */
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopTrainingDatasetImportAnomaly {
+    pub code: String,
+    pub severity: String,
+    pub path: String,
+    pub message: String,
+}
+
+/** 用户确认前保存在受控临时目录的训练集导入快照。 */
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopTrainingDatasetImportPreview {
+    pub id: String,
+    pub source_name: String,
+    pub source_kind: String,
+    pub suggested_title: String,
+    pub image_count: u32,
+    pub paired_tag_count: u32,
+    pub untagged_count: u32,
+    pub anomaly_count: u32,
+    pub can_import: bool,
+    pub anomalies: Vec<DesktopTrainingDatasetImportAnomaly>,
+    pub expires_at: String,
+}
+
+/** 依据已预检快照正式创建训练集的输入。 */
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopTrainingDatasetImportInput {
+    pub preview_id: String,
     pub title: String,
     pub r#type: String,
     pub trigger_words: Vec<String>,
@@ -203,6 +276,16 @@ pub struct DesktopTrainingCaptionUpdateInput {
     pub dataset_id: String,
     pub asset_id: String,
     pub caption: Option<String>,
+}
+
+/** 在一个 SQLite 与文件事务中批量添加或删除训练标签。 */
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopTrainingBatchTagsInput {
+    pub dataset_id: String,
+    pub asset_ids: Vec<String>,
+    pub operation: String,
+    pub tags: Vec<String>,
 }
 
 /** 删除单张本地训练图片的输入。 */
@@ -250,6 +333,8 @@ pub struct DesktopTrainingDatasetIdInput {
 pub struct DesktopCaptionJobCreateInput {
     pub dataset_id: String,
     pub asset_id: Option<String>,
+    #[serde(default)]
+    pub asset_ids: Option<Vec<String>>,
     pub general_threshold: f64,
     pub character_threshold: f64,
     pub include_character_tags: bool,
@@ -290,10 +375,149 @@ pub struct DesktopCaptionJobView {
     pub updated_at: String,
 }
 
+/** AI 标签清洗对一个标签给出的建议和理由。 */
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopAiCleanTagSuggestion {
+    pub tag: String,
+    pub reason: String,
+}
+
+/** 单张图片的 AI 标签清洗建议，不会自动写入训练集。 */
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopAiCleanProposal {
+    pub original_tags: Vec<String>,
+    pub keep: Vec<DesktopAiCleanTagSuggestion>,
+    pub remove: Vec<DesktopAiCleanTagSuggestion>,
+    pub add: Vec<DesktopAiCleanTagSuggestion>,
+    pub final_tags: Vec<String>,
+}
+
+/** AI 清洗批次中单张图片的持久状态。 */
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopAiCleanJobItemView {
+    pub asset_id: String,
+    pub status: String,
+    pub attempt_count: u32,
+    pub proposal: Option<DesktopAiCleanProposal>,
+    pub apply_status: String,
+    pub error: Option<String>,
+    pub updated_at: String,
+}
+
+/** SQLite 为事实源的 AI 标签清洗任务。 */
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopAiCleanJobView {
+    pub id: String,
+    pub dataset_id: String,
+    pub status: String,
+    pub progress: u32,
+    pub total_assets: u32,
+    pub processed_assets: u32,
+    pub succeeded_assets: u32,
+    pub failed_assets: u32,
+    pub training_goal: String,
+    pub items: Vec<DesktopAiCleanJobItemView>,
+    pub error: Option<String>,
+    pub created_at: String,
+    pub completed_at: Option<String>,
+    pub updated_at: String,
+}
+
+/** 创建单图或批量 AI 标签清洗任务。 */
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopAiCleanJobCreateInput {
+    pub dataset_id: String,
+    pub asset_ids: Vec<String>,
+    pub training_goal: String,
+}
+
+/** 用户确认后应用选中的 AI 删除与新增建议。 */
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopAiCleanApplyInput {
+    pub job_id: String,
+    pub dataset_id: String,
+    pub asset_id: String,
+    pub remove_tags: Vec<String>,
+    pub add_tags: Vec<String>,
+}
+
+/** 撤销最后一次仍未被后续编辑覆盖的 AI 清洗。 */
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopAiCleanUndoInput {
+    pub job_id: String,
+    pub dataset_id: String,
+    pub asset_id: String,
+}
+
+/** 创建单图或批量自动抠图任务。 */
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopBackgroundRemovalJobCreateInput {
+    pub dataset_id: String,
+    pub asset_ids: Vec<String>,
+}
+
+/** 自动抠图批次中的逐图持久状态。 */
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopBackgroundRemovalJobItemView {
+    pub asset_id: String,
+    pub status: String,
+    pub derivative_id: Option<String>,
+    pub error: Option<String>,
+    pub updated_at: String,
+}
+
+/** SQLite 为事实源的自动抠图任务。 */
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopBackgroundRemovalJobView {
+    pub id: String,
+    pub dataset_id: String,
+    pub status: String,
+    pub progress: u32,
+    pub total_assets: u32,
+    pub processed_assets: u32,
+    pub succeeded_assets: u32,
+    pub failed_assets: u32,
+    pub items: Vec<DesktopBackgroundRemovalJobItemView>,
+    pub error: Option<String>,
+    pub created_at: String,
+    pub completed_at: Option<String>,
+    pub updated_at: String,
+}
+
+/** 手动抠图只提交 PNG alpha 蒙版，输出路径由核心受控生成。 */
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopTrainingManualMaskInput {
+    pub dataset_id: String,
+    pub asset_id: String,
+    pub mask_png_base64: String,
+}
+
+/** 选择后续训练快照使用的原图或派生版本。 */
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopTrainingAssetVariantSelectInput {
+    pub dataset_id: String,
+    pub asset_id: String,
+    pub derivative_id: Option<String>,
+}
+
 /** 桌面端真实 LoRA 训练任务固化的用户参数。 */
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[serde(default)]
 pub struct DesktopTrainingParameters {
+    pub preset: String,
     pub rank: u32,
     pub alpha: u32,
     pub epochs: u32,
@@ -307,6 +531,60 @@ pub struct DesktopTrainingParameters {
     pub shuffle_caption: bool,
     pub keep_tokens: u32,
     pub seed: u32,
+    pub optimizer: String,
+    pub batch_size: u32,
+    pub max_train_steps: Option<u32>,
+    pub bucket_enabled: bool,
+    pub bucket_no_upscale: bool,
+    pub bucket_min_resolution: u32,
+    pub bucket_max_resolution: u32,
+    pub bucket_resolution_steps: u32,
+    pub text_encoder_strategy: String,
+    pub cache_latents: bool,
+    pub save_every_epochs: u32,
+    pub mixed_precision: String,
+    pub gradient_checkpointing: bool,
+    pub flip_augmentation: bool,
+    pub color_augmentation: bool,
+    pub max_grad_norm: f64,
+}
+
+impl Default for DesktopTrainingParameters {
+    /** 为旧任务参数迁移提供与历史执行一致的安全默认值。 */
+    fn default() -> Self {
+        Self {
+            preset: "custom".into(),
+            rank: 16,
+            alpha: 16,
+            epochs: 4,
+            repeats: 8,
+            resolution: 512,
+            learning_rate: 0.0001,
+            lr_scheduler: "constant".into(),
+            warmup_ratio: 0.0,
+            gradient_accumulation_steps: 1,
+            caption_dropout_rate: 0.0,
+            shuffle_caption: false,
+            keep_tokens: 1,
+            seed: 1,
+            optimizer: "AdamW8bit".into(),
+            batch_size: 1,
+            max_train_steps: None,
+            bucket_enabled: true,
+            bucket_no_upscale: true,
+            bucket_min_resolution: 256,
+            bucket_max_resolution: 1536,
+            bucket_resolution_steps: 64,
+            text_encoder_strategy: "frozen_cached".into(),
+            cache_latents: true,
+            save_every_epochs: 1,
+            mixed_precision: "bf16".into(),
+            gradient_checkpointing: true,
+            flip_augmentation: false,
+            color_augmentation: false,
+            max_grad_norm: 1.0,
+        }
+    }
 }
 
 /** 创建桌面端真实 LoRA 训练任务的参数。 */
@@ -316,6 +594,8 @@ pub struct DesktopTrainingJobCreateInput {
     pub dataset_id: String,
     pub model_id: String,
     pub title: String,
+    pub use_ai_tag_processing: bool,
+    pub training_goal: String,
     pub parameters: DesktopTrainingParameters,
 }
 
@@ -356,6 +636,11 @@ pub struct DesktopTrainingJobView {
     pub total_epochs: u32,
     pub model_id: String,
     pub model_display_name: String,
+    pub use_ai_tag_processing: bool,
+    pub training_goal: String,
+    pub preprocessing_status: String,
+    pub preprocessing_progress: u32,
+    pub preprocessing_error: Option<String>,
     pub trigger_words: Vec<String>,
     pub asset_count: u32,
     pub parameters: DesktopTrainingParameters,
@@ -367,6 +652,45 @@ pub struct DesktopTrainingJobView {
     pub started_at: Option<String>,
     pub completed_at: Option<String>,
     pub updated_at: String,
+}
+
+/** 训练任务中冻结的单张图片、Caption 与逐标签来源。 */
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopTrainingSnapshotAssetView {
+    pub sequence: u32,
+    pub file_name: String,
+    pub path: String,
+    pub sha256: String,
+    pub byte_size: u64,
+    pub caption: String,
+    pub tags: Vec<DesktopTrainingTagView>,
+    pub image_variant: String,
+    pub derivative_source: Option<String>,
+}
+
+/** 桌面训练任务的完整只读快照。 */
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopTrainingSnapshotView {
+    pub job_id: String,
+    pub dataset_id: String,
+    pub dataset_title: String,
+    pub lora_title: String,
+    pub r#type: String,
+    pub status: String,
+    pub trigger_words: Vec<String>,
+    pub parameters: DesktopTrainingParameters,
+    pub assets: Vec<DesktopTrainingSnapshotAssetView>,
+    pub created_at: String,
+}
+
+/** 从只读训练快照复制新训练集时只允许提供新标题。 */
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopTrainingSnapshotCopyInput {
+    pub job_id: String,
+    pub title: String,
 }
 
 /** 提交到本机串行调度器的生成参数。 */
@@ -490,11 +814,21 @@ pub struct DesktopEnvironmentReport {
     pub os: OsView,
     pub cpu: CpuView,
     pub memory: MemoryView,
+    pub display_adapters: Vec<DisplayAdapterView>,
     pub gpus: Vec<GpuView>,
     pub disks: Vec<DiskView>,
     pub runtime: RuntimeView,
     pub capabilities: CapabilityView,
     pub issues: Vec<EnvironmentIssue>,
+}
+
+/** Windows WMI 可见的图形适配器及当前桌面 Runtime 能力。 */
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DisplayAdapterView {
+    pub name: String,
+    pub vendor: String,
+    pub cuda_supported: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -958,6 +1292,9 @@ pub struct WindowsSystemProbe {
     pub total_memory_bytes: Option<u64>,
     pub available_memory_bytes: Option<u64>,
     pub virtual_total_bytes: Option<u64>,
+    /** WMI 可见的全部图形适配器用于展示厂商与非 CUDA 能力边界。 */
+    #[serde(default)]
+    pub display_adapters: Vec<DisplayAdapterView>,
     /** WMI 可见的 NVIDIA 适配器用于区分无显卡和驱动不可用。 */
     #[serde(default)]
     pub nvidia_adapter_names: Vec<String>,

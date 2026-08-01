@@ -1,6 +1,8 @@
 //! 本模块注册 DrawHime Desktop 本地核心、SQLite 和环境检测命令。
 
 mod ai_assist;
+mod ai_cleaner;
+mod background_removal;
 mod auth;
 mod captioner;
 mod environment;
@@ -19,6 +21,9 @@ mod storage_cleanup;
 mod trainer;
 mod training;
 mod training_dataset;
+mod training_files;
+mod training_import;
+mod training_tags;
 mod website_catalog_cache;
 mod website_lora;
 mod website_media;
@@ -27,17 +32,24 @@ mod website_tag_translation;
 mod workload;
 
 use models::{
-    DesktopAiAnalyzeInput, DesktopAiAnalyzeView, DesktopAiSettings, DesktopAiSettingsUpdate,
-    DesktopBootstrapView, DesktopCaptionJobCreateInput, DesktopCaptionJobView,
-    DesktopEnvironmentReport, DesktopLocalJobCreateInput, DesktopLocalJobView,
-    DesktopLocalLoraImportInput, DesktopLocalLoraView, DesktopLocalModelImportInput,
-    DesktopLocalModelView, DesktopManagedFileDeleteInput, DesktopManagedFileRemovalView,
-    DesktopOfflineUpdateImportInput, DesktopResourceCatalogView, DesktopResourceDownloadView,
-    DesktopResourceInstallView, DesktopRuntimeStatusView, DesktopSettings,
-    DesktopSoftwareUpdateView, DesktopStorageCleanupInput, DesktopStorageCleanupView,
-    DesktopTrainingAssetDeleteInput, DesktopTrainingCaptionUpdateInput,
-    DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetIdInput, DesktopTrainingDatasetView,
+    DesktopAiAnalyzeInput, DesktopAiAnalyzeView, DesktopAiCleanApplyInput,
+    DesktopAiCleanJobCreateInput, DesktopAiCleanJobView, DesktopAiCleanUndoInput,
+    DesktopAiSettings, DesktopAiSettingsUpdate, DesktopBackgroundRemovalJobCreateInput,
+    DesktopBackgroundRemovalJobView, DesktopBootstrapView, DesktopCaptionJobCreateInput,
+    DesktopCaptionJobView, DesktopEnvironmentReport, DesktopLocalJobCreateInput,
+    DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView,
+    DesktopLocalModelImportInput, DesktopLocalModelView, DesktopManagedFileDeleteInput,
+    DesktopManagedFileRemovalView, DesktopOfflineUpdateImportInput, DesktopResourceCatalogView,
+    DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView,
+    DesktopSettings, DesktopSoftwareUpdateView, DesktopStorageCleanupInput,
+    DesktopStorageCleanupView, DesktopTrainingAssetDeleteInput, DesktopTrainingBatchTagsInput,
+    DesktopTrainingCaptionUpdateInput,
+    DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetIdInput,
+    DesktopTrainingDatasetImportInput, DesktopTrainingDatasetImportPreview,
+    DesktopTrainingDatasetImportPreviewInput, DesktopTrainingDatasetView,
     DesktopTrainingImagesAddInput, DesktopTrainingJobCreateInput, DesktopTrainingJobView,
+    DesktopTrainingAssetVariantSelectInput, DesktopTrainingManualMaskInput,
+    DesktopTrainingSnapshotCopyInput, DesktopTrainingSnapshotView,
     DesktopTrainingTagTranslationInput, DesktopTrainingTagTranslationView,
     DesktopTrainingTriggerWordsUpdateInput, DesktopWebsiteLoraView, DesktopWebsiteModelView,
     GalleryPublicationInput, GallerySyncItem,
@@ -618,6 +630,60 @@ fn desktop_create_training_dataset(
     state.create_training_dataset(input)
 }
 
+/** 删除可编辑训练集但保留独立训练快照、训练记录和 LoRA 产物。 */
+#[tauri::command]
+async fn desktop_delete_training_dataset(
+    state: State<'_, DesktopState>,
+    input: DesktopTrainingDatasetIdInput,
+) -> Result<String, String> {
+    let database_path = state.database_path.clone();
+    let app_data_dir = state.app_data_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let database = rusqlite::Connection::open(database_path)
+            .map_err(|error| format!("打开训练集数据库失败：{error}"))?;
+        database
+            .execute_batch("PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;")
+            .map_err(|error| format!("初始化训练集数据库连接失败：{error}"))?;
+        training_dataset::delete_dataset(&database, &app_data_dir, input)
+    })
+    .await
+    .map_err(|error| format!("删除训练集任务异常：{error}"))?
+}
+
+/** 在后台安全复制或解压来源，只返回统计和受控预检令牌。 */
+#[tauri::command]
+async fn desktop_preview_training_dataset_import(
+    state: State<'_, DesktopState>,
+    input: DesktopTrainingDatasetImportPreviewInput,
+) -> Result<DesktopTrainingDatasetImportPreview, String> {
+    let app_data_dir = state.app_data_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        training_import::preview_import(&app_data_dir, input)
+    })
+    .await
+    .map_err(|error| format!("训练集预检任务异常：{error}"))?
+}
+
+/** 用户确认后复核预检快照，并原子创建训练集、图片和同名标签。 */
+#[tauri::command]
+async fn desktop_import_training_dataset(
+    state: State<'_, DesktopState>,
+    input: DesktopTrainingDatasetImportInput,
+) -> Result<DesktopTrainingDatasetView, String> {
+    let database_path = state.database_path.clone();
+    let app_data_dir = state.app_data_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut database = rusqlite::Connection::open(database_path)
+            .map_err(|error| format!("打开训练集数据库失败：{error}"))?;
+        database
+            .execute_batch("PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;")
+            .map_err(|error| format!("初始化训练集数据库连接失败：{error}"))?;
+        training_import::commit_import(&mut database, &app_data_dir, input)
+    })
+    .await
+    .map_err(|error| format!("训练集导入任务异常：{error}"))?
+}
+
 #[tauri::command]
 fn desktop_list_training_datasets(
     state: State<'_, DesktopState>,
@@ -659,6 +725,15 @@ fn desktop_update_training_caption(
     input: DesktopTrainingCaptionUpdateInput,
 ) -> Result<DesktopTrainingDatasetView, String> {
     state.update_training_caption(input)
+}
+
+/** 批量标签操作只跨越 WebView 一次，并由核心统一保证文件和 SQLite 回滚。 */
+#[tauri::command]
+fn desktop_batch_update_training_tags(
+    state: State<'_, DesktopState>,
+    input: DesktopTrainingBatchTagsInput,
+) -> Result<DesktopTrainingDatasetView, String> {
+    state.batch_update_training_tags(input)
 }
 
 /** 删除单张训练图片及未运行的打标关联，不触碰已提交训练任务快照。 */
@@ -708,6 +783,18 @@ fn desktop_list_caption_jobs(
     state.list_caption_jobs()
 }
 
+/** 暂停本地离线打标任务。 */
+#[tauri::command]
+fn desktop_pause_caption_job(state: State<'_, DesktopState>, id: String) -> Result<DesktopCaptionJobView, String> {
+    state.pause_caption_job(&id)
+}
+
+/** 恢复本地离线打标任务。 */
+#[tauri::command]
+fn desktop_resume_caption_job(state: State<'_, DesktopState>, id: String) -> Result<DesktopCaptionJobView, String> {
+    state.resume_caption_job(&id)
+}
+
 /** 幂等取消排队或运行中的本地离线打标任务。 */
 #[tauri::command]
 fn desktop_cancel_caption_job(
@@ -715,6 +802,115 @@ fn desktop_cancel_caption_job(
     id: String,
 ) -> Result<DesktopCaptionJobView, String> {
     state.cancel_caption_job(&id)
+}
+
+/** 创建单图或批量自动抠图任务。 */
+#[tauri::command]
+fn desktop_create_background_removal_job(
+    state: State<'_, DesktopState>,
+    input: DesktopBackgroundRemovalJobCreateInput,
+) -> Result<DesktopBackgroundRemovalJobView, String> {
+    state.create_background_removal_job(input)
+}
+
+/** 返回最近的自动抠图任务。 */
+#[tauri::command]
+fn desktop_list_background_removal_jobs(
+    state: State<'_, DesktopState>,
+) -> Result<Vec<DesktopBackgroundRemovalJobView>, String> {
+    state.list_background_removal_jobs()
+}
+
+/** 暂停自动抠图任务。 */
+#[tauri::command]
+fn desktop_pause_background_removal_job(state: State<'_, DesktopState>, id: String) -> Result<DesktopBackgroundRemovalJobView, String> {
+    state.pause_background_removal_job(&id)
+}
+
+/** 恢复自动抠图任务。 */
+#[tauri::command]
+fn desktop_resume_background_removal_job(state: State<'_, DesktopState>, id: String) -> Result<DesktopBackgroundRemovalJobView, String> {
+    state.resume_background_removal_job(&id)
+}
+
+/** 取消自动抠图任务。 */
+#[tauri::command]
+fn desktop_cancel_background_removal_job(state: State<'_, DesktopState>, id: String) -> Result<DesktopBackgroundRemovalJobView, String> {
+    state.cancel_background_removal_job(&id)
+}
+
+/** 保存手动编辑的 PNG alpha 蒙版并生成透明派生文件。 */
+#[tauri::command]
+fn desktop_save_training_manual_mask(
+    state: State<'_, DesktopState>,
+    input: DesktopTrainingManualMaskInput,
+) -> Result<DesktopTrainingDatasetView, String> {
+    state.save_training_manual_mask(input)
+}
+
+/** 选择后续训练快照使用的原图或派生版本。 */
+#[tauri::command]
+fn desktop_select_training_asset_variant(
+    state: State<'_, DesktopState>,
+    input: DesktopTrainingAssetVariantSelectInput,
+) -> Result<DesktopTrainingDatasetView, String> {
+    state.select_training_asset_variant(input)
+}
+
+/** 创建持久化 AI 标签清洗批次，只生成建议而不直接改写训练集。 */
+#[tauri::command]
+fn desktop_create_ai_clean_job(
+    state: State<'_, DesktopState>,
+    input: DesktopAiCleanJobCreateInput,
+) -> Result<DesktopAiCleanJobView, String> {
+    state.create_ai_clean_job(input)
+}
+
+/** 返回最近的 AI 标签清洗批次和逐图建议。 */
+#[tauri::command]
+fn desktop_list_ai_clean_jobs(
+    state: State<'_, DesktopState>,
+) -> Result<Vec<DesktopAiCleanJobView>, String> {
+    state.list_ai_clean_jobs()
+}
+
+/** 暂停 AI 标签清洗批次。 */
+#[tauri::command]
+fn desktop_pause_ai_clean_job(state: State<'_, DesktopState>, id: String) -> Result<DesktopAiCleanJobView, String> {
+    state.pause_ai_clean_job(&id)
+}
+
+/** 恢复 AI 标签清洗批次。 */
+#[tauri::command]
+fn desktop_resume_ai_clean_job(state: State<'_, DesktopState>, id: String) -> Result<DesktopAiCleanJobView, String> {
+    state.resume_ai_clean_job(&id)
+}
+
+/** 幂等取消排队或运行中的 AI 标签清洗批次。 */
+#[tauri::command]
+fn desktop_cancel_ai_clean_job(
+    state: State<'_, DesktopState>,
+    id: String,
+) -> Result<DesktopAiCleanJobView, String> {
+    state.cancel_ai_clean_job(&id)
+}
+
+/** 原子应用用户接受的 AI 删除和新增建议。 */
+#[tauri::command]
+fn desktop_apply_ai_clean(
+    state: State<'_, DesktopState>,
+    input: DesktopAiCleanApplyInput,
+) -> Result<DesktopTrainingDatasetView, String> {
+    state.apply_ai_clean(input)
+}
+
+/** 撤销未被后续人工编辑覆盖的 AI 清洗。 */
+#[tauri::command]
+fn desktop_undo_ai_clean(
+    state: State<'_, DesktopState>,
+    input: DesktopAiCleanUndoInput,
+) -> Result<DesktopTrainingDatasetView, String> {
+    state.undo_ai_clean(input)
 }
 
 /** 创建本地 LoRA 训练任务并立即返回持久化排队记录。 */
@@ -732,6 +928,24 @@ fn desktop_list_training_jobs(
     state: State<'_, DesktopState>,
 ) -> Result<Vec<DesktopTrainingJobView>, String> {
     state.list_training_jobs()
+}
+
+/** 返回训练任务创建时冻结的图片、标签来源和完整参数。 */
+#[tauri::command]
+fn desktop_get_training_snapshot(
+    state: State<'_, DesktopState>,
+    id: String,
+) -> Result<DesktopTrainingSnapshotView, String> {
+    state.get_training_snapshot(&id)
+}
+
+/** 从只读训练快照创建新的可编辑训练集，原训练集和历史任务保持不变。 */
+#[tauri::command]
+fn desktop_copy_training_snapshot(
+    state: State<'_, DesktopState>,
+    input: DesktopTrainingSnapshotCopyInput,
+) -> Result<DesktopTrainingDatasetView, String> {
+    state.copy_training_snapshot(input)
 }
 
 /** 幂等取消排队或运行中的本地 LoRA 训练任务。 */
@@ -787,7 +1001,9 @@ fn desktop_latest_local_job(
 
 /** 独立预览只读取设置，不触发主窗口的硬件、Runtime 和网络检测。 */
 #[tauri::command]
-fn desktop_load_preview_settings(state: State<'_, DesktopState>) -> Result<DesktopSettings, String> {
+fn desktop_load_preview_settings(
+    state: State<'_, DesktopState>,
+) -> Result<DesktopSettings, String> {
     state.load_settings()
 }
 
@@ -1012,18 +1228,40 @@ pub fn run() {
             desktop_apply_software_update,
             desktop_rollback_software_update,
             desktop_create_training_dataset,
+            desktop_delete_training_dataset,
+            desktop_preview_training_dataset_import,
+            desktop_import_training_dataset,
             desktop_list_training_datasets,
             desktop_update_training_trigger_words,
             desktop_add_training_images,
             desktop_update_training_caption,
+            desktop_batch_update_training_tags,
             desktop_delete_training_asset,
             desktop_translate_training_tags,
             desktop_create_caption_job,
             desktop_list_caption_jobs,
+            desktop_pause_caption_job,
+            desktop_resume_caption_job,
             desktop_cancel_caption_job,
+            desktop_create_background_removal_job,
+            desktop_list_background_removal_jobs,
+            desktop_pause_background_removal_job,
+            desktop_resume_background_removal_job,
+            desktop_cancel_background_removal_job,
+            desktop_save_training_manual_mask,
+            desktop_select_training_asset_variant,
+            desktop_create_ai_clean_job,
+            desktop_list_ai_clean_jobs,
+            desktop_pause_ai_clean_job,
+            desktop_resume_ai_clean_job,
+            desktop_cancel_ai_clean_job,
+            desktop_apply_ai_clean,
+            desktop_undo_ai_clean,
             desktop_confirm_training_dataset,
             desktop_create_training_job,
             desktop_list_training_jobs,
+            desktop_get_training_snapshot,
+            desktop_copy_training_snapshot,
             desktop_cancel_training_job,
             desktop_create_local_job,
             desktop_list_local_jobs,

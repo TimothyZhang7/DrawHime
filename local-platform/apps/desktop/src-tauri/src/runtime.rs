@@ -1,6 +1,9 @@
 //! 本模块管理桌面端唯一 ComfyUI 子进程，负责回环启动、健康探测、自检、日志与退出回收。
 
-use crate::{models::{DesktopRuntimeStatusView, DesktopSettings}, process::hide_window};
+use crate::{
+    models::{DesktopRuntimeStatusView, DesktopSettings},
+    process::hide_window,
+};
 use chrono::Utc;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
@@ -74,7 +77,9 @@ impl RuntimeController {
 
     /** 启动桌面状态前回收上次崩溃遗留的已验证 Runtime，避免孤儿进程继续占用 GPU。 */
     pub fn initialize(app_data_dir: &Path) -> Result<Self, String> {
-        let lease_path = app_data_dir.join("runtime-state").join("runtime-process.json");
+        let lease_path = app_data_dir
+            .join("runtime-state")
+            .join("runtime-process.json");
         recover_orphan_runtime(&lease_path)?;
         Ok(Self::with_lease_path(Some(lease_path)))
     }
@@ -459,9 +464,18 @@ fn stop_child(process: &mut RuntimeProcess) {
 }
 
 /** 原子记录桌面与 Runtime 进程身份，崩溃后只允许回收完全匹配的自有进程。 */
-fn persist_runtime_lease(process: &RuntimeProcess, runtime_pid: u32, port: u16, runtime_executable: &Path, runtime_entrypoint: &Path) -> Result<(), String> {
-    let Some(path) = process.lease_path.as_ref() else { return Ok(()); };
-    let owner_executable = std::env::current_exe().map_err(|error| format!("读取桌面进程路径失败：{error}"))?;
+fn persist_runtime_lease(
+    process: &RuntimeProcess,
+    runtime_pid: u32,
+    port: u16,
+    runtime_executable: &Path,
+    runtime_entrypoint: &Path,
+) -> Result<(), String> {
+    let Some(path) = process.lease_path.as_ref() else {
+        return Ok(());
+    };
+    let owner_executable =
+        std::env::current_exe().map_err(|error| format!("读取桌面进程路径失败：{error}"))?;
     let lease = RuntimeLease {
         owner_pid: std::process::id(),
         owner_executable: owner_executable.to_string_lossy().into_owned(),
@@ -471,10 +485,17 @@ fn persist_runtime_lease(process: &RuntimeProcess, runtime_pid: u32, port: u16, 
         port,
         started_at: Utc::now().to_rfc3339(),
     };
-    let parent = path.parent().ok_or_else(|| "Runtime 租约目录不正确".to_string())?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| "Runtime 租约目录不正确".to_string())?;
     fs::create_dir_all(parent).map_err(|error| format!("创建 Runtime 租约目录失败：{error}"))?;
     let temporary = parent.join(format!("runtime-process.{}.tmp", Uuid::new_v4()));
-    fs::write(&temporary, serde_json::to_vec_pretty(&lease).map_err(|error| format!("生成 Runtime 租约失败：{error}"))?).map_err(|error| format!("写入 Runtime 租约失败：{error}"))?;
+    fs::write(
+        &temporary,
+        serde_json::to_vec_pretty(&lease)
+            .map_err(|error| format!("生成 Runtime 租约失败：{error}"))?,
+    )
+    .map_err(|error| format!("写入 Runtime 租约失败：{error}"))?;
     if let Err(error) = fs::rename(&temporary, path) {
         let _ = fs::remove_file(&temporary);
         return Err(format!("切换 Runtime 租约失败：{error}"));
@@ -483,20 +504,31 @@ fn persist_runtime_lease(process: &RuntimeProcess, runtime_pid: u32, port: u16, 
 }
 
 fn remove_runtime_lease(process: &RuntimeProcess) {
-    if let Some(path) = process.lease_path.as_ref() { let _ = fs::remove_file(path); }
+    if let Some(path) = process.lease_path.as_ref() {
+        let _ = fs::remove_file(path);
+    }
 }
 
 /** 校验租约、桌面宿主和 Python 命令行后回收孤儿；PID 复用或身份不符时只清理失效租约。 */
 fn recover_orphan_runtime(path: &Path) -> Result<(), String> {
-    if !path.is_file() { return Ok(()); }
-    let metadata = fs::metadata(path).map_err(|error| format!("读取 Runtime 租约状态失败：{error}"))?;
+    if !path.is_file() {
+        return Ok(());
+    }
+    let metadata =
+        fs::metadata(path).map_err(|error| format!("读取 Runtime 租约状态失败：{error}"))?;
     if metadata.len() == 0 || metadata.len() > RUNTIME_LEASE_MAX_BYTES {
         fs::remove_file(path).map_err(|error| format!("清理异常 Runtime 租约失败：{error}"))?;
         return Ok(());
     }
-    let lease = match fs::read(path).ok().and_then(|bytes| serde_json::from_slice::<RuntimeLease>(&bytes).ok()) {
+    let lease = match fs::read(path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<RuntimeLease>(&bytes).ok())
+    {
         Some(lease) => lease,
-        None => { fs::remove_file(path).map_err(|error| format!("清理损坏 Runtime 租约失败：{error}"))?; return Ok(()); }
+        None => {
+            fs::remove_file(path).map_err(|error| format!("清理损坏 Runtime 租约失败：{error}"))?;
+            return Ok(());
+        }
     };
     #[cfg(windows)]
     {
@@ -506,7 +538,9 @@ fn recover_orphan_runtime(path: &Path) -> Result<(), String> {
             }
         }
         if let Some(runtime) = windows_process_identity(lease.runtime_pid)? {
-            if runtime_process_matches(&runtime, &lease) { terminate_windows_process_tree(lease.runtime_pid)?; }
+            if runtime_process_matches(&runtime, &lease) {
+                terminate_windows_process_tree(lease.runtime_pid)?;
+            }
         }
     }
     fs::remove_file(path).map_err(|error| format!("清理旧 Runtime 租约失败：{error}"))
@@ -515,27 +549,54 @@ fn recover_orphan_runtime(path: &Path) -> Result<(), String> {
 #[cfg(windows)]
 fn windows_process_identity(pid: u32) -> Result<Option<WindowsProcessIdentity>, String> {
     let script = format!("$p=Get-CimInstance Win32_Process -Filter 'ProcessId={pid}';if($null -eq $p){{exit 3}};[ordered]@{{executablePath=[string]$p.ExecutablePath;commandLine=[string]$p.CommandLine}}|ConvertTo-Json -Compress");
-    let output = hide_window(&mut Command::new("powershell.exe")).args(["-NoProfile", "-NonInteractive", "-Command", &script]).output().map_err(|error| format!("查询 Runtime 进程身份失败：{error}"))?;
-    if output.status.code() == Some(3) { return Ok(None); }
-    if !output.status.success() { return Err("查询 Runtime 进程身份失败".into()); }
-    serde_json::from_slice(&output.stdout).map(Some).map_err(|error| format!("解析 Runtime 进程身份失败：{error}"))
+    let output = hide_window(&mut Command::new("powershell.exe"))
+        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+        .output()
+        .map_err(|error| format!("查询 Runtime 进程身份失败：{error}"))?;
+    if output.status.code() == Some(3) {
+        return Ok(None);
+    }
+    if !output.status.success() {
+        return Err("查询 Runtime 进程身份失败".into());
+    }
+    serde_json::from_slice(&output.stdout)
+        .map(Some)
+        .map_err(|error| format!("解析 Runtime 进程身份失败：{error}"))
 }
 
 #[cfg(windows)]
 fn runtime_process_matches(identity: &WindowsProcessIdentity, lease: &RuntimeLease) -> bool {
     same_windows_path(&identity.executable_path, &lease.runtime_executable)
-        && identity.command_line.to_ascii_lowercase().contains(&lease.runtime_entrypoint.replace('/', "\\").to_ascii_lowercase())
-        && identity.command_line.contains(&format!("--port {}", lease.port))
+        && identity.command_line.to_ascii_lowercase().contains(
+            &lease
+                .runtime_entrypoint
+                .replace('/', "\\")
+                .to_ascii_lowercase(),
+        )
+        && identity
+            .command_line
+            .contains(&format!("--port {}", lease.port))
         && identity.command_line.contains("--listen 127.0.0.1")
 }
 
 #[cfg(windows)]
-fn same_windows_path(left: &str, right: &str) -> bool { left.replace('/', "\\").eq_ignore_ascii_case(&right.replace('/', "\\")) }
+fn same_windows_path(left: &str, right: &str) -> bool {
+    left.replace('/', "\\")
+        .eq_ignore_ascii_case(&right.replace('/', "\\"))
+}
 
 #[cfg(windows)]
 fn terminate_windows_process_tree(pid: u32) -> Result<(), String> {
-    let status = hide_window(&mut Command::new("taskkill")).args(["/PID", &pid.to_string(), "/T", "/F"]).output().map_err(|error| format!("回收孤儿 Runtime 失败：{error}"))?.status;
-    if status.success() || windows_process_identity(pid)?.is_none() { Ok(()) } else { Err("回收孤儿 Runtime 失败".into()) }
+    let status = hide_window(&mut Command::new("taskkill"))
+        .args(["/PID", &pid.to_string(), "/T", "/F"])
+        .output()
+        .map_err(|error| format!("回收孤儿 Runtime 失败：{error}"))?
+        .status;
+    if status.success() || windows_process_identity(pid)?.is_none() {
+        Ok(())
+    } else {
+        Err("回收孤儿 Runtime 失败".into())
+    }
 }
 
 fn mark_runtime_ready(root: &Path) -> Result<(), String> {
@@ -598,10 +659,21 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn runtime_lease_requires_exact_executable_entrypoint_and_port() {
-        let lease = RuntimeLease { owner_pid: 1, owner_executable: r"C:\DrawHime\drawhime-desktop.exe".into(), runtime_pid: 2, runtime_executable: r"C:\Runtime\python.exe".into(), runtime_entrypoint: r"C:\Runtime\ComfyUI\main.py".into(), port: 50123, started_at: Utc::now().to_rfc3339() };
+        let lease = RuntimeLease {
+            owner_pid: 1,
+            owner_executable: r"C:\DrawHime\drawhime-desktop.exe".into(),
+            runtime_pid: 2,
+            runtime_executable: r"C:\Runtime\python.exe".into(),
+            runtime_entrypoint: r"C:\Runtime\ComfyUI\main.py".into(),
+            port: 50123,
+            started_at: Utc::now().to_rfc3339(),
+        };
         let matching = WindowsProcessIdentity { executable_path: r"c:\runtime\PYTHON.EXE".into(), command_line: r#""C:\Runtime\python.exe" -s C:\Runtime\ComfyUI\main.py --listen 127.0.0.1 --port 50123"#.into() };
         assert!(runtime_process_matches(&matching, &lease));
-        let reused_pid = WindowsProcessIdentity { executable_path: r"C:\Windows\python.exe".into(), command_line: matching.command_line.clone() };
+        let reused_pid = WindowsProcessIdentity {
+            executable_path: r"C:\Windows\python.exe".into(),
+            command_line: matching.command_line.clone(),
+        };
         assert!(!runtime_process_matches(&reused_pid, &lease));
     }
 

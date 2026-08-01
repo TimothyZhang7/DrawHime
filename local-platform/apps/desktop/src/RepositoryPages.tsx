@@ -1,12 +1,12 @@
 /**
  * 本文件实现桌面底模与 LoRA 仓库的合并卡片、详情、下载状态和本机导入界面。
  */
-import type { DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopManagedFileRemovalView, DesktopWebsiteLoraInstallProgress, DesktopWebsiteLoraView, DesktopWebsiteModelInstallProgress, DesktopWebsiteModelView } from "@drawhime/contracts";
+import type { DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopManagedFileRemovalView, DesktopTrainingDatasetView, DesktopTrainingJobView, DesktopTrainingSnapshotView, DesktopWebsiteLoraInstallProgress, DesktopWebsiteLoraView, DesktopWebsiteModelInstallProgress, DesktopWebsiteModelView } from "@drawhime/contracts";
 import { ArrowLeft, CheckCircle2, ChevronRight, Copy, Database, Download, FolderCog, HardDrive, Image, Layers3, LoaderCircle, PackageOpen, Plus, RefreshCw, Search, Settings2, ShieldCheck, Trash2, X } from "lucide-react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { useMemo, useState, type ReactNode } from "react";
-import { deleteDesktopLocalLoraFile, deleteDesktopLocalModelFile, importDesktopLocalLora, importDesktopLocalModel } from "./desktop-api";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { copyDesktopTrainingSnapshot, deleteDesktopLocalLoraFile, deleteDesktopLocalModelFile, getDesktopTrainingSnapshot, importDesktopLocalLora, importDesktopLocalModel } from "./desktop-api";
 
 /** 以首图本机路径索引同一仓库条目的全部示例图，现有卡片接口无需暴露远端媒体地址。 */
 const repositoryExamplePaths = new Map<string, string[]>();
@@ -69,7 +69,7 @@ export function ModelRepositoryPage({ models, websiteModels, jobs, websiteProgre
 }
 
 /** 合并主站与本机 LoRA，以版本 SHA-256 作为安装状态的唯一判断依据。 */
-export function LoraRepositoryPage({ loras, websiteLoras, jobs, progress, accountConnected, modelRoot, onRefresh, onInstall, onImported, onDeleted, onError }: { loras: DesktopLocalLoraView[]; websiteLoras: DesktopWebsiteLoraView[]; jobs: DesktopLocalJobView[]; progress: Record<string, DesktopWebsiteLoraInstallProgress>; accountConnected: boolean; modelRoot: string; onRefresh: () => void; onInstall: (id: string) => void; onImported: (lora: DesktopLocalLoraView) => void; onDeleted: (result: DesktopManagedFileRemovalView) => void; onError: (message: string) => void }) {
+export function LoraRepositoryPage({ loras, websiteLoras, jobs, trainingJobs, progress, accountConnected, modelRoot, onRefresh, onInstall, onImported, onDatasetCopied, onDeleted, onError }: { loras: DesktopLocalLoraView[]; websiteLoras: DesktopWebsiteLoraView[]; jobs: DesktopLocalJobView[]; trainingJobs: DesktopTrainingJobView[]; progress: Record<string, DesktopWebsiteLoraInstallProgress>; accountConnected: boolean; modelRoot: string; onRefresh: () => void; onInstall: (id: string) => void; onImported: (lora: DesktopLocalLoraView) => void; onDatasetCopied: (dataset: DesktopTrainingDatasetView) => void; onDeleted: (result: DesktopManagedFileRemovalView) => void; onError: (message: string) => void }) {
   const entries = useMemo(() => mergeLoraEntries(loras, websiteLoras), [loras, websiteLoras]);
   const [query, setQuery] = useState("");
   const [type, setType] = useState("all");
@@ -80,8 +80,9 @@ export function LoraRepositoryPage({ loras, websiteLoras, jobs, progress, accoun
   const selected = entries.find((entry) => entry.key === selectedKey) || null;
   const filtered = entries.filter((entry) => (type === "all" || entry.type === type) && (!localOnly || Boolean(entry.local?.available)) && searchable(`${entry.title} ${entry.description} ${entry.modelFamilyName} ${entry.website?.triggerWords.join(" ") || entry.local?.triggerWords.join(" ") || ""}`, query));
   if (selected) {
+    const sourceJob = selected.local ? trainingJobs.find((job) => job.outputLoraId === selected.local?.id) || null : null;
     const remove = async () => { if (!selected.local?.available || deleting || !window.confirm(`删除本机 LoRA 文件“${selected.title}”？历史任务记录会保留。`)) return; setDeleting(true); try { onDeleted(await deleteDesktopLocalLoraFile({ id: selected.local.id })); } catch (error) { onError(errorMessage(error)); } finally { setDeleting(false); } };
-    return <LoraDetail entry={selected} jobs={jobs} modelRoot={modelRoot} progress={selected.website ? progress[selected.website.id] : undefined} deleting={deleting} onBack={() => setSelectedKey(null)} onInstall={() => selected.website && onInstall(selected.website.id)} onDelete={() => void remove()} />;
+    return <LoraDetail entry={selected} jobs={jobs} sourceJob={sourceJob} modelRoot={modelRoot} progress={selected.website ? progress[selected.website.id] : undefined} deleting={deleting} onBack={() => setSelectedKey(null)} onInstall={() => selected.website && onInstall(selected.website.id)} onDelete={() => void remove()} onDatasetCopied={onDatasetCopied} onError={onError} />;
   }
   return <div className="desktop-page repository-page">
     <RepositoryToolbar title="LoRA 仓库" count={filtered.length} query={query} localOnly={localOnly} accountConnected={accountConnected} onQuery={setQuery} onLocalOnly={setLocalOnly} onRefresh={onRefresh} onImport={() => setImportOpen(true)} extra={<select aria-label="LoRA 类型" value={type} onChange={(event) => setType(event.target.value)}><option value="all">全部类型</option>{["style", "character", "concept", "clothing", "pose", "other"].map((value) => <option key={value} value={value}>{loraTypeLabel(value)}</option>)}</select>} />
@@ -116,14 +117,53 @@ function ModelDetail({ entry, jobs, modelRoot, busy, deleting, progress, onBack,
   return <div className="desktop-page repository-detail"><button className="repository-back" onClick={onBack}><ArrowLeft />返回底模仓库</button><section className="repository-detail-hero"><RepositoryCover path={entry.coverPath} fallback="MODEL" /><div className="repository-detail-summary"><div className="repository-detail-tags">{local && <b>已安装</b>}<i>{entry.familyName}</i>{runtimeFormat.toLocaleLowerCase() !== entry.familyName.toLocaleLowerCase() && <i>{runtimeFormat}</i>}</div><h1>{entry.displayName}</h1><p>{entry.description}</p><div className="repository-detail-actions">{local ? <><button disabled><CheckCircle2 />已安装，可直接生成</button><button className="danger" disabled={deleting} onClick={onDelete}>{deleting ? <LoaderCircle className="spin" /> : <Trash2 />}{deleting ? "正在删除" : "删除本地文件"}</button></> : installable ? <button className="primary" disabled={busy} onClick={onInstall}>{busy ? <LoaderCircle className="spin" /> : <Download />}{busy ? progress.label : `下载并安装 · ${formatBytes(missingBytes)}`}</button> : <button onClick={onOpenSettings}><FolderCog />设置模型目录</button>}</div>{progress.percent !== null && <div className="repository-detail-progress"><i style={{ width: `${progress.percent}%` }} /><span>{progress.label} · {progress.percent}%</span></div>}</div></section><section className="repository-detail-grid"><article><header><ShieldCheck /><strong>模型信息</strong></header><dl><InfoRow label="模型系列" value={entry.familyName} /><InfoRow label="文件名称" value={entry.fileName} /><InfoRow label="本机状态" value={local ? "文件校验通过" : website?.download ? "可从主站安装" : "仅提供仓库信息"} /><InfoRow label="待下载" value={local ? "无需下载" : installable ? formatBytes(missingBytes) : "未提供安装资源"} /><InfoRow label="存储目录" value={modelRoot} /></dl></article><article><header><HardDrive /><strong>推荐参数</strong></header><dl><InfoRow label="步数" value={String(website?.parameters.steps ?? "-")} /><InfoRow label="CFG" value={String(website?.parameters.cfg ?? "-")} /><InfoRow label="采样器" value={website?.parameters.sampler || "-"} /><InfoRow label="调度器" value={website?.parameters.scheduler || "-"} /><InfoRow label="最大边长" value={website?.parameters.maxEdge ? `${website.parameters.maxEdge}px` : "-"} /></dl></article></section><RepositoryExamples paths={examples} title="模型示例" /><RelatedJobs jobs={relatedJobs} title="使用该模型的任务" />{website?.usageGuide && <section className="repository-detail-copy"><h3>使用说明</h3><p>{website.usageGuide}</p></section>}{website?.sourceLinks.length ? <section className="repository-detail-copy"><h3>模型来源</h3><div className="repository-source-list">{website.sourceLinks.map((source) => <button key={source.url} onClick={() => void navigator.clipboard.writeText(source.url)}><Copy />复制 {source.label}</button>)}</div></section> : null}</div>;
 }
 
-function LoraDetail({ entry, jobs, modelRoot, progress, deleting, onBack, onInstall, onDelete }: { entry: LoraRepositoryEntry; jobs: DesktopLocalJobView[]; modelRoot: string; progress?: DesktopWebsiteLoraInstallProgress; deleting: boolean; onBack: () => void; onInstall: () => void; onDelete: () => void }) {
+function LoraDetail({ entry, jobs, sourceJob, modelRoot, progress, deleting, onBack, onInstall, onDelete, onDatasetCopied, onError }: { entry: LoraRepositoryEntry; jobs: DesktopLocalJobView[]; sourceJob: DesktopTrainingJobView | null; modelRoot: string; progress?: DesktopWebsiteLoraInstallProgress; deleting: boolean; onBack: () => void; onInstall: () => void; onDelete: () => void; onDatasetCopied: (dataset: DesktopTrainingDatasetView) => void; onError: (message: string) => void }) {
   const local = Boolean(entry.local?.available);
   const running = Boolean(progress && ["downloading", "verifying", "installing"].includes(progress.status));
   const percent = progress ? Math.min(100, Math.round(progress.downloadedBytes / Math.max(1, progress.totalBytes) * 100)) : null;
   const triggers = entry.website?.triggerWords || entry.local?.triggerWords || [];
   const relatedJobs = jobs.filter((job) => job.loras.some((lora) => entry.local ? lora.id === entry.local.id || lora.sha256 === entry.local.sha256 : lora.sha256 === entry.website?.sha256));
   const examples = entry.website?.examplePaths.length ? entry.website.examplePaths : relatedJobs.flatMap((job) => job.artifact ? [job.artifact.path] : []).slice(0, 12);
-  return <div className="desktop-page repository-detail"><button className="repository-back" onClick={onBack}><ArrowLeft />返回 LoRA 仓库</button><section className="repository-detail-hero"><RepositoryCover path={entry.coverPath} fallback="LORA" /><div className="repository-detail-summary"><div className="repository-detail-tags">{local && <b>已安装</b>}<i>{loraTypeLabel(entry.type)}</i>{entry.website?.privacy === "private" && <i>私有</i>}</div><h1>{entry.title}</h1><p>{entry.description || "当前条目未填写详细说明。"}</p><div className="repository-detail-actions">{local ? <><button disabled><CheckCircle2 />已安装，可用于生成</button><button className="danger" disabled={deleting} onClick={onDelete}>{deleting ? <LoaderCircle className="spin" /> : <Trash2 />}{deleting ? "正在删除" : "删除本地文件"}</button></> : entry.website ? <button className="primary" disabled={running} onClick={onInstall}>{running ? <LoaderCircle className="spin" /> : <Download />}{running ? loraProgressLabel(progress!) : `下载到本机 · ${formatBytes(entry.website.byteSize)}`}</button> : null}</div>{percent !== null && <div className="repository-detail-progress"><i style={{ width: `${percent}%` }} /><span>{loraProgressLabel(progress!)} · {percent}%</span></div>}</div></section><section className="repository-detail-grid"><article><header><Layers3 /><strong>LoRA 信息</strong></header><dl><InfoRow label="类型" value={loraTypeLabel(entry.type)} /><InfoRow label="适用底模" value={entry.modelFamilyName} /><InfoRow label="文件名称" value={entry.website?.fileName || entry.local?.fileName || "-"} /><InfoRow label="文件大小" value={formatBytes(entry.website?.byteSize || entry.local?.byteSize || 0)} /></dl></article><article><header><HardDrive /><strong>本机状态</strong></header><dl><InfoRow label="状态" value={local ? "文件校验通过" : entry.website ? "可从主站下载" : "本地文件发生变化"} /><InfoRow label="存储位置" value={joinPath(modelRoot, "loras", entry.local?.fileName || entry.website?.fileName || "")} /><InfoRow label="作者" value={entry.website?.ownerDisplayName || "本机导入"} /><InfoRow label="更新时间" value={entry.local ? new Date(entry.local.updatedAt).toLocaleString("zh-CN") : "随主站同步"} /></dl></article></section><section className="repository-detail-copy"><h3>触发词</h3>{triggers.length ? <div className="repository-trigger-list">{triggers.map((trigger) => <button key={trigger} onClick={() => void navigator.clipboard.writeText(trigger)}>{trigger}<Copy /></button>)}</div> : <p>该 LoRA 未设置触发词，可直接按说明使用。</p>}</section><RepositoryExamples paths={examples} title="LoRA 示例" /><RelatedJobs jobs={relatedJobs} title="使用该 LoRA 的任务" /></div>;
+  const [snapshot, setSnapshot] = useState<DesktopTrainingSnapshotView | null>(null);
+  const [snapshotLoading, setSnapshotLoading] = useState(false);
+  const [copying, setCopying] = useState(false);
+  const [copyTitle, setCopyTitle] = useState(sourceJob ? `${sourceJob.datasetTitle} 副本` : "");
+  useEffect(() => {
+    let active = true;
+    setSnapshot(null);
+    setCopyTitle(sourceJob ? `${sourceJob.datasetTitle} 副本` : "");
+    if (!sourceJob) return () => { active = false; };
+    setSnapshotLoading(true);
+    void getDesktopTrainingSnapshot(sourceJob.id).then((value) => { if (active) setSnapshot(value); }).catch((error) => { if (active) onError(errorMessage(error)); }).finally(() => { if (active) setSnapshotLoading(false); });
+    return () => { active = false; };
+  }, [sourceJob?.id]);
+  /** 快照复制由 Rust 事务创建全新训练集，界面只回写新记录。 */
+  const copySnapshot = async () => {
+    if (!sourceJob || !copyTitle.trim() || copying) return;
+    setCopying(true);
+    try {
+      const dataset = await copyDesktopTrainingSnapshot({ jobId: sourceJob.id, title: copyTitle.trim() });
+      onDatasetCopied(dataset);
+      onError(`已从训练快照创建“${dataset.title}”`);
+    } catch (error) {
+      onError(errorMessage(error));
+    } finally {
+      setCopying(false);
+    }
+  };
+  return <div className="desktop-page repository-detail">
+    <button className="repository-back" onClick={onBack}><ArrowLeft />返回 LoRA 仓库</button>
+    <section className="repository-detail-hero"><RepositoryCover path={entry.coverPath} fallback="LORA" /><div className="repository-detail-summary"><div className="repository-detail-tags">{local && <b>已安装</b>}<i>{loraTypeLabel(entry.type)}</i>{entry.website?.privacy === "private" && <i>私有</i>}</div><h1>{entry.title}</h1><p>{entry.description || "当前条目未填写详细说明。"}</p><div className="repository-detail-actions">{local ? <><button disabled><CheckCircle2 />已安装，可用于生成</button><button className="danger" disabled={deleting} onClick={onDelete}>{deleting ? <LoaderCircle className="spin" /> : <Trash2 />}{deleting ? "正在删除" : "删除本地文件"}</button></> : entry.website ? <button className="primary" disabled={running} onClick={onInstall}>{running ? <LoaderCircle className="spin" /> : <Download />}{running ? loraProgressLabel(progress!) : `下载到本机 · ${formatBytes(entry.website.byteSize)}`}</button> : null}</div>{percent !== null && <div className="repository-detail-progress"><i style={{ width: `${percent}%` }} /><span>{loraProgressLabel(progress!)} · {percent}%</span></div>}</div></section>
+    <section className="repository-detail-grid"><article><header><Layers3 /><strong>LoRA 信息</strong></header><dl><InfoRow label="类型" value={loraTypeLabel(entry.type)} /><InfoRow label="适用底模" value={entry.modelFamilyName} /><InfoRow label="文件名称" value={entry.website?.fileName || entry.local?.fileName || "-"} /><InfoRow label="文件大小" value={formatBytes(entry.website?.byteSize || entry.local?.byteSize || 0)} /></dl></article><article><header><HardDrive /><strong>本机状态</strong></header><dl><InfoRow label="状态" value={local ? "文件校验通过" : entry.website ? "可从主站下载" : "本地文件发生变化"} /><InfoRow label="存储位置" value={joinPath(modelRoot, "loras", entry.local?.fileName || entry.website?.fileName || "")} /><InfoRow label="作者" value={entry.website?.ownerDisplayName || "本机导入"} /><InfoRow label="更新时间" value={entry.local ? new Date(entry.local.updatedAt).toLocaleString("zh-CN") : "随主站同步"} /></dl></article></section>
+    <section className="repository-detail-copy"><h3>触发词</h3>{triggers.length ? <div className="repository-trigger-list">{triggers.map((trigger) => <button key={trigger} onClick={() => void navigator.clipboard.writeText(trigger)}>{trigger}<Copy /></button>)}</div> : <p>该 LoRA 未设置触发词，可直接按说明使用。</p>}</section>
+    {sourceJob && <TrainingSnapshotSection job={sourceJob} snapshot={snapshot} loading={snapshotLoading} copyTitle={copyTitle} copying={copying} onCopyTitle={setCopyTitle} onCopy={() => void copySnapshot()} />}
+    <RepositoryExamples paths={examples} title="LoRA 示例" /><RelatedJobs jobs={relatedJobs} title="使用该 LoRA 的任务" />
+  </div>;
+}
+
+/** LoRA 来源区只展示任务创建时的只读快照，避免把后来修改的训练集误作历史事实。 */
+function TrainingSnapshotSection({ job, snapshot, loading, copyTitle, copying, onCopyTitle, onCopy }: { job: DesktopTrainingJobView; snapshot: DesktopTrainingSnapshotView | null; loading: boolean; copyTitle: string; copying: boolean; onCopyTitle: (value: string) => void; onCopy: () => void }) {
+  return <section className="repository-training-source"><header><Database /><div><span>TRAINING SNAPSHOT</span><h3>来源训练集</h3></div><small>{job.assetCount} 张</small></header><div className="repository-training-summary"><dl><InfoRow label="训练集" value={job.datasetTitle} /><InfoRow label="创建时间" value={new Date(job.createdAt).toLocaleString("zh-CN")} /><InfoRow label="训练类型" value={loraTypeLabel(job.type)} /><InfoRow label="训练轮次" value={`${job.parameters.epochs} Epoch · ${job.parameters.repeats} 次重复`} /><InfoRow label="Rank / Alpha" value={`${job.parameters.rank} / ${job.parameters.alpha}`} /><InfoRow label="分辨率" value={`${job.parameters.resolution}px`} /></dl><div><strong>触发词</strong><p>{job.triggerWords.join(", ") || "未设置"}</p><label><span>复制为新训练集</span><input value={copyTitle} maxLength={191} onChange={(event) => onCopyTitle(event.target.value)} /></label><button className="primary" disabled={copying || !copyTitle.trim()} onClick={onCopy}>{copying ? <LoaderCircle className="spin" /> : <Copy />}{copying ? "正在复制" : "创建可编辑副本"}</button></div></div>{loading && <div className="repository-detail-empty"><LoaderCircle className="spin" />正在读取冻结快照</div>}{snapshot && <details className="repository-training-snapshot"><summary>查看完整快照 · {snapshot.assets.length} 张图片</summary><div>{snapshot.assets.map((asset) => <article key={`${asset.sequence}-${asset.sha256}`}><img loading="lazy" decoding="async" src={convertFileSrc(asset.path)} alt={asset.fileName} /><div><strong>{asset.fileName}</strong><small>{formatBytes(asset.byteSize)} · {asset.sha256.slice(0, 12)}</small><p>{asset.tags.map((tag) => `${tag.value} [${trainingTagSourceLabel(tag.source)}]`).join(", ")}</p></div></article>)}</div></details>}</section>;
 }
 
 function RepositoryCover({ path, fallback }: { path: string | null; fallback: string }) {
@@ -201,6 +241,8 @@ function websiteModelProgress(progress?: DesktopWebsiteModelInstallProgress): { 
 function searchable(value: string, query: string): boolean { return !query.trim() || value.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()); }
 function joinPath(root: string, ...segments: string[]): string { const separator = root.includes("\\") ? "\\" : "/"; return [root.replace(/[\\/]$/, ""), ...segments.filter(Boolean)].join(separator); }
 function loraTypeLabel(type: string): string { return { style: "画风", character: "角色", concept: "概念", clothing: "服装", pose: "姿势", other: "其他" }[type] || "其他"; }
+/** 标签来源名称与训练集编辑页保持一致，快照中不丢失审计语义。 */
+function trainingTagSourceLabel(source: string): string { return { auto: "自动", ai_cleaned: "AI 清洗", manual: "手动", imported: "导入", trigger: "触发词" }[source] || source; }
 function loraProgressLabel(progress: DesktopWebsiteLoraInstallProgress): string { return { downloading: "正在下载", verifying: "正在校验", installing: "正在安装", installed: "安装完成", failed: "安装失败" }[progress.status] || progress.status; }
 function formatBytes(bytes: number): string { if (!bytes) return "大小未知"; const units = ["B", "KiB", "MiB", "GiB"]; const index = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024))); return `${(bytes / 1024 ** index).toFixed(index > 1 ? 1 : 0)} ${units[index]}`; }
 function errorMessage(error: unknown): string { return error instanceof Error ? error.message : String(error); }

@@ -1,12 +1,19 @@
 //! 本模块管理桌面端独立 SQLite、目录设置和图库同步队列，不连接网页或独立平台数据库。
 
+use crate::ai_cleaner::AiCleanScheduler;
+use crate::background_removal::BackgroundRemovalScheduler;
 use crate::captioner::CaptionScheduler;
 use crate::gallery_sync::GallerySyncScheduler;
 use crate::models::{
-    DesktopAiSettings, DesktopCaptionJobCreateInput, DesktopCaptionJobView,
-    DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraView, DesktopLocalModelView,
-    DesktopSettings, DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput,
-    DesktopTrainingDatasetView, DesktopTrainingJobCreateInput, DesktopTrainingJobView,
+    DesktopAiCleanApplyInput, DesktopAiCleanJobCreateInput, DesktopAiCleanJobView,
+    DesktopAiCleanUndoInput, DesktopAiSettings, DesktopBackgroundRemovalJobCreateInput,
+    DesktopBackgroundRemovalJobView, DesktopCaptionJobCreateInput, DesktopCaptionJobView,
+    DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraView,
+    DesktopLocalModelView, DesktopSettings, DesktopTrainingBatchTagsInput,
+    DesktopTrainingCaptionUpdateInput,
+    DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetView, DesktopTrainingJobCreateInput,
+    DesktopTrainingJobView, DesktopTrainingManualMaskInput, DesktopTrainingSnapshotCopyInput,
+    DesktopTrainingSnapshotView, DesktopTrainingAssetVariantSelectInput,
     DesktopTrainingTriggerWordsUpdateInput, DesktopWebsiteModelView, GalleryPublicationInput,
     GallerySyncItem,
 };
@@ -31,6 +38,8 @@ pub struct DesktopState {
     pub database_path: PathBuf,
     pub scheduler: Option<LocalScheduler>,
     pub caption_scheduler: Option<CaptionScheduler>,
+    pub background_removal_scheduler: Option<BackgroundRemovalScheduler>,
+    pub ai_clean_scheduler: Option<AiCleanScheduler>,
     pub training_scheduler: Option<TrainingScheduler>,
     pub gallery_sync_scheduler: Option<GallerySyncScheduler>,
     pub runtime: Arc<RuntimeController>,
@@ -53,12 +62,19 @@ impl DesktopState {
             CREATE TABLE IF NOT EXISTS gallery_sync_queue (id TEXT PRIMARY KEY, local_task_id TEXT NOT NULL, artifact_path TEXT NOT NULL, artifact_sha256 TEXT NOT NULL, privacy TEXT NOT NULL, status TEXT NOT NULL, uploaded_bytes INTEGER NOT NULL DEFAULT 0, retry_count INTEGER NOT NULL DEFAULT 0, gallery_item_id TEXT, last_error TEXT, owner_issuer TEXT, owner_subject TEXT, server_upload_id TEXT, next_attempt_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(local_task_id, artifact_sha256));
             CREATE TABLE IF NOT EXISTS local_models (id TEXT PRIMARY KEY, display_name TEXT NOT NULL, family TEXT NOT NULL, workflow_kind TEXT NOT NULL, model_file_name TEXT NOT NULL, model_relative_path TEXT NOT NULL, model_sha256 TEXT NOT NULL, byte_size INTEGER NOT NULL, model_modified_ms INTEGER NOT NULL, text_encoder_file_name TEXT, text_encoder_relative_path TEXT, text_encoder_sha256 TEXT, vae_file_name TEXT, vae_relative_path TEXT, vae_sha256 TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(model_sha256, workflow_kind));
             CREATE TABLE IF NOT EXISTS local_loras (id TEXT PRIMARY KEY, title TEXT NOT NULL, type TEXT NOT NULL, file_name TEXT NOT NULL, relative_path TEXT NOT NULL, sha256 TEXT NOT NULL UNIQUE, byte_size INTEGER NOT NULL, modified_ms INTEGER NOT NULL, trigger_words_json TEXT NOT NULL, base_model_sha256 TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS local_training_datasets (id TEXT PRIMARY KEY, title TEXT NOT NULL, type TEXT NOT NULL, trigger_words_json TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS local_training_assets (id TEXT PRIMARY KEY, dataset_id TEXT NOT NULL, file_name TEXT NOT NULL, relative_path TEXT NOT NULL, sha256 TEXT NOT NULL, byte_size INTEGER NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL, caption TEXT, confirmed INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(dataset_id,sha256), FOREIGN KEY(dataset_id) REFERENCES local_training_datasets(id));
-            CREATE TABLE IF NOT EXISTS local_caption_jobs (id TEXT PRIMARY KEY, dataset_id TEXT NOT NULL, asset_id TEXT, status TEXT NOT NULL, progress INTEGER NOT NULL DEFAULT 0, total_assets INTEGER NOT NULL, processed_assets INTEGER NOT NULL DEFAULT 0, succeeded_assets INTEGER NOT NULL DEFAULT 0, failed_assets INTEGER NOT NULL DEFAULT 0, skipped_assets INTEGER NOT NULL DEFAULT 0, general_threshold REAL NOT NULL, character_threshold REAL NOT NULL, include_character_tags INTEGER NOT NULL, cancel_requested INTEGER NOT NULL DEFAULT 0, error TEXT, created_at TEXT NOT NULL, started_at TEXT, completed_at TEXT, updated_at TEXT NOT NULL, FOREIGN KEY(dataset_id) REFERENCES local_training_datasets(id));
+            CREATE TABLE IF NOT EXISTS local_training_datasets (id TEXT PRIMARY KEY, title TEXT NOT NULL, type TEXT NOT NULL, trigger_words_json TEXT NOT NULL, status TEXT NOT NULL, deleted_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS local_training_assets (id TEXT PRIMARY KEY, dataset_id TEXT NOT NULL, file_name TEXT NOT NULL, relative_path TEXT NOT NULL, sha256 TEXT NOT NULL, byte_size INTEGER NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL, caption TEXT, selected_derivative_id TEXT, confirmed INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(dataset_id,sha256), FOREIGN KEY(dataset_id) REFERENCES local_training_datasets(id));
+            CREATE TABLE IF NOT EXISTS local_training_asset_derivatives (id TEXT PRIMARY KEY, asset_id TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('background_removed')), source TEXT NOT NULL CHECK(source IN ('auto','manual')), relative_path TEXT NOT NULL, sha256 TEXT NOT NULL, byte_size INTEGER NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, FOREIGN KEY(asset_id) REFERENCES local_training_assets(id) ON DELETE CASCADE);
+            CREATE TABLE IF NOT EXISTS local_training_asset_tags (asset_id TEXT NOT NULL, normalized_value TEXT NOT NULL, value TEXT NOT NULL, source TEXT NOT NULL CHECK(source IN ('auto','ai_cleaned','manual','imported','trigger')), position INTEGER NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(asset_id,normalized_value), FOREIGN KEY(asset_id) REFERENCES local_training_assets(id) ON DELETE CASCADE);
+            CREATE TABLE IF NOT EXISTS local_training_tag_changes (id TEXT PRIMARY KEY, asset_id TEXT NOT NULL, operation TEXT NOT NULL, before_json TEXT NOT NULL, after_json TEXT NOT NULL, reason TEXT, created_at TEXT NOT NULL, FOREIGN KEY(asset_id) REFERENCES local_training_assets(id) ON DELETE CASCADE);
+            CREATE TABLE IF NOT EXISTS local_caption_jobs (id TEXT PRIMARY KEY, dataset_id TEXT NOT NULL, asset_id TEXT, status TEXT NOT NULL, progress INTEGER NOT NULL DEFAULT 0, total_assets INTEGER NOT NULL, processed_assets INTEGER NOT NULL DEFAULT 0, succeeded_assets INTEGER NOT NULL DEFAULT 0, failed_assets INTEGER NOT NULL DEFAULT 0, skipped_assets INTEGER NOT NULL DEFAULT 0, general_threshold REAL NOT NULL, character_threshold REAL NOT NULL, include_character_tags INTEGER NOT NULL, pause_requested INTEGER NOT NULL DEFAULT 0, cancel_requested INTEGER NOT NULL DEFAULT 0, error TEXT, created_at TEXT NOT NULL, started_at TEXT, completed_at TEXT, updated_at TEXT NOT NULL, FOREIGN KEY(dataset_id) REFERENCES local_training_datasets(id));
             CREATE TABLE IF NOT EXISTS local_caption_job_items (job_id TEXT NOT NULL, asset_id TEXT NOT NULL, force_replace INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL, caption TEXT, error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(job_id,asset_id), FOREIGN KEY(job_id) REFERENCES local_caption_jobs(id), FOREIGN KEY(asset_id) REFERENCES local_training_assets(id));
-            CREATE TABLE IF NOT EXISTS local_training_jobs (id TEXT PRIMARY KEY, dataset_id TEXT NOT NULL, dataset_title TEXT NOT NULL, title TEXT NOT NULL, type TEXT NOT NULL, status TEXT NOT NULL, progress INTEGER NOT NULL DEFAULT 0, current_epoch INTEGER NOT NULL DEFAULT 0, total_epochs INTEGER NOT NULL, model_id TEXT NOT NULL, model_display_name TEXT NOT NULL, workflow_kind TEXT NOT NULL, model_file_name TEXT NOT NULL, model_relative_path TEXT NOT NULL, model_sha256 TEXT NOT NULL, model_byte_size INTEGER NOT NULL, model_modified_ms INTEGER NOT NULL, text_encoder_file_name TEXT NOT NULL, text_encoder_relative_path TEXT NOT NULL, text_encoder_sha256 TEXT NOT NULL, vae_file_name TEXT NOT NULL, vae_relative_path TEXT NOT NULL, vae_sha256 TEXT NOT NULL, parameters_json TEXT NOT NULL, trigger_words_json TEXT NOT NULL, asset_count INTEGER NOT NULL, cancel_requested INTEGER NOT NULL DEFAULT 0, output_lora_id TEXT, error TEXT, suggestion_json TEXT, created_at TEXT NOT NULL, started_at TEXT, completed_at TEXT, updated_at TEXT NOT NULL, FOREIGN KEY(dataset_id) REFERENCES local_training_datasets(id), FOREIGN KEY(model_id) REFERENCES local_models(id));
-            CREATE TABLE IF NOT EXISTS local_training_job_assets (job_id TEXT NOT NULL, sequence INTEGER NOT NULL, asset_id TEXT NOT NULL, relative_path TEXT NOT NULL, sha256 TEXT NOT NULL, byte_size INTEGER NOT NULL, caption TEXT NOT NULL, PRIMARY KEY(job_id,sequence), UNIQUE(job_id,asset_id), FOREIGN KEY(job_id) REFERENCES local_training_jobs(id), FOREIGN KEY(asset_id) REFERENCES local_training_assets(id));
+            CREATE TABLE IF NOT EXISTS local_ai_clean_jobs (id TEXT PRIMARY KEY, dataset_id TEXT NOT NULL, status TEXT NOT NULL, progress INTEGER NOT NULL DEFAULT 0, total_assets INTEGER NOT NULL, processed_assets INTEGER NOT NULL DEFAULT 0, succeeded_assets INTEGER NOT NULL DEFAULT 0, failed_assets INTEGER NOT NULL DEFAULT 0, training_goal TEXT NOT NULL, pause_requested INTEGER NOT NULL DEFAULT 0, cancel_requested INTEGER NOT NULL DEFAULT 0, error TEXT, created_at TEXT NOT NULL, started_at TEXT, completed_at TEXT, updated_at TEXT NOT NULL, FOREIGN KEY(dataset_id) REFERENCES local_training_datasets(id));
+            CREATE TABLE IF NOT EXISTS local_ai_clean_job_items (job_id TEXT NOT NULL, asset_id TEXT NOT NULL, status TEXT NOT NULL, attempt_count INTEGER NOT NULL DEFAULT 0, original_tags_json TEXT NOT NULL, proposal_json TEXT, apply_status TEXT NOT NULL DEFAULT 'pending', applied_change_id TEXT, error TEXT, updated_at TEXT NOT NULL, PRIMARY KEY(job_id,asset_id), FOREIGN KEY(job_id) REFERENCES local_ai_clean_jobs(id));
+            CREATE TABLE IF NOT EXISTS local_background_removal_jobs (id TEXT PRIMARY KEY, dataset_id TEXT NOT NULL, status TEXT NOT NULL, progress INTEGER NOT NULL DEFAULT 0, total_assets INTEGER NOT NULL, processed_assets INTEGER NOT NULL DEFAULT 0, succeeded_assets INTEGER NOT NULL DEFAULT 0, failed_assets INTEGER NOT NULL DEFAULT 0, pause_requested INTEGER NOT NULL DEFAULT 0, cancel_requested INTEGER NOT NULL DEFAULT 0, error TEXT, created_at TEXT NOT NULL, started_at TEXT, completed_at TEXT, updated_at TEXT NOT NULL, FOREIGN KEY(dataset_id) REFERENCES local_training_datasets(id));
+            CREATE TABLE IF NOT EXISTS local_background_removal_job_items (job_id TEXT NOT NULL, asset_id TEXT NOT NULL, status TEXT NOT NULL, derivative_id TEXT, error TEXT, updated_at TEXT NOT NULL, PRIMARY KEY(job_id,asset_id), FOREIGN KEY(job_id) REFERENCES local_background_removal_jobs(id), FOREIGN KEY(asset_id) REFERENCES local_training_assets(id), FOREIGN KEY(derivative_id) REFERENCES local_training_asset_derivatives(id));
+            CREATE TABLE IF NOT EXISTS local_training_jobs (id TEXT PRIMARY KEY, dataset_id TEXT NOT NULL, dataset_title TEXT NOT NULL, title TEXT NOT NULL, type TEXT NOT NULL, status TEXT NOT NULL, progress INTEGER NOT NULL DEFAULT 0, current_epoch INTEGER NOT NULL DEFAULT 0, total_epochs INTEGER NOT NULL, model_id TEXT NOT NULL, model_display_name TEXT NOT NULL, workflow_kind TEXT NOT NULL, model_file_name TEXT NOT NULL, model_relative_path TEXT NOT NULL, model_sha256 TEXT NOT NULL, model_byte_size INTEGER NOT NULL, model_modified_ms INTEGER NOT NULL, text_encoder_file_name TEXT NOT NULL, text_encoder_relative_path TEXT NOT NULL, text_encoder_sha256 TEXT NOT NULL, vae_file_name TEXT NOT NULL, vae_relative_path TEXT NOT NULL, vae_sha256 TEXT NOT NULL, parameters_json TEXT NOT NULL, trigger_words_json TEXT NOT NULL, asset_count INTEGER NOT NULL, use_ai_tag_processing INTEGER NOT NULL DEFAULT 0, training_goal TEXT NOT NULL DEFAULT '', preprocessing_status TEXT NOT NULL DEFAULT 'not_requested', preprocessing_progress INTEGER NOT NULL DEFAULT 100, preprocessing_error TEXT, cancel_requested INTEGER NOT NULL DEFAULT 0, output_lora_id TEXT, error TEXT, suggestion_json TEXT, created_at TEXT NOT NULL, started_at TEXT, completed_at TEXT, updated_at TEXT NOT NULL, FOREIGN KEY(dataset_id) REFERENCES local_training_datasets(id), FOREIGN KEY(model_id) REFERENCES local_models(id));
+            CREATE TABLE IF NOT EXISTS local_training_job_assets (job_id TEXT NOT NULL, sequence INTEGER NOT NULL, asset_id TEXT NOT NULL, file_name TEXT NOT NULL, relative_path TEXT NOT NULL, sha256 TEXT NOT NULL, byte_size INTEGER NOT NULL, caption TEXT NOT NULL, tags_json TEXT NOT NULL DEFAULT '[]', image_variant TEXT NOT NULL DEFAULT 'original', derivative_source TEXT, ai_clean_status TEXT NOT NULL DEFAULT 'not_requested', ai_clean_attempt_count INTEGER NOT NULL DEFAULT 0, ai_clean_proposal_json TEXT, ai_clean_error TEXT, PRIMARY KEY(job_id,sequence), UNIQUE(job_id,asset_id), FOREIGN KEY(job_id) REFERENCES local_training_jobs(id));
             CREATE TABLE IF NOT EXISTS local_training_job_attempts (id TEXT PRIMARY KEY, job_id TEXT NOT NULL, attempt_number INTEGER NOT NULL, status TEXT NOT NULL, error TEXT, started_at TEXT NOT NULL, completed_at TEXT, UNIQUE(job_id,attempt_number), FOREIGN KEY(job_id) REFERENCES local_training_jobs(id));
             CREATE TABLE IF NOT EXISTS local_jobs (id TEXT PRIMARY KEY, status TEXT NOT NULL, progress INTEGER NOT NULL, prompt TEXT NOT NULL, negative_prompt TEXT, model_id TEXT NOT NULL, model_display_name TEXT NOT NULL, workflow_kind TEXT NOT NULL, model_file_name TEXT NOT NULL, model_relative_path TEXT NOT NULL, model_sha256 TEXT NOT NULL, text_encoder_file_name TEXT, vae_file_name TEXT, width INTEGER NOT NULL, height INTEGER NOT NULL, quality_preset TEXT NOT NULL DEFAULT 'custom', steps INTEGER NOT NULL, cfg REAL NOT NULL, sampler_name TEXT NOT NULL, scheduler_name TEXT NOT NULL, sampling_max_edge INTEGER NOT NULL DEFAULT 1536, sampling_pixel_budget INTEGER NOT NULL DEFAULT 1350000, aspect_step_threshold REAL NOT NULL DEFAULT 1.5, aspect_adjusted_steps INTEGER NOT NULL DEFAULT 34, upscale_method TEXT NOT NULL DEFAULT 'lanczos', quality_prompt_enabled INTEGER NOT NULL DEFAULT 0, quality_prefix TEXT, default_negative_enabled INTEGER NOT NULL DEFAULT 0, default_negative_prompt TEXT, seed INTEGER NOT NULL, privacy TEXT NOT NULL, runtime_prompt_id TEXT, error TEXT, cancel_requested INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, started_at TEXT, completed_at TEXT, updated_at TEXT NOT NULL, FOREIGN KEY(model_id) REFERENCES local_models(id));
             CREATE TABLE IF NOT EXISTS local_job_attempts (id TEXT PRIMARY KEY, job_id TEXT NOT NULL, attempt_number INTEGER NOT NULL, status TEXT NOT NULL, runtime_prompt_id TEXT, error TEXT, started_at TEXT NOT NULL, completed_at TEXT, UNIQUE(job_id,attempt_number), FOREIGN KEY(job_id) REFERENCES local_jobs(id));
@@ -68,18 +84,109 @@ impl DesktopState {
             CREATE INDEX IF NOT EXISTS local_jobs_status_idx ON local_jobs(status, created_at);
             CREATE INDEX IF NOT EXISTS local_training_jobs_status_idx ON local_training_jobs(status, created_at);
             CREATE INDEX IF NOT EXISTS local_training_jobs_dataset_idx ON local_training_jobs(dataset_id, created_at DESC);
-            CREATE INDEX IF NOT EXISTS local_training_assets_dataset_idx ON local_training_assets(dataset_id, created_at);").map_err(|error| format!("初始化桌面数据库失败：{error}"))?;
+            CREATE INDEX IF NOT EXISTS local_training_assets_dataset_idx ON local_training_assets(dataset_id, created_at);
+            CREATE INDEX IF NOT EXISTS local_training_asset_tags_source_idx ON local_training_asset_tags(asset_id, source, position);
+            CREATE INDEX IF NOT EXISTS local_training_asset_derivatives_asset_idx ON local_training_asset_derivatives(asset_id, created_at DESC);
+            CREATE INDEX IF NOT EXISTS local_training_tag_changes_asset_idx ON local_training_tag_changes(asset_id, created_at DESC);").map_err(|error| format!("初始化桌面数据库失败：{error}"))?;
+        connection.execute_batch("CREATE INDEX IF NOT EXISTS local_ai_clean_jobs_status_idx ON local_ai_clean_jobs(status,created_at); CREATE INDEX IF NOT EXISTS local_ai_clean_items_asset_idx ON local_ai_clean_job_items(asset_id,updated_at DESC);").map_err(|error| format!("初始化 AI 清洗索引失败：{error}"))?;
+        // 训练集删除只隐藏并清理原始受管目录，历史训练任务和快照继续引用审计行。
+        ensure_column(&connection, "local_training_datasets", "deleted_at", "TEXT")?;
+        ensure_training_snapshot_schema(&connection)?;
+        // 打标与 AI 清洗暂停状态是持久事实；旧数据库只增列，不重写任务结果。
+        ensure_column(
+            &connection,
+            "local_caption_jobs",
+            "pause_requested",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        ensure_column(
+            &connection,
+            "local_ai_clean_jobs",
+            "pause_requested",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        // 旧训练集升级后默认继续使用原图；派生版本只能由用户明确选择。
+        ensure_column(
+            &connection,
+            "local_training_assets",
+            "selected_derivative_id",
+            "TEXT",
+        )?;
+        connection.execute_batch("CREATE UNIQUE INDEX IF NOT EXISTS local_background_removal_jobs_active_dataset_idx ON local_background_removal_jobs(dataset_id) WHERE status IN ('queued','running','paused'); CREATE INDEX IF NOT EXISTS local_background_removal_jobs_created_idx ON local_background_removal_jobs(created_at DESC);").map_err(|error| format!("初始化抠图任务索引失败：{error}"))?;
+        // 训练任务 AI 标签处理是可恢复的快照阶段，升级只增列，不改写任何既有任务内容。
+        ensure_column(
+            &connection,
+            "local_training_jobs",
+            "use_ai_tag_processing",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        ensure_column(
+            &connection,
+            "local_training_jobs",
+            "training_goal",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
+        ensure_column(
+            &connection,
+            "local_training_jobs",
+            "preprocessing_status",
+            "TEXT NOT NULL DEFAULT 'not_requested'",
+        )?;
+        ensure_column(
+            &connection,
+            "local_training_jobs",
+            "preprocessing_progress",
+            "INTEGER NOT NULL DEFAULT 100",
+        )?;
+        ensure_column(
+            &connection,
+            "local_training_jobs",
+            "preprocessing_error",
+            "TEXT",
+        )?;
+        ensure_column(
+            &connection,
+            "local_training_job_assets",
+            "ai_clean_status",
+            "TEXT NOT NULL DEFAULT 'not_requested'",
+        )?;
+        ensure_column(
+            &connection,
+            "local_training_job_assets",
+            "ai_clean_attempt_count",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        ensure_column(
+            &connection,
+            "local_training_job_assets",
+            "ai_clean_proposal_json",
+            "TEXT",
+        )?;
+        ensure_column(
+            &connection,
+            "local_training_job_assets",
+            "ai_clean_error",
+            "TEXT",
+        )?;
+        crate::training::materialize_existing_snapshots(&connection, app_data_dir)?;
         let recovery_time = Utc::now().to_rfc3339();
         connection.execute("UPDATE local_job_attempts SET status='interrupted',completed_at=?1 WHERE status='running'", [&recovery_time]).map_err(|error| format!("恢复中断的本地任务尝试失败：{error}"))?;
         connection.execute("UPDATE local_jobs SET status='queued', progress=0, runtime_prompt_id=NULL, started_at=NULL, updated_at=?1 WHERE status='running'", [&recovery_time]).map_err(|error| format!("恢复中断的本地任务失败：{error}"))?;
         // 退出前已经收到取消请求的任务必须恢复为终态，避免重启后永久占用训练集活动任务索引。
         connection.execute("UPDATE local_caption_job_items SET status='cancelled',updated_at=?1 WHERE status='running' AND job_id IN (SELECT id FROM local_caption_jobs WHERE status='running' AND cancel_requested=1)", [&recovery_time]).map_err(|error| format!("恢复已取消的逐图打标状态失败：{error}"))?;
         connection.execute("UPDATE local_caption_jobs SET status='cancelled',progress=100,processed_assets=total_assets,completed_at=?1,updated_at=?1 WHERE status='running' AND cancel_requested=1", [&recovery_time]).map_err(|error| format!("恢复已取消的打标任务失败：{error}"))?;
-        connection.execute("UPDATE local_caption_jobs SET status='queued',progress=0,processed_assets=0,succeeded_assets=0,failed_assets=0,skipped_assets=0,started_at=NULL,updated_at=?1 WHERE status='running' AND cancel_requested=0", [&recovery_time]).map_err(|error| format!("恢复中断的打标任务失败：{error}"))?;
+        connection.execute("UPDATE local_caption_jobs SET status=CASE WHEN pause_requested=1 THEN 'paused' ELSE 'queued' END,started_at=CASE WHEN pause_requested=1 THEN started_at ELSE NULL END,updated_at=?1 WHERE status='running' AND cancel_requested=0", [&recovery_time]).map_err(|error| format!("恢复中断的打标任务失败：{error}"))?;
+        // AI 清洗请求在崩溃时没有保存半结果；运行项重新排队并保留既有成功建议。
+        connection.execute("UPDATE local_ai_clean_job_items SET status='queued',updated_at=?1 WHERE status='running' AND job_id IN (SELECT id FROM local_ai_clean_jobs WHERE cancel_requested=0)", [&recovery_time]).map_err(|error| format!("恢复中断的逐图 AI 清洗失败：{error}"))?;
+        connection.execute("UPDATE local_ai_clean_jobs SET status=CASE WHEN pause_requested=1 THEN 'paused' ELSE 'queued' END,updated_at=?1 WHERE status='running' AND cancel_requested=0", [&recovery_time]).map_err(|error| format!("恢复中断的 AI 清洗任务失败：{error}"))?;
+        connection.execute("UPDATE local_ai_clean_job_items SET status='cancelled',updated_at=?1 WHERE status IN ('queued','running') AND job_id IN (SELECT id FROM local_ai_clean_jobs WHERE cancel_requested=1)", [&recovery_time]).map_err(|error| format!("恢复已取消的逐图 AI 清洗失败：{error}"))?;
+        connection.execute("UPDATE local_ai_clean_jobs SET status='cancelled',progress=100,processed_assets=total_assets,completed_at=?1,updated_at=?1 WHERE status IN ('queued','running') AND cancel_requested=1", [&recovery_time]).map_err(|error| format!("恢复已取消的 AI 清洗任务失败：{error}"))?;
         connection.execute("UPDATE local_caption_job_items SET status='queued',caption=NULL,error=NULL,updated_at=?1 WHERE status='running'", [&recovery_time]).map_err(|error| format!("恢复中断的逐图打标状态失败：{error}"))?;
         connection.execute("UPDATE local_training_job_attempts SET status='interrupted',error='桌面程序退出，训练任务已恢复排队',completed_at=?1 WHERE status='running'", [&recovery_time]).map_err(|error| format!("恢复中断的训练尝试失败：{error}"))?;
         connection.execute("UPDATE local_training_jobs SET status='cancelled',progress=100,completed_at=?1,updated_at=?1 WHERE status='running' AND cancel_requested=1", [&recovery_time]).map_err(|error| format!("恢复已取消的训练任务失败：{error}"))?;
         connection.execute("UPDATE local_training_jobs SET status='queued',progress=0,current_epoch=0,started_at=NULL,error=NULL,suggestion_json=NULL,updated_at=?1 WHERE status='running' AND cancel_requested=0", [&recovery_time]).map_err(|error| format!("恢复中断的训练任务失败：{error}"))?;
+        connection.execute("UPDATE local_training_job_assets SET ai_clean_status='queued',ai_clean_error=NULL WHERE ai_clean_status='running' AND job_id IN (SELECT id FROM local_training_jobs WHERE cancel_requested=0)", []).map_err(|error| format!("恢复中断的训练快照 AI 标签项失败：{error}"))?;
+        connection.execute("UPDATE local_training_jobs SET preprocessing_status='queued',preprocessing_error=NULL,updated_at=?1 WHERE preprocessing_status='running' AND cancel_requested=0", [&recovery_time]).map_err(|error| format!("恢复中断的训练快照 AI 标签阶段失败：{error}"))?;
         ensure_column(
             &connection,
             "desktop_settings",
@@ -182,6 +289,8 @@ impl DesktopState {
             "caption_source",
             "TEXT",
         )?;
+        // 旧版本只有整段 Caption 来源；新表创建后按原值和触发词一次性无损回填。
+        crate::training_tags::backfill_existing_tags(&connection)?;
         ensure_column(&connection, "gallery_sync_queue", "owner_issuer", "TEXT")?;
         ensure_column(&connection, "gallery_sync_queue", "owner_subject", "TEXT")?;
         ensure_column(
@@ -215,6 +324,8 @@ impl DesktopState {
             database_path,
             scheduler: None,
             caption_scheduler: None,
+            background_removal_scheduler: None,
+            ai_clean_scheduler: None,
             training_scheduler: None,
             gallery_sync_scheduler: None,
             runtime: Arc::new(RuntimeController::initialize(app_data_dir)?),
@@ -235,6 +346,16 @@ impl DesktopState {
             app.clone(),
         )?);
         self.caption_scheduler = Some(CaptionScheduler::start(
+            self.database_path.clone(),
+            self.app_data_dir.clone(),
+            app.clone(),
+        )?);
+        self.background_removal_scheduler = Some(BackgroundRemovalScheduler::start(
+            self.database_path.clone(),
+            self.app_data_dir.clone(),
+            app.clone(),
+        )?);
+        self.ai_clean_scheduler = Some(AiCleanScheduler::start(
             self.database_path.clone(),
             self.app_data_dir.clone(),
             app.clone(),
@@ -574,6 +695,18 @@ impl DesktopState {
         crate::training_dataset::update_caption(&database, &self.app_data_dir, input)
     }
 
+    /** 在一个文件与 SQLite 事务中批量添加或删除标签。 */
+    pub fn batch_update_training_tags(
+        &self,
+        input: DesktopTrainingBatchTagsInput,
+    ) -> Result<DesktopTrainingDatasetView, String> {
+        let database = self
+            .database
+            .lock()
+            .map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        crate::training_dataset::batch_update_tags(&database, &self.app_data_dir, input)
+    }
+
     /** 创建持久化打标任务并立即唤醒独立 Caption Worker。 */
     pub fn create_caption_job(
         &self,
@@ -602,6 +735,24 @@ impl DesktopState {
         crate::captioner::list_jobs(&database)
     }
 
+    /** 暂停打标任务并唤醒 Worker 收敛运行中的组件。 */
+    pub fn pause_caption_job(&self, id: &str) -> Result<DesktopCaptionJobView, String> {
+        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        let job = crate::captioner::pause_job(&database, id)?;
+        drop(database);
+        if let Some(scheduler) = &self.caption_scheduler { scheduler.wake(); }
+        Ok(job)
+    }
+
+    /** 恢复暂停的打标任务并立即唤醒 Worker。 */
+    pub fn resume_caption_job(&self, id: &str) -> Result<DesktopCaptionJobView, String> {
+        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        let job = crate::captioner::resume_job(&database, id)?;
+        drop(database);
+        if let Some(scheduler) = &self.caption_scheduler { scheduler.wake(); }
+        Ok(job)
+    }
+
     /** 幂等请求取消排队或运行中的离线自动打标任务。 */
     pub fn cancel_caption_job(&self, id: &str) -> Result<DesktopCaptionJobView, String> {
         let database = self
@@ -616,6 +767,152 @@ impl DesktopState {
         Ok(job)
     }
 
+    /** 创建自动抠图任务并立即返回持久化记录。 */
+    pub fn create_background_removal_job(
+        &self,
+        input: DesktopBackgroundRemovalJobCreateInput,
+    ) -> Result<DesktopBackgroundRemovalJobView, String> {
+        let scheduler = self.background_removal_scheduler.as_ref().ok_or_else(|| "自动抠图调度器尚未启动".to_string())?;
+        let mut database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        let job = crate::background_removal::create_job(&mut database, input)?;
+        drop(database);
+        scheduler.wake();
+        Ok(job)
+    }
+
+    /** 返回最近的自动抠图任务。 */
+    pub fn list_background_removal_jobs(&self) -> Result<Vec<DesktopBackgroundRemovalJobView>, String> {
+        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        crate::background_removal::list_jobs(&database)
+    }
+
+    /** 暂停自动抠图并唤醒 Worker 收敛运行进程。 */
+    pub fn pause_background_removal_job(&self, id: &str) -> Result<DesktopBackgroundRemovalJobView, String> {
+        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        let job = crate::background_removal::pause_job(&database, id)?;
+        drop(database);
+        if let Some(scheduler) = &self.background_removal_scheduler { scheduler.wake(); }
+        Ok(job)
+    }
+
+    /** 恢复已经暂停的自动抠图任务。 */
+    pub fn resume_background_removal_job(&self, id: &str) -> Result<DesktopBackgroundRemovalJobView, String> {
+        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        let job = crate::background_removal::resume_job(&database, id)?;
+        drop(database);
+        if let Some(scheduler) = &self.background_removal_scheduler { scheduler.wake(); }
+        Ok(job)
+    }
+
+    /** 取消自动抠图任务并保留已经成功的派生文件。 */
+    pub fn cancel_background_removal_job(&self, id: &str) -> Result<DesktopBackgroundRemovalJobView, String> {
+        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        let job = crate::background_removal::cancel_job(&database, id)?;
+        drop(database);
+        if let Some(scheduler) = &self.background_removal_scheduler { scheduler.wake(); }
+        Ok(job)
+    }
+
+    /** 保存手动蒙版并返回最新训练集。 */
+    pub fn save_training_manual_mask(&self, input: DesktopTrainingManualMaskInput) -> Result<DesktopTrainingDatasetView, String> {
+        let mut database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        crate::background_removal::save_manual_mask(&mut database, &self.app_data_dir, input)
+    }
+
+    /** 选择后续训练使用的原图或派生版本。 */
+    pub fn select_training_asset_variant(&self, input: DesktopTrainingAssetVariantSelectInput) -> Result<DesktopTrainingDatasetView, String> {
+        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        crate::background_removal::select_variant(&database, &self.app_data_dir, input)
+    }
+
+    /** 创建只生成建议的 AI 标签清洗任务，并唤醒独立网络 Worker。 */
+    pub fn create_ai_clean_job(
+        &self,
+        input: DesktopAiCleanJobCreateInput,
+    ) -> Result<DesktopAiCleanJobView, String> {
+        let scheduler = self
+            .ai_clean_scheduler
+            .as_ref()
+            .ok_or_else(|| "AI 清洗调度器尚未启动".to_string())?;
+        let settings = self.load_ai_settings(crate::ai_assist::api_key_configured()?)?;
+        if !settings.enabled || !settings.api_key_configured {
+            return Err("请先在设置中启用并测试 AI 辅助".into());
+        }
+        let mut database = self
+            .database
+            .lock()
+            .map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        let job = crate::ai_cleaner::create_job(&mut database, input)?;
+        drop(database);
+        scheduler.wake();
+        Ok(job)
+    }
+
+    /** 返回最近的持久化 AI 标签清洗任务。 */
+    pub fn list_ai_clean_jobs(&self) -> Result<Vec<DesktopAiCleanJobView>, String> {
+        let database = self
+            .database
+            .lock()
+            .map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        crate::ai_cleaner::list_jobs(&database)
+    }
+
+    /** 暂停 AI 清洗任务并保留已经完成的建议。 */
+    pub fn pause_ai_clean_job(&self, id: &str) -> Result<DesktopAiCleanJobView, String> {
+        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        let job = crate::ai_cleaner::pause_job(&database, id)?;
+        drop(database);
+        if let Some(scheduler) = &self.ai_clean_scheduler { scheduler.wake(); }
+        Ok(job)
+    }
+
+    /** 恢复暂停的 AI 清洗任务并立即唤醒 Worker。 */
+    pub fn resume_ai_clean_job(&self, id: &str) -> Result<DesktopAiCleanJobView, String> {
+        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        let job = crate::ai_cleaner::resume_job(&database, id)?;
+        drop(database);
+        if let Some(scheduler) = &self.ai_clean_scheduler { scheduler.wake(); }
+        Ok(job)
+    }
+
+    /** 幂等取消 AI 标签清洗任务并唤醒 Worker 收敛状态。 */
+    pub fn cancel_ai_clean_job(&self, id: &str) -> Result<DesktopAiCleanJobView, String> {
+        let database = self
+            .database
+            .lock()
+            .map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        let job = crate::ai_cleaner::cancel_job(&database, id)?;
+        drop(database);
+        if let Some(scheduler) = &self.ai_clean_scheduler {
+            scheduler.wake();
+        }
+        Ok(job)
+    }
+
+    /** 应用用户确认的 AI 标签建议并返回更新后的训练集。 */
+    pub fn apply_ai_clean(
+        &self,
+        input: DesktopAiCleanApplyInput,
+    ) -> Result<DesktopTrainingDatasetView, String> {
+        let database = self
+            .database
+            .lock()
+            .map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        crate::ai_cleaner::apply_proposal(&database, &self.app_data_dir, input)
+    }
+
+    /** 撤销未被后续编辑覆盖的最近一次 AI 标签清洗。 */
+    pub fn undo_ai_clean(
+        &self,
+        input: DesktopAiCleanUndoInput,
+    ) -> Result<DesktopTrainingDatasetView, String> {
+        let database = self
+            .database
+            .lock()
+            .map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        crate::ai_cleaner::undo_proposal(&database, &self.app_data_dir, input)
+    }
+
     /** 固化已确认数据集和 Anima 底模后创建本地训练任务。 */
     pub fn create_training_job(
         &self,
@@ -625,6 +922,8 @@ impl DesktopState {
             .training_scheduler
             .as_ref()
             .ok_or_else(|| "本地训练调度器尚未启动".to_string())?;
+        // 创建训练快照前确认用户已经启动本地核心，避免绕过页面直接把任务塞入后台队列。
+        self.require_task_runtime_ready()?;
         let settings = self.load_settings()?;
         crate::environment::require_training_ready(&settings)?;
         let mut database = self
@@ -638,7 +937,14 @@ impl DesktopState {
             input,
         )?;
         drop(database);
-        scheduler.wake();
+        if job.use_ai_tag_processing {
+            self.ai_clean_scheduler
+                .as_ref()
+                .ok_or_else(|| "AI 标签处理调度器尚未启动".to_string())?
+                .wake();
+        } else {
+            scheduler.wake();
+        }
         Ok(job)
     }
 
@@ -651,6 +957,27 @@ impl DesktopState {
         crate::training::list_jobs(&database)
     }
 
+    /** 读取任务创建时冻结的训练快照，历史内容不跟随原训练集变化。 */
+    pub fn get_training_snapshot(&self, id: &str) -> Result<DesktopTrainingSnapshotView, String> {
+        let database = self
+            .database
+            .lock()
+            .map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        crate::training::get_snapshot(&database, &self.app_data_dir, id)
+    }
+
+    /** 从只读任务快照复制新的可编辑训练集，不覆盖任何现有数据。 */
+    pub fn copy_training_snapshot(
+        &self,
+        input: DesktopTrainingSnapshotCopyInput,
+    ) -> Result<DesktopTrainingDatasetView, String> {
+        let mut database = self
+            .database
+            .lock()
+            .map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        crate::training::copy_snapshot_to_dataset(&mut database, &self.app_data_dir, input)
+    }
+
     /** 幂等取消排队或运行中的本地训练任务。 */
     pub fn cancel_training_job(&self, id: &str) -> Result<DesktopTrainingJobView, String> {
         let database = self
@@ -660,6 +987,9 @@ impl DesktopState {
         let job = crate::training::cancel_job(&database, id)?;
         drop(database);
         if let Some(scheduler) = &self.training_scheduler {
+            scheduler.wake();
+        }
+        if let Some(scheduler) = &self.ai_clean_scheduler {
             scheduler.wake();
         }
         Ok(job)
@@ -674,6 +1004,8 @@ impl DesktopState {
             .scheduler
             .as_ref()
             .ok_or_else(|| "本地调度器尚未启动".to_string())?;
+        // Tauri 命令是最终安全边界，不能只依赖前端按钮状态阻止未启动核心时提交。
+        self.require_task_runtime_ready()?;
         let settings = self.load_settings()?;
         crate::environment::require_inference_ready(&settings)?;
         let mut database = self
@@ -684,6 +1016,14 @@ impl DesktopState {
         drop(database);
         scheduler.wake();
         Ok(job)
+    }
+
+    /** 生成与训练提交共用的真实 Runtime 健康门禁。 */
+    fn require_task_runtime_ready(&self) -> Result<(), String> {
+        self.runtime
+            .endpoint()
+            .map(|_| ())
+            .map_err(|_| "本地核心未启动或不可用，请先在“启动”页面启动核心".to_string())
     }
 
     /** 读取最近本地任务。 */
@@ -910,6 +1250,78 @@ fn ensure_column(
     }
     Ok(())
 }
+
+/** 旧版任务图片表外键绑定原训练集；升级时重建为只绑定任务的独立快照表。 */
+fn ensure_training_snapshot_schema(database: &Connection) -> Result<(), String> {
+    let has_asset_foreign_key = {
+        let mut statement = database
+            .prepare("PRAGMA foreign_key_list(local_training_job_assets)")
+            .map_err(|error| format!("读取训练快照外键失败：{error}"))?;
+        let rows = statement
+            .query_map([], |row| row.get::<_, String>(2))
+            .map_err(|error| format!("查询训练快照外键失败：{error}"))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("解析训练快照外键失败：{error}"))?;
+        rows.iter().any(|table| table == "local_training_assets")
+    };
+    if has_asset_foreign_key {
+        let transaction = database
+            .unchecked_transaction()
+            .map_err(|error| format!("开启训练快照结构迁移失败：{error}"))?;
+        transaction.execute_batch(
+            "CREATE TABLE local_training_job_assets_v2 (
+            job_id TEXT NOT NULL,
+            sequence INTEGER NOT NULL,
+            asset_id TEXT NOT NULL,
+            file_name TEXT NOT NULL,
+            relative_path TEXT NOT NULL,
+            sha256 TEXT NOT NULL,
+            byte_size INTEGER NOT NULL,
+            caption TEXT NOT NULL,
+            tags_json TEXT NOT NULL DEFAULT '[]',
+            image_variant TEXT NOT NULL DEFAULT 'original',
+            derivative_source TEXT,
+            PRIMARY KEY(job_id,sequence),
+            UNIQUE(job_id,asset_id),
+            FOREIGN KEY(job_id) REFERENCES local_training_jobs(id)
+        );
+        INSERT INTO local_training_job_assets_v2 (job_id,sequence,asset_id,file_name,relative_path,sha256,byte_size,caption,tags_json)
+            SELECT snapshot.job_id,snapshot.sequence,snapshot.asset_id,
+                   COALESCE((SELECT asset.file_name FROM local_training_assets asset WHERE asset.id=snapshot.asset_id),'training-image'),
+                   snapshot.relative_path,snapshot.sha256,snapshot.byte_size,snapshot.caption,'[]'
+            FROM local_training_job_assets snapshot;
+        DROP TABLE local_training_job_assets;
+        ALTER TABLE local_training_job_assets_v2 RENAME TO local_training_job_assets;"
+        ).map_err(|error| format!("迁移训练快照结构失败：{error}"))?;
+        transaction
+            .commit()
+            .map_err(|error| format!("提交训练快照结构迁移失败：{error}"))?;
+    }
+    ensure_column(
+        database,
+        "local_training_job_assets",
+        "file_name",
+        "TEXT NOT NULL DEFAULT 'training-image'",
+    )?;
+    ensure_column(
+        database,
+        "local_training_job_assets",
+        "tags_json",
+        "TEXT NOT NULL DEFAULT '[]'",
+    )?;
+    ensure_column(
+        database,
+        "local_training_job_assets",
+        "image_variant",
+        "TEXT NOT NULL DEFAULT 'original'",
+    )?;
+    ensure_column(
+        database,
+        "local_training_job_assets",
+        "derivative_source",
+        "TEXT",
+    )
+}
 fn path_text(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
@@ -941,6 +1353,18 @@ fn sha256_file(path: &Path) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stopped_runtime_blocks_new_gpu_tasks() {
+        let temporary = tempfile::tempdir().expect("创建 Runtime 门禁测试目录");
+        let state = DesktopState::initialize(temporary.path()).expect("初始化桌面状态");
+        assert_eq!(
+            state
+                .require_task_runtime_ready()
+                .expect_err("停止状态必须拒绝任务"),
+            "本地核心未启动或不可用，请先在“启动”页面启动核心"
+        );
+    }
 
     #[test]
     fn legacy_generation_jobs_gain_quality_columns_without_data_loss() {

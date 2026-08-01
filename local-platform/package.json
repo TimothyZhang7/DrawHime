@@ -31,6 +31,7 @@
     "desktop:set-version": "node scripts/set-desktop-version.mjs",
     "desktop:build-runtime": "node scripts/build-desktop-runtime.mjs",
     "desktop:build-captioner": "node scripts/build-desktop-captioner.mjs",
+    "desktop:build-segmenter": "node scripts/build-desktop-segmenter.mjs",
     "desktop:build-trainer": "node scripts/build-desktop-trainer.mjs",
     "migrate:main-loras": "node scripts/migrate-main-loras.mjs",
     "requeue:training-fast": "node scripts/requeue-active-training-fast-profile.mjs",

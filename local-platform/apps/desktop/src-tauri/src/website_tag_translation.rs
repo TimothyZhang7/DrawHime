@@ -18,7 +18,9 @@ struct ApiEnvelope<T> {
 }
 
 /** 校验并批量读取最多 200 个标签的中英对照和稳定颜色。 */
-pub fn translate(input: DesktopTrainingTagTranslationInput) -> Result<DesktopTrainingTagTranslationView, String> {
+pub fn translate(
+    input: DesktopTrainingTagTranslationInput,
+) -> Result<DesktopTrainingTagTranslationView, String> {
     if input.tags.is_empty() || input.tags.len() > 200 {
         return Err("每次必须翻译 1–200 个训练标签".into());
     }
@@ -27,7 +29,9 @@ pub fn translate(input: DesktopTrainingTagTranslationInput) -> Result<DesktopTra
         .tags
         .into_iter()
         .map(|tag| tag.trim().to_owned())
-        .filter(|tag| !tag.is_empty() && tag.chars().count() <= 200 && seen.insert(tag.to_lowercase()))
+        .filter(|tag| {
+            !tag.is_empty() && tag.chars().count() <= 200 && seen.insert(tag.to_lowercase())
+        })
         .collect::<Vec<_>>();
     if tags.is_empty() {
         return Err("训练标签内容为空".into());
@@ -51,12 +55,25 @@ pub fn translate(input: DesktopTrainingTagTranslationInput) -> Result<DesktopTra
     parse_response(response)
 }
 
-fn parse_response(result: Result<Response, reqwest::Error>) -> Result<DesktopTrainingTagTranslationView, String> {
-    let response = result.map_err(|error| if error.is_timeout() { "标签翻译请求超时".to_string() } else { "标签翻译服务连接失败".to_string() })?;
+fn parse_response(
+    result: Result<Response, reqwest::Error>,
+) -> Result<DesktopTrainingTagTranslationView, String> {
+    let response = result.map_err(|error| {
+        if error.is_timeout() {
+            "标签翻译请求超时".to_string()
+        } else {
+            "标签翻译服务连接失败".to_string()
+        }
+    })?;
     let status = response.status();
-    let payload: ApiEnvelope<DesktopTrainingTagTranslationView> = response.json().map_err(|_| "标签翻译服务返回格式不正确".to_string())?;
+    let payload: ApiEnvelope<DesktopTrainingTagTranslationView> = response
+        .json()
+        .map_err(|_| "标签翻译服务返回格式不正确".to_string())?;
     if !status.is_success() || !payload.ok {
-        return Err(payload.message.or(payload.code).unwrap_or_else(|| format!("标签翻译服务 HTTP {}", status.as_u16())));
+        return Err(payload
+            .message
+            .or(payload.code)
+            .unwrap_or_else(|| format!("标签翻译服务 HTTP {}", status.as_u16())));
     }
     payload.data.ok_or_else(|| "标签翻译服务未返回数据".into())
 }

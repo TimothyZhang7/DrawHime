@@ -1,7 +1,7 @@
 /**
  * 本文件实现桌面生成、任务、模型、Runtime、资源、环境、图库同步和本地设置的响应式工作区。
  */
-import type { DesktopAccountView, DesktopBootstrapView, DesktopCaptionJobView, DesktopLocalJobView, DesktopLocalLoraView, DesktopLocalModelView, DesktopManagedFileRemovalView, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopSettings, DesktopSoftwareUpdateView, DesktopStorageCleanupView, DesktopTrainingDatasetView, DesktopTrainingJobView, DesktopWebsiteLoraInstallProgress, DesktopWebsiteLoraView, DesktopWebsiteModelInstallProgress, DesktopWebsiteModelView } from "@drawhime/contracts";
+import type { DesktopAccountView, DesktopAiCleanJobView, DesktopBackgroundRemovalJobView, DesktopBootstrapView, DesktopCaptionJobView, DesktopLocalJobView, DesktopLocalLoraView, DesktopLocalModelView, DesktopManagedFileRemovalView, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopSettings, DesktopSoftwareUpdateView, DesktopStorageCleanupView, DesktopTrainingDatasetView, DesktopTrainingJobView, DesktopWebsiteLoraInstallProgress, DesktopWebsiteLoraView, DesktopWebsiteModelInstallProgress, DesktopWebsiteModelView } from "@drawhime/contracts";
 import type { DesktopAiSettings, DesktopAiSettingsUpdate } from "@drawhime/contracts";
 import { AlertTriangle, BookOpenCheck, CheckCircle2, Database, Download, Eraser, FlaskConical, FolderCog, Gauge, HardDrive, Image, Images, KeyRound, Layers3, LoaderCircle, Monitor, Moon, PackageCheck, RefreshCw, Save, ScanSearch, Settings2, ShieldCheck, Sparkles, Sun, Tags, Trash2, Upload } from "lucide-react";
 import { Copy } from "lucide-react";
@@ -9,7 +9,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from "react";
-import { applyDesktopSoftwareUpdate, cancelDesktopLocalJob, cleanupDesktopStorage, downloadDesktopResource, downloadDesktopSoftwareUpdate, importDesktopOfflineUpdate, inspectDesktopEnvironment, installDesktopResource, installDesktopWebsiteLora, installDesktopWebsiteModel, listDesktopCaptionJobs, listDesktopLocalJobs, listDesktopLocalLoras, listDesktopLocalModels, listDesktopTrainingDatasets, listDesktopTrainingJobs, listenDesktopCaptionJobUpdates, listenDesktopLocalJobUpdates, listenDesktopResourceInstallProgress, listenDesktopResourceProgress, listenDesktopTrainingJobUpdates, listenDesktopWebsiteLoraProgress, listenDesktopWebsiteModelProgress, loadDesktopAccountStatus, loadDesktopBootstrap, loadDesktopResourceCatalog, loadDesktopRuntimeStatus, loadDesktopSoftwareUpdateStatus, loadDesktopWebsiteLoras, loadDesktopWebsiteModels, pauseDesktopResourceDownload, rollbackDesktopSoftwareUpdate, saveDesktopSettings, selfTestDesktopRuntime, startDesktopRuntime, toggleDesktopGenerationPreview } from "./desktop-api";
+import { applyDesktopSoftwareUpdate, cancelDesktopLocalJob, cleanupDesktopStorage, downloadDesktopResource, downloadDesktopSoftwareUpdate, importDesktopOfflineUpdate, inspectDesktopEnvironment, installDesktopResource, installDesktopWebsiteLora, installDesktopWebsiteModel, listDesktopAiCleanJobs, listDesktopBackgroundRemovalJobs, listDesktopCaptionJobs, listDesktopLocalJobs, listDesktopLocalLoras, listDesktopLocalModels, listDesktopTrainingDatasets, listDesktopTrainingJobs, listenDesktopAiCleanJobUpdates, listenDesktopBackgroundRemovalJobUpdates, listenDesktopCaptionJobUpdates, listenDesktopLocalJobUpdates, listenDesktopResourceInstallProgress, listenDesktopResourceProgress, listenDesktopTrainingJobUpdates, listenDesktopWebsiteLoraProgress, listenDesktopWebsiteModelProgress, loadDesktopAccountStatus, loadDesktopBootstrap, loadDesktopResourceCatalog, loadDesktopRuntimeStatus, loadDesktopSoftwareUpdateStatus, loadDesktopWebsiteLoras, loadDesktopWebsiteModels, pauseDesktopResourceDownload, rollbackDesktopSoftwareUpdate, saveDesktopSettings, selfTestDesktopRuntime, startDesktopRuntime, toggleDesktopGenerationPreview } from "./desktop-api";
 import { analyzeDesktopImage, loadDesktopAiSettings, saveDesktopAiSettings, testDesktopAiSettings } from "./desktop-api";
 import { AccountPage } from "./AccountPage";
 import { LoraRepositoryPage, ModelRepositoryPage } from "./RepositoryPages";
@@ -80,6 +80,8 @@ export function App() {
   const [softwareUpdate, setSoftwareUpdate] = useState<DesktopSoftwareUpdateView | null>(null);
   const [trainingDatasets, setTrainingDatasets] = useState<DesktopTrainingDatasetView[]>([]);
   const [captionJobs, setCaptionJobs] = useState<DesktopCaptionJobView[]>([]);
+  const [backgroundRemovalJobs, setBackgroundRemovalJobs] = useState<DesktopBackgroundRemovalJobView[]>([]);
+  const [aiCleanJobs, setAiCleanJobs] = useState<DesktopAiCleanJobView[]>([]);
   const [trainingJobs, setTrainingJobs] = useState<DesktopTrainingJobView[]>([]);
   const [jobs, setJobs] = useState<DesktopLocalJobView[]>([]);
   const [account, setAccount] = useState<DesktopAccountView>({ status: "signed_out", identity: null, expiresAt: null, message: "尚未连接绘图姬账号" });
@@ -102,7 +104,7 @@ export function App() {
   const accountStatus = useRef<DesktopAccountView["status"]>("signed_out");
   const bootstrapReady = bootstrap !== null;
 
-  useEffect(() => { void loadDesktopBootstrap().then(async (state) => { lastEnvironmentCheckAt.current = Date.now(); setBootstrap(state); const accountRequest = loadDesktopAccountStatus().catch((): DesktopAccountView => ({ status: "offline", identity: null, expiresAt: null, message: "账号服务当前未连接；全部本地功能继续可用" })); const [catalog, nextModels, nextJobs, nextLoras, nextTrainingDatasets, nextCaptionJobs, nextTrainingJobs, nextAccount] = await Promise.all([loadDesktopResourceCatalog(), listDesktopLocalModels(), listDesktopLocalJobs(), listDesktopLocalLoras(), listDesktopTrainingDatasets(), listDesktopCaptionJobs(), listDesktopTrainingJobs(), accountRequest]); setResourceCatalog(catalog); setModels(nextModels); setJobs(nextJobs); setLoras(nextLoras); setTrainingDatasets(nextTrainingDatasets); setCaptionJobs(nextCaptionJobs); setTrainingJobs(nextTrainingJobs); setAccount(nextAccount); }).catch((error) => setMessage(errorMessage(error))).finally(() => setLoading(false)); }, []);
+  useEffect(() => { void loadDesktopBootstrap().then(async (state) => { lastEnvironmentCheckAt.current = Date.now(); setBootstrap(state); const accountRequest = loadDesktopAccountStatus().catch((): DesktopAccountView => ({ status: "offline", identity: null, expiresAt: null, message: "账号服务当前未连接；全部本地功能继续可用" })); const [catalog, nextModels, nextJobs, nextLoras, nextTrainingDatasets, nextCaptionJobs, nextBackgroundRemovalJobs, nextAiCleanJobs, nextTrainingJobs, nextAccount] = await Promise.all([loadDesktopResourceCatalog(), listDesktopLocalModels(), listDesktopLocalJobs(), listDesktopLocalLoras(), listDesktopTrainingDatasets(), listDesktopCaptionJobs(), listDesktopBackgroundRemovalJobs(), listDesktopAiCleanJobs(), listDesktopTrainingJobs(), accountRequest]); setResourceCatalog(catalog); setModels(nextModels); setJobs(nextJobs); setLoras(nextLoras); setTrainingDatasets(nextTrainingDatasets); setCaptionJobs(nextCaptionJobs); setBackgroundRemovalJobs(nextBackgroundRemovalJobs); setAiCleanJobs(nextAiCleanJobs); setTrainingJobs(nextTrainingJobs); setAccount(nextAccount); }).catch((error) => setMessage(errorMessage(error))).finally(() => setLoading(false)); }, []);
   useEffect(() => { void loadDesktopSoftwareUpdateStatus().then(setSoftwareUpdate).catch((error) => setMessage(errorMessage(error))); }, []);
   /** 主站仓库按需读取并合并同一时刻的并发请求，避免启动阶段缓存全部示例图。 */
   const ensureWebsiteModels = useCallback((forceRefresh = false): Promise<void> => {
@@ -155,6 +157,15 @@ export function App() {
   }, []);
   useEffect(() => {
     let unlisten: (() => void) | undefined;
+    void listenDesktopBackgroundRemovalJobUpdates((job) => {
+      setBackgroundRemovalJobs((current) => [job, ...current.filter((item) => item.id !== job.id)].sort((left, right) => right.createdAt.localeCompare(left.createdAt)));
+      if (captionDatasetRefresh.current !== null) window.clearTimeout(captionDatasetRefresh.current);
+      captionDatasetRefresh.current = window.setTimeout(() => void listDesktopTrainingDatasets().then(setTrainingDatasets).catch((error) => setMessage(errorMessage(error))), 120);
+    }).then((dispose) => { unlisten = dispose; }).catch((error) => setMessage(errorMessage(error)));
+    return () => unlisten?.();
+  }, []);
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
     void listenDesktopWebsiteModelProgress((progress) => setWebsiteModelProgress((current) => ({ ...current, [progress.modelId]: progress }))).then((dispose) => { unlisten = dispose; }).catch((error) => setMessage(errorMessage(error)));
     return () => unlisten?.();
   }, []);
@@ -171,6 +182,13 @@ export function App() {
       captionDatasetRefresh.current = window.setTimeout(() => void listDesktopTrainingDatasets().then(setTrainingDatasets).catch((error) => setMessage(errorMessage(error))), 120);
     }).then((dispose) => { unlisten = dispose; }).catch((error) => setMessage(errorMessage(error)));
     return () => { unlisten?.(); if (captionDatasetRefresh.current !== null) window.clearTimeout(captionDatasetRefresh.current); };
+  }, []);
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    void listenDesktopAiCleanJobUpdates((job) => {
+      setAiCleanJobs((current) => [job, ...current.filter((item) => item.id !== job.id)].sort((left, right) => right.createdAt.localeCompare(left.createdAt)));
+    }).then((dispose) => { unlisten = dispose; }).catch((error) => setMessage(errorMessage(error)));
+    return () => unlisten?.();
   }, []);
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -386,9 +404,17 @@ export function App() {
   const trainingDatasetUpdated = (dataset: DesktopTrainingDatasetView) => {
     setTrainingDatasets((current) => [dataset, ...current.filter((item) => item.id !== dataset.id)]);
   };
+  /** 删除训练集后只从可编辑列表移除，历史训练任务状态继续保留。 */
+  const trainingDatasetDeleted = (datasetId: string) => {
+    setTrainingDatasets((current) => current.filter((item) => item.id !== datasetId));
+  };
   /** 打标任务按 ID 实时更新，数据库事件是进度事实源。 */
   const captionJobUpdated = (job: DesktopCaptionJobView) => {
     setCaptionJobs((current) => [job, ...current.filter((item) => item.id !== job.id)].sort((left, right) => right.createdAt.localeCompare(left.createdAt)));
+  };
+  /** AI 清洗任务按 ID 更新；建议应用后由页面单独回写训练集。 */
+  const aiCleanJobUpdated = (job: DesktopAiCleanJobView) => {
+    setAiCleanJobs((current) => [job, ...current.filter((item) => item.id !== job.id)].sort((left, right) => right.createdAt.localeCompare(left.createdAt)));
   };
   /** 训练提交和取消均按 ID 更新同一条持久化任务。 */
   const trainingJobUpdated = (job: DesktopTrainingJobView) => {
@@ -422,11 +448,11 @@ export function App() {
       <header className="desktop-topbar"><div className="desktop-title"><span>本地模型工作站</span><strong>{pageTitle(page)}</strong></div></header>
        {bootstrap.environment.status !== "ready" && critical && <section className={`environment-banner is-${critical.severity}`}><AlertTriangle /><div><strong>{critical.title}</strong><span>{critical.message}</span></div><button onClick={() => { setPage("overview"); setOverviewSection("start"); }}>查看启动状态</button></section>}
       {message && <div className="desktop-notice" role="status" aria-live="polite"><span>{message}</span><button aria-label="关闭提示" onClick={() => setMessage("")}>×</button></div>}
-      <div hidden={page !== "generate"}><StableGenerationPage active={page === "generate"} models={models} loras={loras} websiteLoras={websiteLoras} websiteLoraProgress={websiteLoraProgress} inferenceReady={bootstrap.environment.capabilities.inference} defaultPrivacy={bootstrap.settings.defaultPrivacy} onCreated={jobCreated} onInstallWebsiteLora={(id) => void installWebsiteLora(id)} onOpenLoraLibrary={() => void ensureWebsiteLoras()} onTogglePreview={() => void toggleGenerationPreview()} onError={setMessage} /></div>
+      <div hidden={page !== "generate"}><StableGenerationPage active={page === "generate"} models={models} loras={loras} websiteLoras={websiteLoras} websiteLoraProgress={websiteLoraProgress} inferenceReady={bootstrap.environment.capabilities.inference} coreRunning={bootstrap.runtime.status === "ready"} defaultPrivacy={bootstrap.settings.defaultPrivacy} onCreated={jobCreated} onInstallWebsiteLora={(id) => void installWebsiteLora(id)} onOpenLoraLibrary={() => void ensureWebsiteLoras()} onTogglePreview={() => void toggleGenerationPreview()} onError={setMessage} /></div>
       <div hidden={page !== "models"}><StableModelRepositoryPage active={page === "models"} models={models} websiteModels={websiteModels} jobs={jobs} websiteProgress={websiteModelProgress} accountConnected={account.status === "connected"} modelRoot={bootstrap.settings.modelRoot} onRefresh={() => void refreshRepositories()} onInstallWebsite={(id) => void installWebsiteModel(id)} onImported={modelImported} onDeleted={(result) => void managedFileDeleted(result)} onOpenSettings={() => { setPage("settings"); setSettingsSection("general"); }} onError={setMessage} /></div>
-      <div hidden={page !== "loras"}><StableLoraRepositoryPage active={page === "loras"} loras={loras} websiteLoras={websiteLoras} jobs={jobs} progress={websiteLoraProgress} accountConnected={account.status === "connected"} modelRoot={bootstrap.settings.modelRoot} onRefresh={() => void refreshRepositories()} onInstall={(id) => void installWebsiteLora(id)} onImported={loraImported} onDeleted={(result) => void managedFileDeleted(result)} onError={setMessage} /></div>
-      <div hidden={page !== "captioning"}><StableCaptioningPage active={page === "captioning"} datasets={trainingDatasets} captionJobs={captionJobs} captioningReady={bootstrap.environment.capabilities.captioning} onUpdated={trainingDatasetUpdated} onCaptionJobUpdated={captionJobUpdated} onOpenResources={() => { setPage("overview"); setOverviewSection("start"); }} onError={setMessage} /></div>
-      <div hidden={page !== "training"}><StableLoraTrainingPage active={page === "training"} datasets={trainingDatasets} trainingJobs={trainingJobs} models={models} trainingReady={bootstrap.environment.capabilities.training} onTrainingJobUpdated={trainingJobUpdated} onOpenResources={() => { setPage("overview"); setOverviewSection("start"); }} onError={setMessage} /></div>
+      <div hidden={page !== "loras"}><StableLoraRepositoryPage active={page === "loras"} loras={loras} websiteLoras={websiteLoras} jobs={jobs} trainingJobs={trainingJobs} progress={websiteLoraProgress} accountConnected={account.status === "connected"} modelRoot={bootstrap.settings.modelRoot} onRefresh={() => void refreshRepositories()} onInstall={(id) => void installWebsiteLora(id)} onImported={loraImported} onDatasetCopied={trainingDatasetUpdated} onDeleted={(result) => void managedFileDeleted(result)} onError={setMessage} /></div>
+      <div hidden={page !== "captioning"}><StableCaptioningPage active={page === "captioning"} datasets={trainingDatasets} captionJobs={captionJobs} backgroundRemovalJobs={backgroundRemovalJobs} aiCleanJobs={aiCleanJobs} captioningReady={bootstrap.environment.capabilities.captioning} segmenterReady={Boolean(resourceCatalog?.resources.some((resource) => resource.kind === "segmenter" && resource.installed))} onUpdated={trainingDatasetUpdated} onDeleted={trainingDatasetDeleted} onCaptionJobUpdated={captionJobUpdated} onBackgroundRemovalJobUpdated={(job) => setBackgroundRemovalJobs((current) => [job, ...current.filter((item) => item.id !== job.id)].sort((left, right) => right.createdAt.localeCompare(left.createdAt)))} onAiCleanJobUpdated={aiCleanJobUpdated} onOpenResources={() => setDownloadQueueOpen(true)} onError={setMessage} /></div>
+      <div hidden={page !== "training"}><StableLoraTrainingPage active={page === "training"} datasets={trainingDatasets} trainingJobs={trainingJobs} models={models} trainingReady={bootstrap.environment.capabilities.training} coreRunning={bootstrap.runtime.status === "ready"} onTrainingJobUpdated={trainingJobUpdated} onOpenResources={() => { setPage("overview"); setOverviewSection("start"); }} onError={setMessage} /></div>
        <div hidden={page !== "overview"} className="workspace-page"><WorkspaceTabs label="启动与账号" value={overviewSection} onChange={(value) => setOverviewSection(value as OverviewSection)} items={[{ id: "start", label: "启动", status: bootstrap.runtime.status === "ready" ? "运行中" : startupInitialized ? "可启动" : "待初始化" }, { id: "account", label: "账号", status: account.status === "connected" ? "已连接" : "未连接" }]} /><div hidden={overviewSection !== "start"}><StableStartupPage active={page === "overview" && overviewSection === "start"} state={bootstrap} catalog={resourceCatalog} progress={resourceProgress} installProgress={installProgress} phase={startupPhase} checking={checking} bulkBusy={resourceBulkBusy} onPrimary={() => void runStartup()} onRecheck={() => void recheck()} onOpenQueue={() => setDownloadQueueOpen(true)} onInstallRequired={() => resourceCatalog && void installCoreResources(resourceCatalog)} onDownload={(resourceId) => void downloadResource(resourceId)} onPause={(resourceId) => void pauseDesktopResourceDownload(resourceId)} onInstall={(resourceId) => void installResource(resourceId)} /></div><div hidden={overviewSection !== "account"}><StableAccountPage active={page === "overview" && overviewSection === "account"} account={account} onChanged={setAccount} onError={setMessage} /></div></div>
       <div hidden={page !== "gallery"} className="workspace-page"><WorkspaceTabs label="图库与本地记录" value={gallerySection} onChange={(value) => setGallerySection(value as GallerySection)} items={[{ id: "gallery", label: "图库", status: `${jobs.filter((job) => job.artifact).length} 张` }, { id: "jobs", label: "记录", status: `${jobs.length} 项` }]} /><div hidden={gallerySection !== "gallery"}><StableLocalGalleryPage active={page === "gallery" && gallerySection === "gallery"} jobs={jobs} loras={loras} websiteLoras={websiteLoras} /></div><div hidden={gallerySection !== "jobs"}><StableLocalJobsPage active={page === "gallery" && gallerySection === "jobs"} jobs={jobs} loras={loras} websiteLoras={websiteLoras} onCancel={(id) => void cancelJob(id)} /></div></div>
       <div hidden={page !== "settings"} className="workspace-page"><WorkspaceTabs label="应用设置" value={settingsSection} onChange={(value) => setSettingsSection(value as SettingsSection)} items={[{ id: "general", label: "基础设置" }, { id: "ai", label: "AI 辅助" }, { id: "updates", label: "软件更新", status: softwareUpdateStatusLabel(softwareUpdate?.status || "unavailable") }]} /><div hidden={settingsSection !== "general"}><StableSettingsPage active={page === "settings" && settingsSection === "general"} value={bootstrap.settings} onSaved={(settings) => { setBootstrap((current) => current ? { ...current, settings } : current); setMessage("本地设置已保存"); void reloadResourceCatalog(); }} onError={setMessage} /></div><div hidden={settingsSection !== "ai"}><StableAiSettingsCard active={page === "settings" && settingsSection === "ai"} onMessage={setMessage} /></div><div hidden={settingsSection !== "updates"}><StableUpdatesPage active={page === "settings" && settingsSection === "updates"} value={softwareUpdate} onChanged={setSoftwareUpdate} onError={setMessage} /></div></div>

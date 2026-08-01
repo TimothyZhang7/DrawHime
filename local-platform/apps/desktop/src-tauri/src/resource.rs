@@ -30,7 +30,8 @@ use tauri::Emitter;
 use uuid::Uuid;
 use zip::ZipArchive;
 
-const MANIFEST_URL: &str = "https://www.xanime.ink/local-model-api/v1/desktop/resources/manifest";
+// 显式声明新客户端理解 Segmenter；旧客户端无参数时继续读取不含新枚举的兼容清单。
+const MANIFEST_URL: &str = "https://www.xanime.ink/local-model-api/v1/desktop/resources/manifest?capabilities=segmenter-v1";
 const MANIFEST_KEY_ID: &str = "stable-2026-07-29";
 const MANIFEST_PUBLIC_KEY: &str = "asfEBEwmIW6BPSgrLk9iNSgKqLprKisVFkq9QpJI8Pg=";
 const MAX_MANIFEST_BYTES: u64 = 5 * 1024 * 1024;
@@ -960,7 +961,7 @@ fn validate_item(item: &DesktopResourceManifestItem) -> Result<(), String> {
     }
     if !matches!(
         item.kind.as_str(),
-        "runtime" | "model" | "lora" | "captioner" | "trainer" | "application"
+        "runtime" | "model" | "lora" | "captioner" | "segmenter" | "trainer" | "application"
     ) {
         return Err(format!("资源类型不受支持：{}", item.id));
     }
@@ -1002,7 +1003,7 @@ fn validate_item(item: &DesktopResourceManifestItem) -> Result<(), String> {
             item.id
         ));
     }
-    if matches!(item.kind.as_str(), "runtime" | "captioner" | "trainer") && item.archive == "raw" {
+    if matches!(item.kind.as_str(), "runtime" | "captioner" | "segmenter" | "trainer") && item.archive == "raw" {
         return Err(format!("运行组件必须使用归档文件：{}", item.id));
     }
     if item.kind == "application"
@@ -1365,6 +1366,10 @@ fn install_destination(item: &DesktopResourceManifestItem, settings: &DesktopSet
         "captioner" => Path::new(&settings.runtime_root)
             .join("components")
             .join("captioner")
+            .join(&item.version),
+        "segmenter" => Path::new(&settings.runtime_root)
+            .join("components")
+            .join("segmenter")
             .join(&item.version),
         "trainer" => Path::new(&settings.runtime_root)
             .join("components")
@@ -1757,6 +1762,23 @@ fn validate_extracted_resource(
             if !required.is_file() {
                 return Err(format!(
                     "Captioner 归档缺少必需文件：{}",
+                    required.file_name().unwrap_or_default().to_string_lossy()
+                ));
+            }
+        }
+    }
+    if item.kind == "segmenter" {
+        for required in [
+            staging.join("runner.py"),
+            staging.join("u2net.onnx"),
+            staging
+                .join("site-packages")
+                .join("onnxruntime")
+                .join("__init__.py"),
+        ] {
+            if !required.is_file() {
+                return Err(format!(
+                    "Segmenter 归档缺少必需文件：{}",
                     required.file_name().unwrap_or_default().to_string_lossy()
                 ));
             }
@@ -2249,6 +2271,26 @@ mod tests {
     }
 
     #[test]
+    fn segmenter_requires_runner_model_and_private_onnx_runtime() {
+        let temporary = tempfile::tempdir().expect("创建 Segmenter 结构测试目录");
+        let staging = temporary.path();
+        let mut segmenter = item();
+        segmenter.kind = "segmenter".into();
+        fs::write(staging.join("runner.py"), b"# test").expect("写入 Segmenter Runner");
+        fs::write(staging.join("u2net.onnx"), b"onnx").expect("写入 Segmenter 模型");
+        assert!(validate_extracted_resource(&segmenter, staging).is_err());
+
+        let onnxruntime = staging.join("site-packages").join("onnxruntime");
+        fs::create_dir_all(&onnxruntime).expect("创建私有 ONNX Runtime 目录");
+        fs::write(onnxruntime.join("__init__.py"), b"# test")
+            .expect("写入私有 ONNX Runtime 标记");
+        validate_extracted_resource(&segmenter, staging)
+            .expect("完整 Segmenter 结构必须通过校验");
+        fs::remove_file(staging.join("u2net.onnx")).expect("移除 Segmenter 模型");
+        assert!(validate_extracted_resource(&segmenter, staging).is_err());
+    }
+
+    #[test]
     fn corrupted_archive_never_enters_verified_download_state() {
         let temporary = tempfile::tempdir().expect("创建损坏归档测试目录");
         let archive_path = temporary.path().join("runtime.zip");
@@ -2516,8 +2558,9 @@ mod tests {
             return;
         };
         let temporary = tempfile::tempdir().expect("创建 Trainer 安装目录");
+        // 发布归档门禁固定到支持完整高级训练参数的 Trainer v3。
         let item = DesktopResourceManifestItem {
-            id: "trainer.anima-sd-scripts".into(), kind: "trainer".into(), version: "anima-sd-scripts-37a1cbbc5725-py312-v2".into(), os: "windows".into(), arch: std::env::consts::ARCH.into(), file_name: "drawhime-anima-trainer-win-x64-v2.zip".into(), byte_size: 162_338_622, installed_size: 506_199_484, sha256: "c8344e24c9c54feffa02ea79253cae543220a0072165bd2e03b48721678dc993".into(), archive: "zip".into(), root_directory: Some("drawhime-anima-trainer".into()), install_directory: None, model_registration: None, application_update: None, required: true, sources: vec![DesktopResourceSource { kind: "mirror".into(), url: "https://www.xanime.ink/local-model-api/v1/desktop/resources/trainer.anima-sd-scripts/content".into() }],
+            id: "trainer.anima-sd-scripts".into(), kind: "trainer".into(), version: "anima-sd-scripts-37a1cbbc5725-py312-v3".into(), os: "windows".into(), arch: std::env::consts::ARCH.into(), file_name: "drawhime-anima-trainer-win-x64-v3.zip".into(), byte_size: 161_998_435, installed_size: 506_203_040, sha256: "aa8258aaea99306f11aec3aa2814124f5a9431b2b431b0b142e05ef77de0cc88".into(), archive: "zip".into(), root_directory: Some("drawhime-anima-trainer".into()), install_directory: None, model_registration: None, application_update: None, required: true, sources: vec![DesktopResourceSource { kind: "mirror".into(), url: "https://www.xanime.ink/local-model-api/v1/desktop/resources/trainer.anima-sd-scripts/content".into() }],
         };
         let runtime_root = temporary.path().join("runtime");
         fs::create_dir_all(runtime_root.join("current").join("python_embeded"))

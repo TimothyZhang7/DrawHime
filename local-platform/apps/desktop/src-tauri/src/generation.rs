@@ -178,9 +178,19 @@ fn build_workflow(request: &GenerationRequest) -> Result<Value, String> {
     }
     let positive = effective_positive_prompt(request);
     let negative = effective_negative_prompt(request);
-    let (sampling_width, sampling_height) = sampling_size(request.width, request.height, request.sampling_max_edge, request.sampling_pixel_budget);
-    let aspect = f64::from(request.width.max(request.height)) / f64::from(request.width.min(request.height));
-    let steps = if aspect >= request.aspect_step_threshold { request.aspect_adjusted_steps.min(request.steps) } else { request.steps };
+    let (sampling_width, sampling_height) = sampling_size(
+        request.width,
+        request.height,
+        request.sampling_max_edge,
+        request.sampling_pixel_budget,
+    );
+    let aspect =
+        f64::from(request.width.max(request.height)) / f64::from(request.width.min(request.height));
+    let steps = if aspect >= request.aspect_step_threshold {
+        request.aspect_adjusted_steps.min(request.steps)
+    } else {
+        request.steps
+    };
     let should_scale = sampling_width != request.width || sampling_height != request.height;
     let prefix = format!("drawhime_{}", request.job_id.replace('-', ""));
     if request.workflow_kind == "checkpoint" {
@@ -229,10 +239,24 @@ fn build_workflow(request: &GenerationRequest) -> Result<Value, String> {
 }
 
 /** 按用户选择顺序串联全部 LoRA，并让正负提示词与采样器共同使用最终模型和 CLIP。 */
-fn attach_loras(workflow: &mut Value, request: &GenerationRequest, base_model_node: &str, base_clip_slot: usize, positive_node: &str, negative_node: &str, sampler_node: &str) -> Result<(), String> {
-    let object = workflow.as_object_mut().ok_or_else(|| "ComfyUI 工作流结构异常".to_string())?;
+fn attach_loras(
+    workflow: &mut Value,
+    request: &GenerationRequest,
+    base_model_node: &str,
+    base_clip_slot: usize,
+    positive_node: &str,
+    negative_node: &str,
+    sampler_node: &str,
+) -> Result<(), String> {
+    let object = workflow
+        .as_object_mut()
+        .ok_or_else(|| "ComfyUI 工作流结构异常".to_string())?;
     let mut model_input = json!([base_model_node, 0]);
-    let mut clip_input = if request.workflow_kind == "checkpoint" { json!([base_model_node, base_clip_slot]) } else { json!(["2", base_clip_slot]) };
+    let mut clip_input = if request.workflow_kind == "checkpoint" {
+        json!([base_model_node, base_clip_slot])
+    } else {
+        json!(["2", base_clip_slot])
+    };
     for (index, lora) in request.loras.iter().enumerate() {
         let node_id = (20 + index).to_string();
         object.insert(node_id.clone(), json!({ "class_type": "LoraLoader", "inputs": { "model": model_input, "clip": clip_input, "lora_name": lora.file_name, "strength_model": lora.strength, "strength_clip": lora.clip_strength } }));
@@ -240,9 +264,24 @@ fn attach_loras(workflow: &mut Value, request: &GenerationRequest, base_model_no
         clip_input = json!([node_id, 1]);
     }
     if !request.loras.is_empty() {
-        object.get_mut(positive_node).and_then(|node| node.get_mut("inputs")).and_then(Value::as_object_mut).ok_or_else(|| "正面提示词节点结构异常".to_string())?.insert("clip".into(), clip_input.clone());
-        object.get_mut(negative_node).and_then(|node| node.get_mut("inputs")).and_then(Value::as_object_mut).ok_or_else(|| "负面提示词节点结构异常".to_string())?.insert("clip".into(), clip_input);
-        object.get_mut(sampler_node).and_then(|node| node.get_mut("inputs")).and_then(Value::as_object_mut).ok_or_else(|| "采样器节点结构异常".to_string())?.insert("model".into(), model_input);
+        object
+            .get_mut(positive_node)
+            .and_then(|node| node.get_mut("inputs"))
+            .and_then(Value::as_object_mut)
+            .ok_or_else(|| "正面提示词节点结构异常".to_string())?
+            .insert("clip".into(), clip_input.clone());
+        object
+            .get_mut(negative_node)
+            .and_then(|node| node.get_mut("inputs"))
+            .and_then(Value::as_object_mut)
+            .ok_or_else(|| "负面提示词节点结构异常".to_string())?
+            .insert("clip".into(), clip_input);
+        object
+            .get_mut(sampler_node)
+            .and_then(|node| node.get_mut("inputs"))
+            .and_then(Value::as_object_mut)
+            .ok_or_else(|| "采样器节点结构异常".to_string())?
+            .insert("model".into(), model_input);
     }
     Ok(())
 }
@@ -254,8 +293,20 @@ fn effective_positive_prompt(request: &GenerationRequest) -> String {
         return prompt.into();
     }
     let lower = prompt.to_ascii_lowercase();
-    let missing = request.quality_prefix.as_deref().unwrap_or("").split(',').map(str::trim).filter(|item| !item.is_empty() && !lower.contains(&item.to_ascii_lowercase())).collect::<Vec<_>>();
-    missing.into_iter().chain(std::iter::once(prompt)).filter(|item| !item.is_empty()).collect::<Vec<_>>().join(", ")
+    let missing = request
+        .quality_prefix
+        .as_deref()
+        .unwrap_or("")
+        .split(',')
+        .map(str::trim)
+        .filter(|item| !item.is_empty() && !lower.contains(&item.to_ascii_lowercase()))
+        .collect::<Vec<_>>();
+    missing
+        .into_iter()
+        .chain(std::iter::once(prompt))
+        .filter(|item| !item.is_empty())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /** 用户负面提示词优先，留空时才应用模型级默认负面词。 */
@@ -265,7 +316,12 @@ fn effective_negative_prompt(request: &GenerationRequest) -> String {
         return user.into();
     }
     if request.default_negative_enabled {
-        return request.default_negative_prompt.as_deref().unwrap_or("").trim().into();
+        return request
+            .default_negative_prompt
+            .as_deref()
+            .unwrap_or("")
+            .trim()
+            .into();
     }
     String::new()
 }
@@ -279,7 +335,10 @@ fn sampling_size(width: u32, height: u32, max_edge: u32, pixel_budget: u32) -> (
     let edge_scale = f64::from(max_edge) / width_f.max(height_f);
     let budget_scale = (budget / (width_f * height_f)).sqrt();
     let scale = edge_scale.min(budget_scale);
-    (align_dimension(width_f * scale, max_edge), align_dimension(height_f * scale, max_edge))
+    (
+        align_dimension(width_f * scale, max_edge),
+        align_dimension(height_f * scale, max_edge),
+    )
 }
 
 /** 维度四舍五入到 8 的倍数，并限制在有效潜空间范围。 */
@@ -428,8 +487,16 @@ mod tests {
     fn multiple_loras_are_chained_into_model_and_both_conditionings() {
         let mut request = test_request("anima");
         request.loras = vec![
-            GenerationLora { file_name: "character.safetensors".into(), strength: 0.8, clip_strength: 0.65 },
-            GenerationLora { file_name: "style.safetensors".into(), strength: 0.55, clip_strength: 0.4 },
+            GenerationLora {
+                file_name: "character.safetensors".into(),
+                strength: 0.8,
+                clip_strength: 0.65,
+            },
+            GenerationLora {
+                file_name: "style.safetensors".into(),
+                strength: 0.55,
+                clip_strength: 0.4,
+            },
         ];
         let workflow = build_workflow(&request).expect("构建多 LoRA 工作流");
         assert_eq!(workflow["20"]["inputs"]["model"], json!(["1", 0]));
@@ -441,7 +508,10 @@ mod tests {
         assert_eq!(workflow["21"]["inputs"]["strength_clip"], 0.4);
         assert_eq!(workflow["20"]["inputs"]["strength_model"], 0.8);
         assert_eq!(workflow["21"]["inputs"]["strength_model"], 0.55);
-        assert_eq!(workflow["20"]["inputs"]["lora_name"], "character.safetensors");
+        assert_eq!(
+            workflow["20"]["inputs"]["lora_name"],
+            "character.safetensors"
+        );
         assert_eq!(workflow["21"]["inputs"]["lora_name"], "style.safetensors");
     }
 
@@ -466,13 +536,27 @@ mod tests {
         request.upscale_method = "bicubic".into();
         request.quality_prompt_enabled = false;
         request.default_negative_enabled = true;
-        request.default_negative_prompt = Some("default negative must not replace user input".into());
+        request.default_negative_prompt =
+            Some("default negative must not replace user input".into());
         request.seed = 1_234_567;
-        request.loras = vec![GenerationLora { file_name: "character.safetensors".into(), strength: 0.9, clip_strength: 0.7 }];
+        request.loras = vec![GenerationLora {
+            file_name: "character.safetensors".into(),
+            strength: 0.9,
+            clip_strength: 0.7,
+        }];
         let workflow = build_workflow(&request).expect("构建完整 Anima 工作流");
-        assert_eq!(workflow["1"]["inputs"]["unet_name"], "waiANIMA_v10Base10.safetensors");
-        assert_eq!(workflow["2"]["inputs"]["clip_name"], "qwen_3_06b_base.safetensors");
-        assert_eq!(workflow["3"]["inputs"]["vae_name"], "qwen_image_vae.safetensors");
+        assert_eq!(
+            workflow["1"]["inputs"]["unet_name"],
+            "waiANIMA_v10Base10.safetensors"
+        );
+        assert_eq!(
+            workflow["2"]["inputs"]["clip_name"],
+            "qwen_3_06b_base.safetensors"
+        );
+        assert_eq!(
+            workflow["3"]["inputs"]["vae_name"],
+            "qwen_image_vae.safetensors"
+        );
         assert_eq!(workflow["4"]["inputs"]["text"], request.prompt);
         assert_eq!(workflow["5"]["inputs"]["text"], "bad anatomy, blurry");
         assert_eq!(workflow["7"]["inputs"]["seed"], 1_234_567);
@@ -494,7 +578,11 @@ mod tests {
     #[test]
     fn checkpoint_lora_uses_independent_model_and_clip_weights() {
         let mut request = test_request("checkpoint");
-        request.loras = vec![GenerationLora { file_name: "checkpoint-style.safetensors".into(), strength: 1.1, clip_strength: 0.45 }];
+        request.loras = vec![GenerationLora {
+            file_name: "checkpoint-style.safetensors".into(),
+            strength: 1.1,
+            clip_strength: 0.45,
+        }];
         let workflow = build_workflow(&request).expect("构建 Checkpoint LoRA 工作流");
         assert_eq!(workflow["20"]["inputs"]["model"], json!(["1", 0]));
         assert_eq!(workflow["20"]["inputs"]["clip"], json!(["1", 1]));
@@ -534,23 +622,92 @@ mod tests {
         request.default_negative_prompt = Some("worst quality".into());
         let workflow = build_workflow(&request).expect("构建极端画幅工作流");
         assert_eq!(workflow["7"]["inputs"]["steps"], 34);
-        assert_eq!(workflow["4"]["inputs"]["text"], "masterpiece, best quality, subject");
+        assert_eq!(
+            workflow["4"]["inputs"]["text"],
+            "masterpiece, best quality, subject"
+        );
         assert_eq!(workflow["5"]["inputs"]["text"], "worst quality");
     }
 
     #[test]
     fn real_anima_runtime_generates_verified_png() {
-        let Ok(runtime_root) = std::env::var("DRAWHIME_GENERATION_TEST_RUNTIME_ROOT") else { return; };
-        let Ok(model_root) = std::env::var("DRAWHIME_GENERATION_TEST_MODEL_ROOT") else { return; };
-        let output_root = std::env::var("DRAWHIME_GENERATION_TEST_OUTPUT_ROOT").map(PathBuf::from).unwrap_or_else(|_| tempfile::tempdir().expect("创建真实生成输出目录").keep());
+        let Ok(runtime_root) = std::env::var("DRAWHIME_GENERATION_TEST_RUNTIME_ROOT") else {
+            return;
+        };
+        let Ok(model_root) = std::env::var("DRAWHIME_GENERATION_TEST_MODEL_ROOT") else {
+            return;
+        };
+        let output_root = std::env::var("DRAWHIME_GENERATION_TEST_OUTPUT_ROOT")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| tempfile::tempdir().expect("创建真实生成输出目录").keep());
         let temporary = tempfile::tempdir().expect("创建真实生成状态目录");
-        let settings = DesktopSettings { theme_mode: "system".into(), font_scale: 1.1, default_privacy: "private".into(), auto_upload: true, model_root, output_root: output_root.to_string_lossy().into_owned(), runtime_root, upload_concurrency: 2, wifi_only: false, bandwidth_limit_kib: None };
+        let settings = DesktopSettings {
+            theme_mode: "system".into(),
+            font_scale: 1.1,
+            default_privacy: "private".into(),
+            auto_upload: true,
+            model_root,
+            output_root: output_root.to_string_lossy().into_owned(),
+            runtime_root,
+            upload_concurrency: 2,
+            wifi_only: false,
+            bandwidth_limit_kib: None,
+        };
         let controller = RuntimeController::new();
-        controller.self_test(&settings, temporary.path()).expect("真实 Runtime 自检");
+        controller
+            .self_test(&settings, temporary.path())
+            .expect("真实 Runtime 自检");
         let endpoint = controller.endpoint().expect("读取 Runtime 端点");
         // 设置真实 LoRA 文件名时，同一集成测试同时覆盖 Runtime 的 LoraLoader 链路。
-        let loras = std::env::var("DRAWHIME_GENERATION_TEST_LORA_FILE").ok().map(|file_name| vec![GenerationLora { file_name, strength: 0.8, clip_strength: 0.8 }]).unwrap_or_default();
-        let result = generate_image(&endpoint, GenerationRequest { job_id: Uuid::new_v4().to_string(), workflow_kind: "anima".into(), model_file_name: "animeBulldozer_anima.safetensors".into(), text_encoder_file_name: Some("qwen_3_06b_base.safetensors".into()), vae_file_name: Some("qwen_image_vae.safetensors".into()), loras, prompt: "masterpiece, best quality, 1girl, solo, blue hair, white background".into(), negative_prompt: Some("worst quality, low quality, blurry, bad anatomy".into()), width: 512, height: 512, steps: 4, cfg: 4.0, sampler_name: "euler".into(), scheduler_name: "normal".into(), sampling_max_edge: 512, sampling_pixel_budget: 262_144, aspect_step_threshold: 1.5, aspect_adjusted_steps: 4, upscale_method: "lanczos".into(), quality_prompt_enabled: false, quality_prefix: None, default_negative_enabled: false, default_negative_prompt: None, seed: 20260729, output_root, runtime_output_root: temporary.path().join("runtime-state").join("comfy-output") }, |_| Ok(()), || false).map_err(|failure| match failure { GenerationFailure::Cancelled => "生成被取消".to_string(), GenerationFailure::Failed(error) => error }).expect("真实 Anima 生图");
+        let loras = std::env::var("DRAWHIME_GENERATION_TEST_LORA_FILE")
+            .ok()
+            .map(|file_name| {
+                vec![GenerationLora {
+                    file_name,
+                    strength: 0.8,
+                    clip_strength: 0.8,
+                }]
+            })
+            .unwrap_or_default();
+        let result = generate_image(
+            &endpoint,
+            GenerationRequest {
+                job_id: Uuid::new_v4().to_string(),
+                workflow_kind: "anima".into(),
+                model_file_name: "animeBulldozer_anima.safetensors".into(),
+                text_encoder_file_name: Some("qwen_3_06b_base.safetensors".into()),
+                vae_file_name: Some("qwen_image_vae.safetensors".into()),
+                loras,
+                prompt: "masterpiece, best quality, 1girl, solo, blue hair, white background"
+                    .into(),
+                negative_prompt: Some("worst quality, low quality, blurry, bad anatomy".into()),
+                width: 512,
+                height: 512,
+                steps: 4,
+                cfg: 4.0,
+                sampler_name: "euler".into(),
+                scheduler_name: "normal".into(),
+                sampling_max_edge: 512,
+                sampling_pixel_budget: 262_144,
+                aspect_step_threshold: 1.5,
+                aspect_adjusted_steps: 4,
+                upscale_method: "lanczos".into(),
+                quality_prompt_enabled: false,
+                quality_prefix: None,
+                default_negative_enabled: false,
+                default_negative_prompt: None,
+                seed: 20260729,
+                output_root,
+                runtime_output_root: temporary.path().join("runtime-state").join("comfy-output"),
+            },
+            |_| Ok(()),
+            || false,
+        )
+        .map_err(|failure| match failure {
+            GenerationFailure::Cancelled => "生成被取消".to_string(),
+            GenerationFailure::Failed(error) => error,
+        })
+        .expect("真实 Anima 生图");
         assert!(Path::new(&result.path).is_file());
         assert_eq!((result.width, result.height), (512, 512));
         assert_eq!(result.sha256.len(), 64);

@@ -1,5 +1,5 @@
 /** 本文件封装 WebView 到 Tauri 本地核心的受类型约束命令。 */
-import type { DesktopAccountView, DesktopAuthorizationRequestView, DesktopAuthorizationStartRequest, DesktopBootstrapView, DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopEnvironmentReport, DesktopGalleryPrivacy, DesktopGallerySyncItem, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopManagedFileDeleteInput, DesktopManagedFileRemovalView, DesktopOfflineUpdateImportInput, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView, DesktopSettings, DesktopSettingsUpdate, DesktopSoftwareUpdateView, DesktopStorageCleanupInput, DesktopStorageCleanupView, DesktopTrainingAssetDeleteInput, DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetIdInput, DesktopTrainingDatasetView, DesktopTrainingImagesAddInput, DesktopTrainingJobCreateInput, DesktopTrainingJobView, DesktopTrainingTagTranslationInput, DesktopTrainingTriggerWordsUpdateInput, DesktopWebsiteLoraInstallProgress, DesktopWebsiteLoraView, DesktopWebsiteModelInstallProgress, DesktopWebsiteModelView, TrainingTagTranslationView } from "@drawhime/contracts";
+import type { DesktopAccountView, DesktopAiCleanApplyInput, DesktopAiCleanJobCreateInput, DesktopAiCleanJobView, DesktopAiCleanUndoInput, DesktopAuthorizationRequestView, DesktopAuthorizationStartRequest, DesktopBackgroundRemovalJobCreateInput, DesktopBackgroundRemovalJobView, DesktopBootstrapView, DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopEnvironmentReport, DesktopGalleryPrivacy, DesktopGallerySyncItem, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopManagedFileDeleteInput, DesktopManagedFileRemovalView, DesktopOfflineUpdateImportInput, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView, DesktopSettings, DesktopSettingsUpdate, DesktopSoftwareUpdateView, DesktopStorageCleanupInput, DesktopStorageCleanupView, DesktopTrainingAssetDeleteInput, DesktopTrainingAssetVariantSelectInput, DesktopTrainingBatchTagsInput, DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetIdInput, DesktopTrainingDatasetImportInput, DesktopTrainingDatasetImportPreview, DesktopTrainingDatasetImportPreviewInput, DesktopTrainingDatasetView, DesktopTrainingImagesAddInput, DesktopTrainingJobCreateInput, DesktopTrainingJobView, DesktopTrainingManualMaskInput, DesktopTrainingSnapshotCopyInput, DesktopTrainingSnapshotView, DesktopTrainingTagTranslationInput, DesktopTrainingTriggerWordsUpdateInput, DesktopWebsiteLoraInstallProgress, DesktopWebsiteLoraView, DesktopWebsiteModelInstallProgress, DesktopWebsiteModelView, TrainingTagTranslationView } from "@drawhime/contracts";
 import type { DesktopAiAnalyzeInput, DesktopAiAnalyzeView, DesktopAiSettings, DesktopAiSettingsUpdate } from "@drawhime/contracts";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -95,6 +95,12 @@ export function applyDesktopSoftwareUpdate(): Promise<DesktopSoftwareUpdateView>
 export function rollbackDesktopSoftwareUpdate(): Promise<DesktopSoftwareUpdateView> { return invoke("desktop_rollback_software_update"); }
 /** 创建本地持久训练集。 */
 export function createDesktopTrainingDataset(input: DesktopTrainingDatasetCreateInput): Promise<DesktopTrainingDatasetView> { return invoke("desktop_create_training_dataset", { input }); }
+/** 删除可编辑训练集目录；独立训练快照和历史训练记录保持不变。 */
+export function deleteDesktopTrainingDataset(input: DesktopTrainingDatasetIdInput): Promise<string> { return invoke("desktop_delete_training_dataset", { input }); }
+/** 安全预检训练集文件夹或压缩包，不创建数据库记录。 */
+export function previewDesktopTrainingDatasetImport(input: DesktopTrainingDatasetImportPreviewInput): Promise<DesktopTrainingDatasetImportPreview> { return invoke("desktop_preview_training_dataset_import", { input }); }
+/** 用户确认后按预检快照原子创建训练集。 */
+export function importDesktopTrainingDataset(input: DesktopTrainingDatasetImportInput): Promise<DesktopTrainingDatasetView> { return invoke("desktop_import_training_dataset", { input }); }
 /** 读取全部本地训练集与图片 Caption。 */
 export function listDesktopTrainingDatasets(): Promise<DesktopTrainingDatasetView[]> { return invoke("desktop_list_training_datasets"); }
 /** 更新训练集触发词并返回最新持久化视图。 */
@@ -103,7 +109,9 @@ export function updateDesktopTrainingTriggerWords(input: DesktopTrainingTriggerW
 export function addDesktopTrainingImages(input: DesktopTrainingImagesAddInput): Promise<DesktopTrainingDatasetView> { return invoke("desktop_add_training_images", { input }); }
 /** 保存单张训练图片 Caption。 */
 export function updateDesktopTrainingCaption(input: DesktopTrainingCaptionUpdateInput): Promise<DesktopTrainingDatasetView> { return invoke("desktop_update_training_caption", { input }); }
-/** 删除单张未被训练任务快照引用的训练图片。 */
+/** 在一次核心事务中批量添加或删除训练标签。 */
+export function batchUpdateDesktopTrainingTags(input: DesktopTrainingBatchTagsInput): Promise<DesktopTrainingDatasetView> { return invoke("desktop_batch_update_training_tags", { input }); }
+/** 删除没有活动打标、清洗或抠图任务的单张原训练图片。 */
 export function deleteDesktopTrainingAsset(input: DesktopTrainingAssetDeleteInput): Promise<DesktopTrainingDatasetView> { return invoke("desktop_delete_training_asset", { input }); }
 /** 使用设备会话批量读取训练标签的中文翻译和颜色。 */
 export function translateDesktopTrainingTags(input: DesktopTrainingTagTranslationInput): Promise<TrainingTagTranslationView> { return invoke("desktop_translate_training_tags", { input }); }
@@ -113,12 +121,52 @@ export function createDesktopCaptionJob(input: DesktopCaptionJobCreateInput): Pr
 export function listDesktopCaptionJobs(): Promise<DesktopCaptionJobView[]> { return invoke("desktop_list_caption_jobs"); }
 /** 取消排队或运行中的离线自动打标任务。 */
 export function cancelDesktopCaptionJob(id: string): Promise<DesktopCaptionJobView> { return invoke("desktop_cancel_caption_job", { id }); }
+/** 暂停持久化自动打标任务。 */
+export function pauseDesktopCaptionJob(id: string): Promise<DesktopCaptionJobView> { return invoke("desktop_pause_caption_job", { id }); }
+/** 恢复持久化自动打标任务。 */
+export function resumeDesktopCaptionJob(id: string): Promise<DesktopCaptionJobView> { return invoke("desktop_resume_caption_job", { id }); }
 /** 监听 SQLite 已持久化的离线自动打标状态。 */
 export function listenDesktopCaptionJobUpdates(handler: (job: DesktopCaptionJobView) => void): Promise<UnlistenFn> { return listen<DesktopCaptionJobView>("desktop-caption-job-updated", (event) => handler(event.payload)); }
+/** 创建单图或批量自动抠图任务。 */
+export function createDesktopBackgroundRemovalJob(input: DesktopBackgroundRemovalJobCreateInput): Promise<DesktopBackgroundRemovalJobView> { return invoke("desktop_create_background_removal_job", { input }); }
+/** 返回最近的自动抠图任务。 */
+export function listDesktopBackgroundRemovalJobs(): Promise<DesktopBackgroundRemovalJobView[]> { return invoke("desktop_list_background_removal_jobs"); }
+/** 暂停自动抠图任务。 */
+export function pauseDesktopBackgroundRemovalJob(id: string): Promise<DesktopBackgroundRemovalJobView> { return invoke("desktop_pause_background_removal_job", { id }); }
+/** 恢复自动抠图任务。 */
+export function resumeDesktopBackgroundRemovalJob(id: string): Promise<DesktopBackgroundRemovalJobView> { return invoke("desktop_resume_background_removal_job", { id }); }
+/** 取消自动抠图任务。 */
+export function cancelDesktopBackgroundRemovalJob(id: string): Promise<DesktopBackgroundRemovalJobView> { return invoke("desktop_cancel_background_removal_job", { id }); }
+/** 保存手动 PNG alpha 蒙版。 */
+export function saveDesktopTrainingManualMask(input: DesktopTrainingManualMaskInput): Promise<DesktopTrainingDatasetView> { return invoke("desktop_save_training_manual_mask", { input }); }
+/** 选择后续训练使用的原图或派生版本。 */
+export function selectDesktopTrainingAssetVariant(input: DesktopTrainingAssetVariantSelectInput): Promise<DesktopTrainingDatasetView> { return invoke("desktop_select_training_asset_variant", { input }); }
+/** 监听抠图任务持久化状态。 */
+export function listenDesktopBackgroundRemovalJobUpdates(handler: (job: DesktopBackgroundRemovalJobView) => void): Promise<UnlistenFn> { return listen<DesktopBackgroundRemovalJobView>("desktop-background-removal-job-updated", (event) => handler(event.payload)); }
+/** 创建只生成建议的单图或批量 AI 标签清洗任务。 */
+export function createDesktopAiCleanJob(input: DesktopAiCleanJobCreateInput): Promise<DesktopAiCleanJobView> { return invoke("desktop_create_ai_clean_job", { input }); }
+/** 返回最近的持久化 AI 标签清洗任务。 */
+export function listDesktopAiCleanJobs(): Promise<DesktopAiCleanJobView[]> { return invoke("desktop_list_ai_clean_jobs"); }
+/** 幂等取消排队或运行中的 AI 标签清洗任务。 */
+export function cancelDesktopAiCleanJob(id: string): Promise<DesktopAiCleanJobView> { return invoke("desktop_cancel_ai_clean_job", { id }); }
+/** 暂停持久化 AI 标签清洗任务。 */
+export function pauseDesktopAiCleanJob(id: string): Promise<DesktopAiCleanJobView> { return invoke("desktop_pause_ai_clean_job", { id }); }
+/** 恢复持久化 AI 标签清洗任务。 */
+export function resumeDesktopAiCleanJob(id: string): Promise<DesktopAiCleanJobView> { return invoke("desktop_resume_ai_clean_job", { id }); }
+/** 原子应用用户接受的 AI 标签删除与新增建议。 */
+export function applyDesktopAiClean(input: DesktopAiCleanApplyInput): Promise<DesktopTrainingDatasetView> { return invoke("desktop_apply_ai_clean", { input }); }
+/** 撤销未被后续编辑覆盖的 AI 标签清洗。 */
+export function undoDesktopAiClean(input: DesktopAiCleanUndoInput): Promise<DesktopTrainingDatasetView> { return invoke("desktop_undo_ai_clean", { input }); }
+/** 监听 SQLite 已持久化的 AI 标签清洗状态。 */
+export function listenDesktopAiCleanJobUpdates(handler: (job: DesktopAiCleanJobView) => void): Promise<UnlistenFn> { return listen<DesktopAiCleanJobView>("desktop-ai-clean-job-updated", (event) => handler(event.payload)); }
 /** 创建本地 LoRA 训练任务并立即返回排队记录。 */
 export function createDesktopTrainingJob(input: DesktopTrainingJobCreateInput): Promise<DesktopTrainingJobView> { return invoke("desktop_create_training_job", { input }); }
 /** 读取最近的持久化本地 LoRA 训练任务。 */
 export function listDesktopTrainingJobs(): Promise<DesktopTrainingJobView[]> { return invoke("desktop_list_training_jobs"); }
+/** 读取任务创建时冻结的完整训练快照。 */
+export function getDesktopTrainingSnapshot(id: string): Promise<DesktopTrainingSnapshotView> { return invoke("desktop_get_training_snapshot", { id }); }
+/** 从只读训练快照创建新的可编辑训练集。 */
+export function copyDesktopTrainingSnapshot(input: DesktopTrainingSnapshotCopyInput): Promise<DesktopTrainingDatasetView> { return invoke("desktop_copy_training_snapshot", { input }); }
 /** 取消排队或运行中的本地 LoRA 训练任务。 */
 export function cancelDesktopTrainingJob(id: string): Promise<DesktopTrainingJobView> { return invoke("desktop_cancel_training_job", { id }); }
 /** 监听 SQLite 已持久化的本地 LoRA 训练状态。 */

@@ -2,13 +2,15 @@
 
 use crate::{
     models::{
-        DesktopOfflineUpdateImportInput, DesktopResourceManifestItem,
-        DesktopSoftwareUpdateView, DesktopSettings,
+        DesktopOfflineUpdateImportInput, DesktopResourceManifestItem, DesktopSettings,
+        DesktopSoftwareUpdateView,
     },
     resource,
 };
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use rusqlite::{params, Connection};
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 use std::{
     fs,
     path::Path,
@@ -16,8 +18,6 @@ use std::{
     thread,
     time::Duration,
 };
-#[cfg(target_os = "windows")]
-use std::os::windows::process::CommandExt;
 
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 const APPLY_STALE_MINUTES: i64 = 30;
@@ -185,13 +185,9 @@ fn build_status(
     let rollback_version = latest_trusted_update(database, app_data_dir, |order| order < 0)?
         .map(|value| value.record.version);
     match latest_online_update() {
-        Ok(online) => build_available_view(
-            app_data_dir,
-            online,
-            trusted_local,
-            rollback_version,
-            None,
-        ),
+        Ok(online) => {
+            build_available_view(app_data_dir, online, trusted_local, rollback_version, None)
+        }
         Err(error) => build_available_view(
             app_data_dir,
             None,
@@ -291,8 +287,7 @@ fn launch_record(
     fs::write(&helper, windows_update_helper_script())
         .map_err(|error| format!("写入更新辅助脚本失败：{error}"))?;
     if result_path.exists() {
-        fs::remove_file(&result_path)
-            .map_err(|error| format!("清理旧更新结果失败：{error}"))?;
+        fs::remove_file(&result_path).map_err(|error| format!("清理旧更新结果失败：{error}"))?;
     }
     if started_path.exists() {
         fs::remove_file(&started_path)
@@ -377,8 +372,8 @@ fn latest_online_update() -> Result<Option<DesktopResourceManifestItem>, String>
 }
 
 fn open_database(path: &Path) -> Result<Connection, String> {
-    let database = Connection::open(path)
-        .map_err(|error| format!("打开软件更新数据库失败：{error}"))?;
+    let database =
+        Connection::open(path).map_err(|error| format!("打开软件更新数据库失败：{error}"))?;
     database
         .execute_batch("PRAGMA busy_timeout=5000;")
         .map_err(|error| format!("初始化软件更新数据库失败：{error}"))?;
@@ -452,7 +447,9 @@ fn reconcile_applying_records(
         .prepare("SELECT version,updated_at FROM software_updates WHERE status='applying'")
         .map_err(|error| format!("读取待确认软件更新失败：{error}"))?;
     let applying = statement
-        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
         .map_err(|error| format!("查询待确认软件更新失败：{error}"))?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| format!("解析待确认软件更新失败：{error}"))?;
@@ -472,7 +469,10 @@ fn reconcile_applying_records(
             .ok()
             .and_then(|value| value.trim().parse::<i32>().ok());
         let stale = DateTime::parse_from_rfc3339(&updated_at)
-            .map(|value| now.signed_duration_since(value.with_timezone(&Utc)) >= ChronoDuration::minutes(APPLY_STALE_MINUTES))
+            .map(|value| {
+                now.signed_duration_since(value.with_timezone(&Utc))
+                    >= ChronoDuration::minutes(APPLY_STALE_MINUTES)
+            })
             .unwrap_or(true);
         let error = match exit_code {
             Some(0) => Some("安装器已结束，但当前运行版本未更新".to_string()),
@@ -570,14 +570,8 @@ mod tests {
 
     #[test]
     fn semantic_versions_compare_numerically() {
-        assert_eq!(
-            compare_versions("0.10.0", "0.9.9").expect("比较版本"),
-            1
-        );
-        assert_eq!(
-            compare_versions("1.0.0", "1.0.0").expect("比较相同版本"),
-            0
-        );
+        assert_eq!(compare_versions("0.10.0", "0.9.9").expect("比较版本"), 1);
+        assert_eq!(compare_versions("1.0.0", "1.0.0").expect("比较相同版本"), 0);
         assert!(compare_versions("1.0", "1.0.0").is_err());
     }
 
@@ -636,8 +630,15 @@ mod tests {
             params!["a".repeat(64), now.to_rfc3339()],
         ).expect("写入待确认更新");
         fs::write(apply_result_path(temporary.path(), "1.2.5"), "1603").expect("写入安装器退出码");
-        reconcile_applying_records(&database, temporary.path(), "1.2.4", now).expect("收敛安装器失败状态");
-        let (status, error): (String, Option<String>) = database.query_row("SELECT status,error FROM software_updates WHERE version='1.2.5'", [], |row| Ok((row.get(0)?, row.get(1)?))).expect("读取安装器失败状态");
+        reconcile_applying_records(&database, temporary.path(), "1.2.4", now)
+            .expect("收敛安装器失败状态");
+        let (status, error): (String, Option<String>) = database
+            .query_row(
+                "SELECT status,error FROM software_updates WHERE version='1.2.5'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("读取安装器失败状态");
         assert_eq!(status, "failed");
         assert_eq!(error.as_deref(), Some("安装器退出码 1603"));
     }
@@ -653,8 +654,15 @@ mod tests {
             "INSERT INTO software_updates(version,resource_id,file_name,sha256,byte_size,source,status,created_at,updated_at) VALUES('1.2.6','application.desktop','update.exe',?1,10,'online','applying',?2,?2)",
             params!["a".repeat(64), stale_at],
         ).expect("写入超时更新");
-        reconcile_applying_records(&database, temporary.path(), "1.2.5", now).expect("收敛更新超时状态");
-        let (status, error): (String, Option<String>) = database.query_row("SELECT status,error FROM software_updates WHERE version='1.2.6'", [], |row| Ok((row.get(0)?, row.get(1)?))).expect("读取更新超时状态");
+        reconcile_applying_records(&database, temporary.path(), "1.2.5", now)
+            .expect("收敛更新超时状态");
+        let (status, error): (String, Option<String>) = database
+            .query_row(
+                "SELECT status,error FROM software_updates WHERE version='1.2.6'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("读取更新超时状态");
         assert_eq!(status, "failed");
         assert_eq!(error.as_deref(), Some("软件更新在规定时间内未完成"));
     }

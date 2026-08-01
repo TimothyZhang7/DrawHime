@@ -26,7 +26,7 @@
 | `GET /ready` | 运维/调度 | 所有服务 | `ServiceReadinessView` |
 | `GET /v1/system/overview` | web/admin | api | `PlatformOverviewView` |
 | `desktop_bootstrap` | desktop webview | desktop core | 返回 SQLite 持久设置、真实本机环境报告和待同步图库数量；对应 `DesktopBootstrapView` |
-| `desktop_inspect_environment` | desktop webview | desktop core | 重新检测 Windows 名称、版本、构建号、支持状态、CPU、内存、磁盘、NVIDIA GPU、驱动和本地 Runtime，并持久化脱敏快照 |
+| `desktop_inspect_environment` | desktop webview | desktop core | 重新检测 Windows、CPU、内存、磁盘、WMI 全部显卡厂商、NVIDIA CUDA GPU、驱动和本地 Runtime；AMD/Intel 不误报 CUDA 可用，并持久化脱敏快照 |
 | `desktop_save_settings` | desktop webview | desktop core | 校验并保存主题模式、100%–130% 字体缩放、依赖来源、模型/输出/Runtime 目录、默认图库隐私、`autoUpload` 和上传策略；字体默认 110%，自动上传默认开启且默认公开，用户可在设置中修改 |
 | `POST /v1/desktop-auth/requests` | desktop core | api | 创建 10 分钟有效的设备授权请求；服务端只保存随机设备密钥 SHA-256，返回用户码、浏览器确认地址和轮询间隔 |
 | `POST /v1/desktop-auth/requests/approve` | local web | api | 由已登录主站并完成本地平台身份交换的用户确认设备码；设备码过期、已确认或账号状态失效时保持拒绝 |
@@ -35,7 +35,7 @@
 | `desktop_start_authorization` | desktop webview | desktop core | 创建浏览器设备授权请求并返回确认地址；不在 SQLite、日志或页面持久化设备密钥 |
 | `desktop_poll_authorization` | desktop webview | desktop core | 按服务端间隔轮询，授权完成后写入 Windows Credential Manager 并只返回脱敏账号视图 |
 | `desktop_sign_out` | desktop webview | desktop core | 尽力撤销服务端会话后删除 Windows Credential Manager 凭据；网络异常不阻止本机退出 |
-| `GET /v1/desktop/resources/manifest` | desktop core | api/CDN | 返回 `{ ok: true, data: DesktopResourceManifestEnvelope }`；`payload` 是原始 UTF-8 JSON，`signature` 是服务端 Ed25519 签名，桌面端使用安装包内固定公钥验签后才解析资源；模型资源额外固化受控安装目录和模型组合的 group/role，只有主文件、文本编码器与 VAE 全部通过哈希安装后才自动登记 Anima 底模 |
+| `GET /v1/desktop/resources/manifest` | desktop core | api/CDN | 返回 `{ ok: true, data: DesktopResourceManifestEnvelope }`；默认返回不含新资源枚举的旧客户端兼容信封，声明 `capabilities=segmenter-v1` 时返回独立签名的 Segmenter 扩展信封；`payload` 是原始 UTF-8 JSON，`signature` 是服务端 Ed25519 签名，桌面端使用安装包内固定公钥验签后才解析资源；模型资源额外固化受控安装目录和模型组合的 group/role，只有主文件、文本编码器与 VAE 全部通过哈希安装后才自动登记 Anima 底模 |
 | `GET /v1/desktop/resources/:id/content` | desktop core | api | 从签名清单定位主站 `/data` 镜像资源，只流式返回大小与清单一致的受控文件；支持单段 HTTP Range、`ETag=SHA-256` 和断点续传，不接受客户端文件路径；文件缺失时明确失败，不代理官方或第三方来源 |
 | `desktop_load_resource_catalog` | desktop webview | desktop core | 从主站拉取并验签唯一资源清单，校验过期时间、Windows/架构、文件名、大小、SHA-256 与唯一镜像来源后返回可展示目录；在线成功后原子保存签名信封，临时网络异常时可读取仍在有效期内的本机已验签清单 |
 | `desktop_download_resource` | desktop webview | desktop core | 按资源 ID 仅从主站镜像执行断点下载，完成整体 SHA-256 后原子写入本机下载缓存；客户端不存在官方源、第三方源或切源链路 |
@@ -55,18 +55,39 @@
 | `desktop_delete_local_lora_file` | desktop webview | desktop core | 按 UUID 删除已登记 LoRA 的受管文件；活动生成任务引用时拒绝，保留数据库登记与历史任务快照，并返回 `DesktopManagedFileRemovalView` |
 | `desktop_storage_cleanup` | desktop webview | desktop core | 使用 `DesktopStorageCleanupInput.execute` 区分只读扫描与确认执行；仅回收已安装依赖缓存、已登记 LoRA 重复下载、终态训练工作区和受管临时/隔离文件，返回按类别汇总的 `DesktopStorageCleanupView`，不删除作品、训练集、当前模型、当前 Runtime、更新回滚包或未知文件 |
 | `desktop_create_training_dataset` | desktop webview | desktop core | 创建角色、画风或概念训练集并持久化标题和触发词，返回 `DesktopTrainingDatasetView` |
-| `desktop_list_training_datasets` | desktop webview | desktop core | 返回当前设备训练集、真实图片文件摘要、逐图 Caption 和确认状态；应用重启后仍以 SQLite 为准 |
-| `desktop_update_training_trigger_words` | desktop webview | desktop core | 校验、去重并更新当前训练集触发词；既有训练任务继续使用自己的不可变快照，新任务读取更新后的触发词 |
+| `desktop_delete_training_dataset` | desktop webview | desktop core | 软删除训练集审计行并清理受管原图目录；内容寻址训练快照、训练记录和 LoRA 产物保持不变，活动打标、清洗或抠图任务会阻止删除 |
+| `desktop_preview_training_dataset_import` | desktop webview | desktop core | 把用户选择的文件夹或 `zip/7z/tar/tar.gz/tgz` 解到受控临时目录，拒绝路径穿越、链接、超量与损坏内容，并返回图片、同名标签、未打标和异常统计；预检不创建训练集 |
+| `desktop_import_training_dataset` | desktop webview | desktop core | 仅接受未过期且无阻断异常的预检 UUID，复核文件 SHA-256 后把图片、英文逗号标签和训练集元数据原子写入受管目录与 SQLite；失败不留下半训练集 |
+| `desktop_list_training_datasets` | desktop webview | desktop core | 返回当前设备训练集、真实图片文件摘要、兼容 Caption、逐标签 `AUTO/AI_CLEANED/MANUAL/IMPORTED/TRIGGER` 来源和确认状态；应用重启后仍以 SQLite 为准 |
+| `desktop_update_training_trigger_words` | desktop webview | desktop core | 校验、去重并更新当前训练集触发词，同步逐图 `TRIGGER` 标签和同名 `.txt`；既有训练任务继续使用自己的不可变快照，新任务读取更新后的触发词 |
 | `desktop_add_training_images` | desktop webview | desktop core | 校验并原子复制用户选择的 PNG/JPEG/WebP，读取真实尺寸和 SHA-256；同训练集内容去重且总量不超过 200，添加后重新执行确认门禁 |
-| `desktop_update_training_caption` | desktop webview | desktop core | 逐图保存人工 Caption；修改后只使当前训练集回到待确认，不改写其他图片内容 |
-| `desktop_delete_training_asset` | desktop webview | desktop core | 原子删除未被训练任务快照引用的单张训练图片和打标关联，保留用户原始导入文件并重新计算确认门禁 |
+| `desktop_update_training_caption` | desktop webview | desktop core | 逐图保存人工标签，保留匹配项既有来源、新增项记为 `MANUAL`，并把 SQLite 与同名 `.txt` 原子同步；修改后只使当前训练集回到待确认 |
+| `desktop_batch_update_training_tags` | desktop webview | desktop core | 对同一训练集最多 200 张图片批量添加或删除英文标签；一次 IPC 内预写全部同名 `.txt`、事务化更新逐标签来源与 Caption，任一文件或 SQLite 写入失败时整批回滚 |
+| `desktop_delete_training_asset` | desktop webview | desktop core | 原子删除没有活动打标、清洗或抠图任务的原训练图片；训练快照读取内容寻址 Blob，因此历史任务不受影响，并重新计算确认门禁 |
 | `desktop_translate_training_tags` | desktop webview | desktop core/main API | 通过 Rust 核心内的设备会话批量读取真实标签翻译集和稳定颜色；会话密钥不进入页面 |
-| `desktop_create_caption_job` | desktop webview | desktop core/caption scheduler | 按训练集或单张图片创建持久化离线打标任务；批量任务跳过人工 Caption，单图重新打标属于用户明确覆盖操作；对应 `DesktopCaptionJobCreateInput` 和 `DesktopCaptionJobView` |
+| `desktop_create_caption_job` | desktop webview | desktop core/caption scheduler | 按训练集、单张图片或批量工作区明确选择的 `assetIds` 创建一个持久化离线打标任务；重新打标只删除并替换该图 `AUTO` 标签，绝不覆盖 `MANUAL/IMPORTED/TRIGGER` 标签；对应 `DesktopCaptionJobCreateInput` 和 `DesktopCaptionJobView` |
+| `desktop_pause_caption_job` / `desktop_resume_caption_job` / `desktop_cancel_caption_job` | desktop webview | desktop core/caption scheduler | 幂等暂停、恢复或取消自动打标任务；已成功写入的逐图标签保留，未完成图片恢复后继续执行，重启时保持暂停事实 |
+| `desktop_create_training_job` | desktop webview | desktop core/training scheduler | 创建不可变训练快照并立即返回持久任务；可选 `useAiTagProcessing` 会先由 AI Worker 只清洗任务快照，原训练集不变，只有预处理成功后训练调度器才可领取；对应 `DesktopTrainingJobCreateInput` 和 `DesktopTrainingJobView` |
 | `desktop_list_caption_jobs` | desktop webview | desktop core | 返回最近 100 个打标任务、逐图状态、阈值、进度和脱敏错误；应用重启后仍以 SQLite 为准 |
 | `desktop_cancel_caption_job` | desktop webview | desktop core/caption scheduler | 幂等取消排队或运行中的打标任务，已经成功落库的逐图 Caption 保留 |
 | `desktop-caption-job-updated` | desktop core/caption scheduler | desktop webview | 离线打标任务及逐图状态变化事件；载荷为 `DesktopCaptionJobView` |
+| `desktop_create_background_removal_job` | desktop webview | desktop core/segmenter scheduler | 为明确选择的训练图片创建 SQLite 持久化抠图批次；只写入透明 PNG 派生文件，原图保持不变；对应 `DesktopBackgroundRemovalJobCreateInput` 和 `DesktopBackgroundRemovalJobView` |
+| `desktop_list_background_removal_jobs` | desktop webview | desktop core | 返回最近的抠图批次、逐图状态和脱敏错误；客户端重启后从 SQLite 恢复排队任务 |
+| `desktop_pause_background_removal_job` / `desktop_resume_background_removal_job` / `desktop_cancel_background_removal_job` | desktop webview | desktop core/segmenter scheduler | 幂等暂停、恢复或取消抠图任务；已成功生成的派生文件保留，未完成图片继续排队或收敛到取消状态 |
+| `desktop_save_training_manual_mask` | desktop webview | desktop core | 校验与原图尺寸一致的 PNG 蒙版，真实合成透明 PNG 并原子登记为 `manual` 派生版本；页面只传蒙版字节，不可指定任意输出路径 |
+| `desktop_select_training_asset_variant` | desktop webview | desktop core | 选择训练使用原图或指定派生版本；只影响后续训练快照，不改写原图和既有任务 |
+| `desktop-background-removal-job-updated` | desktop core/segmenter scheduler | desktop webview | 抠图批次和逐图进度事件；载荷为 `DesktopBackgroundRemovalJobView` |
+| `desktop_create_ai_clean_job` | desktop webview | desktop core/AI clean scheduler | 为单图或批量图片创建持久化 AI 标签清洗任务；只生成结构化保留、删除、新增建议和理由，不直接修改训练集 |
+| `desktop_pause_ai_clean_job` / `desktop_resume_ai_clean_job` / `desktop_cancel_ai_clean_job` | desktop webview | desktop core/AI clean scheduler | 幂等暂停、恢复或取消 AI 清洗任务；已完成建议保留，未完成图片恢复后继续，暂停与重启均不改写用户标签 |
+| `desktop_list_ai_clean_jobs` | desktop webview | desktop core | 返回最近 AI 清洗批次、逐图重试次数、结构化建议和应用状态；应用重启后继续以 SQLite 为准 |
+| `desktop_cancel_ai_clean_job` | desktop webview | desktop core/AI clean scheduler | 幂等取消尚未处理的图片；运行中请求返回后检查取消状态并丢弃未持久化结果 |
+| `desktop_apply_ai_clean` | desktop webview | desktop core | 仅应用用户接受的删除和新增建议，校验原标签未漂移后原子同步 SQLite 与同名 `.txt` |
+| `desktop_undo_ai_clean` | desktop webview | desktop core | 仅在 AI 清洗应用后没有继续编辑标签时恢复变更前快照，不覆盖后续人工内容 |
+| `desktop-ai-clean-job-updated` | desktop core/AI clean scheduler | desktop webview | AI 清洗批次和逐图状态变化事件；载荷为 `DesktopAiCleanJobView` |
 | `desktop_confirm_training_dataset` | desktop webview | desktop core | 仅在训练集含 5–200 张图片且每张 Caption 非空时事务化确认，确认成功后才允许进入训练参数阶段 |
 | `desktop_create_training_job` | desktop webview | desktop core/training scheduler | 固化已确认训练集、Anima 底模文件快照与训练参数并立即返回排队记录；默认动态达到至少 320 次图片遍历，训练产物按底模 SHA-256 绑定，切换到其他精确底模时拒绝误用；对应 `DesktopTrainingJobCreateInput` 和 `DesktopTrainingJobView` |
+| `desktop_get_training_snapshot` | desktop webview | desktop core | 按训练任务 ID 返回只读快照元数据、内容寻址图片、冻结 Caption、逐标签来源、触发词和训练参数，不读取后来变化的原训练集 |
+| `desktop_copy_training_snapshot` | desktop webview | desktop core | 把有权限访问的本机训练任务快照复制成新的可编辑训练集；新建记录与文件写入原子提交，不覆盖原训练集、历史任务或 LoRA |
 | `desktop_list_training_jobs` | desktop webview | desktop core | 返回最近 100 个训练任务、尝试、排队位置、进度、产物 LoRA ID 与 OOM 降档建议 |
 | `desktop_cancel_training_job` | desktop webview | desktop core/training scheduler | 幂等取消排队或运行中的本地训练；运行中进程树由核心终止，已成功登记的 LoRA 不回滚 |
 | `desktop-training-job-updated` | desktop core/training scheduler | desktop webview | 本地训练任务状态变化事件；载荷为 `DesktopTrainingJobView` |
@@ -109,7 +130,7 @@
 | `PATCH /v1/admin/model-library/:id` | admin | api | 管理员编辑底模仓库外显名称、描述、多个来源链接、使用说明和公开状态，不改写历史任务 |
 | `POST/DELETE /v1/admin/model-library/:id/examples[/:exampleId]` | admin | api | 管理员上传或删除底模封面与示例图；第一张示例作为仓库封面，图片统一转为高质量 WebP |
 | `GET /v1/model-library/examples/:id/content` | web/admin | api | 登录用户读取可访问底模的仓库示例图，不暴露对象存储键 |
-| `POST /v1/inference/jobs` | web | api | `InferenceJobCreateRequest` 创建持久化任务并完成主站资金预留后入队；同一独立身份默认每 180 秒只接受一个新任务，幂等重放不重复占用冷却；正负提示词独立保存；LoRA 最多 4 个且按版本与内容哈希去重，平台训练产物必须与训练时的精确底模一致，外部 LoRA 继续按系列兼容；任务固化实际强度、触发词和采样参数 |
+| `POST /v1/inference/jobs` | web | api | `InferenceJobCreateRequest` 创建持久化任务并完成主站资金预留后入队；同一独立身份默认每 180 秒只接受一个新任务，幂等重放不重复占用冷却；正负提示词独立保存；LoRA 最多 4 个且按版本与内容哈希去重，默认允许同主模型系列全部底模，作者设为 `restricted` 时只允许显式底模版本；任务固化实际强度、触发词和采样参数 |
 | `GET /v1/inference/jobs` | web/admin | api | 当前身份任务列表；管理员可读取全局列表；等待执行的任务批量返回全局推理队列位置、前方任务数、队列任务总数及预计等待/执行/完成秒数 |
 | `GET /v1/inference/jobs/:id` | web/admin | api | `InferenceJobView`，包含阶段、尝试、固化参数、任务所用 LoRA 的标题、类型、权重与封面地址、产物哈希与字节数、计费镜像、主站图库发布状态和等待执行时的队列估算；普通用户只读取自己的任务 |
 | `GET /v1/inference/jobs/:id/loras/:versionId/cover` | web/admin | api | 经任务归属鉴权读取该任务实际选用 LoRA 的首张示例封面；即使 LoRA 后续下架，历史任务仍可审计展示 |
@@ -118,12 +139,12 @@
 | `POST /v1/inference/jobs/:id/cancel` | web | api | `InferenceJobCancelRequest`，只取消尚未运行任务并释放资金预留；若该任务仍是所属身份最后一次提交，则在同一事务中清除该身份的本地模型提交冷却 |
 | `DELETE /v1/inference/jobs/:id` | web | api | 删除已结束推理记录；已发布作品先同步删除主站正式图库，余额、计费和产物审计不删除 |
 | `GET /v1/artifacts/:id/content` | web/admin | api | 经会话鉴权读取所属任务的对象存储产物 |
-| `GET /v1/loras` | web/admin | api | 已上传有效模型文件且当前身份可访问的 LoRA 列表；平台训练产物返回 `baseModelVersionId`，生成页据此过滤精确底模不匹配项 |
+| `GET /v1/loras` | web/admin | api | 已上传有效模型文件且当前身份可访问的 LoRA 列表；返回 `compatibilityMode` 与 `compatibleModelVersionIds`，生成页按同系列全部可用或作者显式限制过滤；训练来源不再自动锁定精确底模 |
 | `GET /v1/lora-library` | web/admin/desktop core | api | 返回公开 LoRA 和当前用户自己的私有 LoRA；`mine=1` 仅返回本人条目，私有条目不向其他用户外显；桌面在线成功后原子缓存最近目录供同一已保存设备会话离线浏览；仓库不再区分草稿与发布状态 |
 | `GET /v1/lora-library/:id` | web/admin | api | 按 LoRA 条目 ID 或任务固化的 LoRA 版本 ID 读取唯一详情；公开条目可由其他用户查看，私有条目仅作者和管理员可读；详情附带最近引用该 LoRA 且已发布到主站图库的公开任务卡片，不外显私密任务 |
 | `GET /v1/lora-library/:id/download` | web/admin/desktop core | api | 登录用户流式下载可访问 LoRA 的最新有效 safetensors 文件；公开条目允许下载，私有条目仅作者和管理员可下载；支持单段 HTTP Range、`ETag=SHA-256` 和断点续传，不暴露对象存储键 |
-| `POST /v1/lora-library` | web | api | 创建默认可用的当前用户 LoRA 并固化公开/私有选择；自定义主模型系列会持久化为全局筛选项 |
-| `PATCH /v1/lora-library/:id` | web | api | 作者修改标题、描述、类型、主模型系列、触发词和公开/私有范围；不覆盖有效模型版本 |
+| `POST /v1/lora-library` | web | api | 创建默认对同系列全部底模可用的当前用户 LoRA，并固化公开/私有选择；自定义主模型系列会持久化为全局筛选项 |
+| `PATCH /v1/lora-library/:id` | web | api | 作者修改标题、描述、类型、主模型系列、触发词、公开/私有范围及底模兼容策略；限制模式只能选择同系列活动底模，不覆盖有效模型版本 |
 | `POST/GET/PUT /v1/lora-library/:id/uploads[/:uploadId]` | web | api | 创建、查询并按服务端偏移续传 LoRA 文件；单片最多 4MB，偏移和临时文件持久化，刷新或网络中断后可继续 |
 | `POST /v1/lora-library/:id/uploads/:uploadId/complete` | web | api | 校验完整 safetensors 文件、字节数和 SHA-256 后流式写入独立对象存储并创建版本 |
 | `POST /v1/lora-library/:id/examples` | web | api | 作者为 LoRA 上传最多 8 张示例图，服务端统一转为高质量 WebP 后写入独立对象存储 |

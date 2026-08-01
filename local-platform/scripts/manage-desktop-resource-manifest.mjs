@@ -14,7 +14,9 @@ if (command === "generate") await generateSigningKey(argumentsMap);
 else if (command === "sign") await signManifest(argumentsMap);
 else if (command === "normalize") await normalizeManifest(argumentsMap);
 else if (command === "add-anima-models") await addAnimaModels(argumentsMap);
-else throw new Error("用法：generate --private-key PATH --public-key PATH；sign --payload PATH --private-key PATH --output PATH --key-id ID；normalize --payload PATH --output PATH；或 add-anima-models --payload PATH --output PATH");
+else if (command === "add-component") await addComponent(argumentsMap);
+else if (command === "legacy-compatible") await createLegacyCompatibleManifest(argumentsMap);
+else throw new Error("用法：generate --private-key PATH --public-key PATH；sign --payload PATH --private-key PATH --output PATH --key-id ID；normalize --payload PATH --output PATH；add-anima-models --payload PATH --output PATH；legacy-compatible --payload PATH --output PATH；或 add-component --payload PATH --output PATH --id ID --kind KIND --version VERSION --file-name NAME --byte-size BYTES --installed-size BYTES --sha256 HASH --root-directory NAME --required true|false");
 
 /** 解析明确的 --key value 参数，拒绝遗漏值和重复键。 */
 function parseArguments(values) {
@@ -114,6 +116,73 @@ async function addAnimaModels(options) {
   process.stdout.write(`已收缩桌面初始化底模：${animaModelDefinitions().length} 个模型组合 · ${parsed.data.resources.length} 项资源\n`);
 }
 
+/** 以真实归档摘要向签名清单增加或替换一个按需桌面组件。 */
+async function addComponent(options) {
+  const payloadPath = requiredPath(options, "payload");
+  const outputPath = requiredPath(options, "output");
+  const id = requiredText(options, "id", /^[a-z0-9._-]{1,191}$/);
+  const kind = requiredText(options, "kind", /^(captioner|segmenter|trainer)$/);
+  const version = requiredText(options, "version", /^[a-zA-Z0-9._-]{1,191}$/);
+  const fileName = requiredText(options, "file-name", /^[^\\/:*?"<>|]{1,255}$/);
+  const rootDirectory = requiredText(options, "root-directory", /^[^\\/:*?"<>|]{1,255}$/);
+  const sha256 = requiredText(options, "sha256", /^[a-f0-9]{64}$/);
+  const byteSize = requiredPositiveInteger(options, "byte-size");
+  const installedSize = requiredPositiveInteger(options, "installed-size");
+  const requiredValue = options.get("required");
+  if (!/^(true|false)$/.test(requiredValue || "")) throw new Error("--required 必须是 true 或 false");
+  const raw = JSON.parse(await readFile(payloadPath, "utf8"));
+  if (!Array.isArray(raw.resources)) throw new Error("资源清单缺少 resources 数组");
+  const component = {
+    id,
+    kind,
+    version,
+    os: "windows",
+    arch: "x86_64",
+    fileName,
+    byteSize,
+    installedSize,
+    sha256,
+    archive: "zip",
+    rootDirectory,
+    installDirectory: null,
+    modelRegistration: null,
+    applicationUpdate: null,
+    required: requiredValue === "true",
+    sources: [{ kind: "mirror", url: `https://www.xanime.ink/local-model-api/v1/desktop/resources/${id}/content` }],
+  };
+  const minimumExpiry = new Date(Date.now() + 180 * 24 * 60 * 60 * 1000);
+  const currentExpiry = new Date(raw.expiresAt);
+  const candidate = {
+    ...raw,
+    generatedAt: new Date().toISOString(),
+    expiresAt: currentExpiry > minimumExpiry ? currentExpiry.toISOString() : minimumExpiry.toISOString(),
+    resources: [...raw.resources.filter((resource) => resource.id !== id), component],
+  };
+  const parsed = desktopResourceManifestPayloadSchema.safeParse(candidate);
+  if (!parsed.success) throw new Error(`组件资源未通过契约校验：${parsed.error.issues[0]?.message || "未知字段错误"}`);
+  await mkdir(dirname(outputPath), { recursive: true });
+  await writeFile(outputPath, `${JSON.stringify(parsed.data, null, 2)}\n`, "utf8");
+  process.stdout.write(`已登记可选组件 ${id}：${outputPath}\n`);
+}
+
+/** 为不认识 Segmenter 枚举的旧客户端生成独立签名兼容载荷，不修改扩展清单。 */
+async function createLegacyCompatibleManifest(options) {
+  const payloadPath = requiredPath(options, "payload");
+  const outputPath = requiredPath(options, "output");
+  const raw = JSON.parse(await readFile(payloadPath, "utf8"));
+  if (!Array.isArray(raw.resources)) throw new Error("资源清单缺少 resources 数组");
+  const candidate = {
+    ...raw,
+    generatedAt: new Date().toISOString(),
+    resources: raw.resources.filter((resource) => resource.kind !== "segmenter"),
+  };
+  const parsed = desktopResourceManifestPayloadSchema.safeParse(candidate);
+  if (!parsed.success) throw new Error(`旧客户端兼容清单未通过契约校验：${parsed.error.issues[0]?.message || "未知字段错误"}`);
+  await mkdir(dirname(outputPath), { recursive: true });
+  await writeFile(outputPath, `${JSON.stringify(parsed.data, null, 2)}\n`, "utf8");
+  process.stdout.write(`已生成旧客户端兼容清单：${parsed.data.resources.length} 项\n`);
+}
+
 /** 返回所有曾进入签名清单的底模组，用于确定性移除旧的可选仓库资源。 */
 function animaModelGroupIds() {
   return [
@@ -159,6 +228,20 @@ function requiredPath(options, key) {
   const value = options.get(key)?.trim();
   if (!value) throw new Error(`缺少 --${key}`);
   return resolve(value);
+}
+
+/** 读取受格式约束的必填文本，禁止把任意路径或控制字符写入清单。 */
+function requiredText(options, key, pattern) {
+  const value = options.get(key)?.trim();
+  if (!value || !pattern.test(value)) throw new Error(`--${key} 格式不正确`);
+  return value;
+}
+
+/** 读取 JavaScript 安全整数范围内的正整数资源大小。 */
+function requiredPositiveInteger(options, key) {
+  const value = Number(options.get(key));
+  if (!Number.isSafeInteger(value) || value <= 0) throw new Error(`--${key} 必须是正整数`);
+  return value;
 }
 
 /** 密钥文件存在时停止，避免误覆盖仍在使用的发布密钥。 */

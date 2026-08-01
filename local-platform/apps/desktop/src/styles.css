@@ -1089,9 +1089,11 @@ select:focus-visible {
 .startup-gpu > svg { width: 18px; color: var(--accent); }
 .startup-gpu span,
 .startup-gpu small,
-.startup-gpu strong { display: block; min-width: 0; }
+.startup-gpu strong,
+.startup-gpu em { display: block; min-width: 0; }
 .startup-gpu small { color: var(--muted); font-size: 7px; }
 .startup-gpu strong { margin-top: 3px; overflow: hidden; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.startup-gpu em { margin-top: 3px; color: var(--muted); font-size: 7px; font-style: normal; line-height: 1.35; }
 .startup-device dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; margin: 11px 0 0; }
 .startup-device dl > div { min-width: 0; padding: 7px; border-left: 2px solid var(--border-strong); background: var(--panel-muted); }
 .startup-device dt { display: flex; align-items: center; gap: 4px; color: var(--muted); font-size: 7px; }
@@ -1099,7 +1101,8 @@ select:focus-visible {
 .startup-device dd { margin: 4px 0 0; overflow: hidden; font-size: 8px; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
 
 .startup-check-ok,
-.startup-blocking {
+.startup-blocking,
+.startup-compatibility {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1112,7 +1115,9 @@ select:focus-visible {
   font-size: 8px;
 }
 .startup-check-ok svg,
-.startup-blocking svg { width: 15px; flex: 0 0 auto; }
+.startup-blocking svg,
+.startup-compatibility svg { width: 15px; flex: 0 0 auto; }
+.startup-compatibility { align-items: flex-start; border-color: var(--warning-border); background: var(--warning-soft); color: var(--warning); line-height: 1.5; }
 .startup-blocking { align-items: flex-start; border-color: var(--danger-border); background: var(--danger-soft); color: var(--danger); }
 .startup-blocking strong,
 .startup-blocking span { display: block; }
@@ -2487,6 +2492,77 @@ select:focus-visible {
   display: block;
 }
 
+/* 两种打标布局共用紧凑工具栏，批量操作只在工作区模式展开。 */
+.training-batch-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 9px;
+  padding: 7px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel-muted);
+}
+
+.training-layout-switch,
+.training-sort,
+.training-batch-selection,
+.training-batch-actions,
+.training-batch-actions label { display: flex; align-items: center; gap: 5px; }
+.training-layout-switch { padding: 2px; border: 1px solid var(--border); border-radius: 3px; background: var(--control); }
+.training-layout-switch button,
+.training-sort button,
+.training-batch-selection button,
+.training-batch-actions button { min-height: 29px; display: inline-flex; align-items: center; justify-content: center; gap: 4px; padding: 0 8px; border: 1px solid transparent; border-radius: 2px; background: transparent; color: var(--muted); font-size: 7px; font-weight: 800; }
+.training-layout-switch button.active { border-color: var(--accent-border); background: var(--accent-soft); color: var(--accent); }
+.training-layout-switch svg,
+.training-sort svg,
+.training-batch-actions svg { width: 12px; }
+.training-sort { margin-left: auto; }
+.training-sort select { height: 31px; padding: 0 24px 0 8px; border: 1px solid var(--border); border-radius: 3px; background: var(--control); color: var(--text); font-size: 7px; }
+.training-sort button { width: 31px; padding: 0; border-color: var(--border); background: var(--control); color: var(--text); }
+.training-batch-selection { width: 100%; padding-top: 6px; border-top: 1px solid var(--border); }
+.training-batch-selection button { border-color: var(--border); background: var(--control); color: var(--text); }
+.training-batch-selection span { color: var(--muted); font-size: 7px; }
+.training-batch-actions { min-width: 0; flex: 1; flex-wrap: wrap; justify-content: flex-end; }
+.training-batch-actions > button { border-color: var(--border); background: var(--control); color: var(--text); }
+.training-batch-actions > button.danger { border-color: var(--danger-border); background: var(--danger-soft); color: var(--danger); }
+.training-batch-actions button:disabled { cursor: not-allowed; opacity: .45; }
+.training-batch-actions label { min-width: 260px; flex: 1; justify-content: flex-end; }
+.training-batch-actions input { min-width: 120px; height: 29px; flex: 1; padding: 0 7px; border: 1px solid var(--border); border-radius: 2px; outline: 0; background: var(--control); color: var(--text); font-size: 7px; }
+.training-batch-actions label button { border-color: var(--accent-border); background: var(--accent-soft); color: var(--accent); }
+.training-batch-progress { width: 100%; display: grid; grid-template-columns: auto minmax(100px, 1fr); align-items: center; gap: 8px; padding-top: 6px; border-top: 1px solid var(--border); }
+.training-batch-progress strong,
+.training-batch-progress small { display: block; font-size: 7px; }
+.training-batch-progress small { margin-top: 2px; color: var(--muted); }
+.training-batch-progress i { height: 4px; overflow: hidden; border-radius: 2px; background: var(--border); }
+.training-batch-progress em { height: 100%; display: block; background: var(--accent); }
+
+.training-batch-workspace {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(210px, 260px) minmax(0, 1fr);
+  align-items: start;
+  gap: 9px;
+}
+
+.training-batch-thumbnails { max-height: 70vh; display: grid; align-content: start; gap: 5px; overflow: auto; padding-right: 3px; }
+.training-batch-thumbnails > button { min-width: 0; display: grid; grid-template-columns: auto 54px minmax(0, 1fr); align-items: center; gap: 7px; padding: 5px; border: 1px solid var(--border); border-radius: 3px; background: var(--panel-raised); color: var(--text); text-align: left; }
+.training-batch-thumbnails > button.active { border-color: var(--accent); box-shadow: inset 2px 0 var(--accent); }
+.training-batch-thumbnails > button.selected { background: var(--accent-soft); }
+.training-batch-thumbnails input { accent-color: var(--accent); }
+.training-batch-thumbnails img { width: 54px; height: 54px; display: block; object-fit: cover; border-radius: 2px; background: var(--control); }
+.training-batch-thumbnails > button > svg { width: 22px; color: var(--danger); }
+.training-batch-thumbnails span,
+.training-batch-thumbnails strong,
+.training-batch-thumbnails small { min-width: 0; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.training-batch-thumbnails strong { font-size: 7px; }
+.training-batch-thumbnails small { margin-top: 3px; color: var(--muted); font-size: 6px; }
+.training-batch-editor { min-width: 0; }
+.training-batch-editor > article { min-width: 0; display: grid; grid-template-columns: minmax(150px, 25%) minmax(0, 1fr); gap: 10px; padding: 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--panel-raised); }
+.training-batch-editor .training-asset-image { height: min(42vh, 420px); }
+
 /* 离线打标控制区把组件状态、阈值和持久任务进度放在同一紧凑工作流内。 */
 .caption-control {
   display: grid;
@@ -2585,6 +2661,18 @@ select:focus-visible {
   font-weight: 800;
 }
 
+/* 持久任务控制保持紧凑横排，暂停与取消不会撑高进度卡片。 */
+.caption-job-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.caption-job-actions button {
+  min-height: 32px;
+  padding: 0 10px;
+}
+
 .caption-options > button:disabled,
 .caption-job > button:disabled {
   cursor: not-allowed;
@@ -2662,6 +2750,65 @@ select:focus-visible {
 }
 
 .caption-translation-error { color: var(--warning); font-size: 7px; }
+
+/* AI 清洗与离线打标分开呈现，训练目标输入保持单行并让操作固定在右侧。 */
+.ai-clean-control {
+  background: color-mix(in srgb, var(--success-soft) 38%, var(--panel-raised));
+}
+
+.ai-clean-options {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+}
+
+.ai-clean-options label { min-width: 0; display: grid; gap: 4px; }
+.ai-clean-options label span { color: var(--muted); font-size: 7px; }
+.ai-clean-options input { width: 100%; min-width: 0; height: 31px; padding: 0 8px; border: 1px solid var(--border); border-radius: 3px; outline: 0; background: var(--control); color: var(--text); font-size: 8px; }
+.ai-clean-options input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.ai-clean-options > button { min-height: 31px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 0 10px; border: 1px solid var(--accent-border); border-radius: 3px; background: var(--accent); color: #fff; font-size: 8px; font-weight: 800; }
+.ai-clean-options > button:disabled { cursor: not-allowed; opacity: .48; }
+.ai-clean-options > button svg { width: 13px; }
+
+.ai-clean-review {
+  display: grid;
+  gap: 8px;
+  margin-top: 9px;
+  padding-top: 9px;
+  border-top: 1px solid var(--border);
+}
+
+.ai-clean-review.is-running,
+.ai-clean-review.is-failed { grid-template-columns: auto minmax(0, 1fr); align-items: center; color: var(--muted); font-size: 7px; }
+.ai-clean-review.is-failed { color: var(--danger); }
+.ai-clean-review.is-running svg,
+.ai-clean-review.is-failed svg { width: 14px; }
+.ai-clean-review > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ai-clean-review > header span { display: inline-flex; align-items: center; gap: 5px; }
+.ai-clean-review > header svg { width: 14px; color: var(--accent); }
+.ai-clean-review > header strong { font-size: 8px; }
+.ai-clean-review > header b { padding: 3px 5px; border: 1px solid var(--warning-border); border-radius: 3px; background: var(--warning-soft); color: var(--warning); font-size: 7px; }
+.ai-clean-review > header b.is-applied { border-color: var(--success-border); background: var(--success-soft); color: var(--success); }
+.ai-clean-review > header b.is-undone { border-color: var(--border); background: var(--panel-muted); color: var(--muted); }
+
+.ai-clean-suggestion-groups { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.ai-clean-suggestion { min-width: 0; display: grid; align-content: start; gap: 5px; padding: 7px; border: 1px solid var(--border); border-radius: 3px; background: var(--panel-muted); }
+.ai-clean-suggestion > strong { color: var(--muted); font-size: 7px; }
+.ai-clean-suggestion > label { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 5px; cursor: pointer; }
+.ai-clean-suggestion > label input { margin: 2px 0 0; accent-color: var(--accent); }
+.ai-clean-suggestion > label span,
+.ai-clean-suggestion > label b,
+.ai-clean-suggestion > label small { min-width: 0; display: block; }
+.ai-clean-suggestion > label b { overflow: hidden; font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
+.ai-clean-suggestion > label small { margin-top: 2px; color: var(--muted); font-size: 6px; line-height: 1.4; }
+.ai-clean-suggestion > p { margin: 0; color: var(--muted); font-size: 7px; }
+.ai-clean-suggestion.is-remove { border-color: var(--danger-border); }
+.ai-clean-suggestion.is-add { border-color: var(--success-border); }
+.ai-clean-review > footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ai-clean-review > footer > span { color: var(--muted); font-size: 6px; line-height: 1.4; }
+.ai-clean-review > footer > button { min-height: 28px; display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; gap: 5px; padding: 0 8px; border: 1px solid var(--accent-border); border-radius: 3px; background: var(--accent); color: #fff; font-size: 7px; font-weight: 800; }
+.ai-clean-review > footer > button svg { width: 12px; }
 
 .training-gate span strong {
   font-size: 9px;
@@ -2766,6 +2913,12 @@ select:focus-visible {
 .desktop-caption-tag-list > span:focus-within { border-color: color-mix(in srgb, var(--tag-color) 72%, var(--border)); background: color-mix(in srgb, var(--tag-color) 15%, var(--panel-raised)); }
 .desktop-caption-tag-list b { max-width: 150px; overflow: hidden; color: var(--text); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
 .desktop-caption-tag-list small { padding-left: 5px; border-left: 1px solid color-mix(in srgb, var(--tag-color) 38%, var(--border)); color: var(--muted); font-size: 7px; white-space: nowrap; }
+.desktop-caption-tag-list em { padding: 2px 4px; border: 1px solid color-mix(in srgb, var(--source-color) 42%, var(--border)); border-radius: 3px; background: color-mix(in srgb, var(--source-color) 12%, var(--panel-raised)); color: color-mix(in srgb, var(--source-color) 78%, var(--text)); font-size: 7px; font-style: normal; line-height: 1; white-space: nowrap; }
+.desktop-caption-tag-list .is-source-auto { --source-color: #4f8fc8; }
+.desktop-caption-tag-list .is-source-ai_cleaned { --source-color: #8a65bd; }
+.desktop-caption-tag-list .is-source-manual { --source-color: #2f9c78; }
+.desktop-caption-tag-list .is-source-imported { --source-color: #b27a36; }
+.desktop-caption-tag-list .is-source-trigger { --source-color: #c34f67; }
 .desktop-caption-tag-list button { width: 18px; height: 18px; display: grid; place-items: center; padding: 0; border: 0; background: transparent; color: var(--muted); }
 .desktop-caption-tag-list button:hover { background: var(--danger-soft); color: var(--danger); }
 .desktop-caption-tag-list button svg { width: 10px; }
@@ -2810,6 +2963,154 @@ select:focus-visible {
 .training-asset-caption .caption-item-error {
   font-size: 7px;
 }
+
+/* 抠图控制沿用打标工作流层级，按钮与进度不改变图片列表宽度。 */
+.background-removal-control {
+  background: color-mix(in srgb, var(--success-soft) 34%, var(--panel-raised));
+}
+
+.background-removal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.background-removal-actions button,
+.training-asset-variants button {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 9px;
+  border: 1px solid var(--accent-border);
+  border-radius: 3px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 7px;
+  font-weight: 800;
+}
+
+.background-removal-actions button.secondary,
+.training-asset-variants button:last-child {
+  border-color: var(--border);
+  background: var(--control);
+  color: var(--text);
+}
+
+.background-removal-actions button:disabled,
+.training-asset-variants button:disabled {
+  cursor: not-allowed;
+  opacity: .45;
+}
+
+.background-removal-actions svg,
+.training-asset-variants svg { width: 12px; }
+.background-removal-job.is-paused > i > em { background: var(--warning); }
+
+.training-asset-variants {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) auto auto;
+  align-items: end;
+  gap: 5px;
+}
+
+.training-asset-variants label {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.training-asset-variants label span { color: var(--muted); font-size: 7px; }
+.training-asset-variants select { min-width: 0; width: 100%; height: 30px; padding: 0 24px 0 7px; border: 1px solid var(--border); border-radius: 3px; background: var(--control); color: var(--text); font-size: 7px; }
+.training-asset-image > em { position: absolute; left: 5px; bottom: 5px; padding: 3px 5px; border: 1px solid rgba(255,255,255,.28); border-radius: 2px; background: rgba(0,0,0,.58); color: #fff; font-size: 7px; font-style: normal; }
+
+/* 浏览器跳过屏幕外卡片的布局与绘制，保留稳定固有高度以减少滚动抖动。 */
+.training-asset-list > article,
+.training-batch-thumbnails > button {
+  content-visibility: auto;
+}
+.training-asset-list > article { contain-intrinsic-size: 330px; }
+.training-batch-thumbnails > button { contain-intrinsic-size: 66px; }
+
+/* 手动蒙版使用独立顶层弹窗和棋盘格画布，缩放时仅滚动画布区域。 */
+.training-mask-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: grid;
+  place-items: center;
+  padding: 12px;
+  background: rgba(5, 8, 12, .72);
+}
+
+.training-mask-dialog {
+  width: min(1180px, 100%);
+  height: min(860px, 100%);
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  background: var(--panel);
+  box-shadow: 0 22px 70px rgba(0, 0, 0, .34);
+}
+
+.training-mask-dialog > header,
+.training-mask-dialog > footer,
+.training-mask-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 11px;
+  border-bottom: 1px solid var(--border);
+}
+
+.training-mask-dialog > header { justify-content: space-between; }
+.training-mask-dialog > header span { color: var(--accent); font-size: 7px; font-weight: 900; }
+.training-mask-dialog > header h2 { margin: 2px 0; font-size: 15px; }
+.training-mask-dialog > header small,
+.training-mask-dialog > footer span { color: var(--muted); font-size: 7px; }
+.training-mask-dialog > header > button { width: 30px; height: 30px; display: grid; place-items: center; padding: 0; border: 1px solid var(--border); border-radius: 3px; background: var(--control); color: var(--text); }
+.training-mask-dialog > header > button svg { width: 14px; }
+
+.training-mask-toolbar { flex-wrap: wrap; background: var(--panel-muted); }
+.training-mask-toolbar > div,
+.training-mask-toolbar > label { display: flex; align-items: center; gap: 5px; }
+.training-mask-toolbar button,
+.training-mask-dialog > footer button { min-height: 30px; display: inline-flex; align-items: center; justify-content: center; gap: 4px; padding: 0 8px; border: 1px solid var(--border); border-radius: 3px; background: var(--control); color: var(--text); font-size: 7px; font-weight: 800; }
+.training-mask-toolbar button.active,
+.training-mask-dialog > footer button:last-child { border-color: var(--accent-border); background: var(--accent); color: #fff; }
+.training-mask-toolbar button:disabled,
+.training-mask-dialog > footer button:disabled { cursor: not-allowed; opacity: .45; }
+.training-mask-toolbar button svg,
+.training-mask-dialog > footer button svg { width: 12px; }
+.training-mask-toolbar input[type="range"] { width: 120px; accent-color: var(--accent); }
+.training-mask-toolbar b,
+.training-mask-toolbar span { font-size: 7px; }
+.training-mask-edge input { accent-color: var(--accent); }
+
+.training-mask-stage {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background-color: #d7dbe0;
+  background-image: linear-gradient(45deg, #b9bec5 25%, transparent 25%), linear-gradient(-45deg, #b9bec5 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #b9bec5 75%), linear-gradient(-45deg, transparent 75%, #b9bec5 75%);
+  background-position: 0 0, 0 10px, 10px -10px, -10px 0;
+  background-size: 20px 20px;
+}
+.training-mask-stage canvas { max-width: none; display: block; touch-action: none; box-shadow: 0 6px 24px rgba(0,0,0,.22); cursor: crosshair; }
+.training-mask-stage.is-edge { background: #2a2a2a; }
+.training-mask-dialog > footer { justify-content: flex-end; border-top: 1px solid var(--border); border-bottom: 0; }
+.training-mask-dialog > footer span { margin-right: auto; display: inline-flex; align-items: center; gap: 5px; }
+.training-mask-dialog > footer span svg { width: 12px; color: var(--success); }
 
 /* 训练参数与持久任务独立于逐图 Caption，避免长列表滚动时丢失提交状态。 */
 .desktop-training-execution {
@@ -4962,6 +5263,58 @@ html.preview-window-document {
 
 .caption-dataset-library > header { justify-content: space-between; }
 
+.dataset-library-actions { display: flex; align-items: center; gap: 8px; }
+.dataset-library-actions > button { height: 30px; display: inline-flex; align-items: center; gap: 5px; padding: 0 9px; border: 1px solid var(--accent-border); border-radius: 3px; background: var(--accent-soft); color: var(--accent); font-size: 8px; font-weight: 800; }
+.dataset-library-actions > button svg { width: 13px; }
+
+/* 导入弹窗把来源选择、预检统计、异常和确认字段限制在一个稳定滚动区。 */
+.dataset-import-backdrop { position: fixed; inset: 0; z-index: 95; display: grid; place-items: center; padding: 24px; background: rgba(4, 10, 18, .58); backdrop-filter: blur(4px); }
+.dataset-import-dialog { width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 48px); display: grid; grid-template-rows: auto auto minmax(0, auto) auto; gap: 12px; overflow: auto; padding: 16px; border: 1px solid var(--border-strong); border-radius: 5px; background: var(--panel); box-shadow: 0 24px 70px rgba(0, 0, 0, .34); }
+.dataset-import-dialog > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.dataset-import-dialog > header span { color: var(--accent); font-size: 7px; font-weight: 850; letter-spacing: .12em; }
+.dataset-import-dialog > header h2 { margin: 3px 0 0; font-size: 15px; }
+.dataset-import-dialog > header p { margin: 5px 0 0; color: var(--muted); font-size: 8px; }
+.dataset-import-dialog > header > button { width: 30px; height: 30px; display: grid; place-items: center; padding: 0; border: 1px solid var(--border); border-radius: 3px; background: var(--panel-muted); color: var(--text); }
+.dataset-import-dialog > header > button svg { width: 14px; }
+.dataset-import-source { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.dataset-import-source > button { min-height: 58px; display: flex; align-items: center; gap: 10px; padding: 10px; border: 1px solid var(--border); border-radius: 3px; background: var(--panel-raised); color: var(--text); text-align: left; }
+.dataset-import-source > button:hover { border-color: var(--accent-border); background: var(--accent-soft); }
+.dataset-import-source > button > svg { width: 20px; color: var(--accent); }
+.dataset-import-source strong, .dataset-import-source small { display: block; }
+.dataset-import-source strong { font-size: 9px; }
+.dataset-import-source small { margin-top: 3px; color: var(--muted); font-size: 7px; }
+.dataset-import-loading { min-height: 54px; display: flex; align-items: center; justify-content: center; gap: 7px; border: 1px solid var(--border); background: var(--panel-muted); color: var(--muted); font-size: 8px; }
+.dataset-import-loading svg { width: 15px; }
+.dataset-import-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; }
+.dataset-import-summary > span { padding: 9px; border: 1px solid var(--border); background: var(--panel-muted); }
+.dataset-import-summary strong, .dataset-import-summary small { display: block; }
+.dataset-import-summary strong { font-size: 13px; }
+.dataset-import-summary small { margin-top: 2px; color: var(--muted); font-size: 7px; }
+.dataset-import-summary .has-anomaly { border-color: var(--warning-border); background: var(--warning-soft); }
+.dataset-import-gate { display: flex; align-items: center; gap: 8px; padding: 9px; border: 1px solid var(--border); }
+.dataset-import-gate.ready { border-color: var(--success-border); background: var(--success-soft); color: var(--success); }
+.dataset-import-gate.blocked { border-color: var(--danger-border); background: var(--danger-soft); color: var(--danger); }
+.dataset-import-gate > svg { width: 16px; }
+.dataset-import-gate strong, .dataset-import-gate small { display: block; }
+.dataset-import-gate strong { font-size: 8px; }
+.dataset-import-gate small { margin-top: 2px; color: var(--muted); font-size: 7px; }
+.dataset-import-anomalies { max-height: 150px; display: grid; gap: 5px; overflow: auto; }
+.dataset-import-anomalies > div { display: flex; align-items: center; gap: 7px; padding: 7px; border: 1px solid var(--warning-border); background: var(--warning-soft); color: var(--warning); }
+.dataset-import-anomalies > div.is-error { border-color: var(--danger-border); background: var(--danger-soft); color: var(--danger); }
+.dataset-import-anomalies svg { width: 13px; flex: 0 0 auto; }
+.dataset-import-anomalies strong, .dataset-import-anomalies small { display: block; }
+.dataset-import-anomalies strong { font-size: 8px; }
+.dataset-import-anomalies small { margin-top: 2px; color: var(--muted); font-size: 7px; }
+.dataset-import-fields { display: grid; grid-template-columns: minmax(0, 1fr) 150px; gap: 8px; }
+.dataset-import-fields label { display: grid; gap: 5px; color: var(--muted); font-size: 8px; font-weight: 750; }
+.dataset-import-fields label.wide { grid-column: 1 / -1; }
+.dataset-import-fields input, .dataset-import-fields select { width: 100%; min-width: 0; height: 32px; padding: 0 8px; border: 1px solid var(--border); border-radius: 3px; background: var(--control); color: var(--text); font-size: 8px; }
+.dataset-import-dialog > footer { display: flex; justify-content: flex-end; gap: 7px; padding-top: 12px; border-top: 1px solid var(--border); }
+.dataset-import-dialog > footer button { min-height: 32px; display: inline-flex; align-items: center; gap: 5px; padding: 0 11px; border: 1px solid var(--accent-border); border-radius: 3px; background: var(--accent); color: #fff; font-size: 8px; font-weight: 800; }
+.dataset-import-dialog > footer button.secondary { border-color: var(--border); background: var(--panel-muted); color: var(--text); }
+.dataset-import-dialog > footer button:disabled { cursor: not-allowed; opacity: .45; }
+.dataset-import-dialog > footer button svg { width: 13px; }
+
 .caption-dataset-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -5165,9 +5518,52 @@ html.preview-window-document {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.training-preset-picker {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.training-preset-picker button {
+  min-width: 0;
+  min-height: 48px;
+  display: grid;
+  align-content: center;
+  gap: 3px;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--control);
+  color: var(--text);
+  text-align: left;
+}
+
+.training-preset-picker button.active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.training-preset-picker button strong { font-size: 9px; }
+.training-preset-picker button small { overflow: hidden; color: var(--muted); font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
+.training-preset-picker > span { grid-column: 1 / -1; color: var(--warning); font-size: 7px; font-weight: 800; }
+
+.training-advanced-parameters {
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--panel-muted);
+}
+
+.training-advanced-parameters > summary { padding: 9px 11px; cursor: pointer; color: var(--text); font-size: 8px; font-weight: 800; }
+.training-advanced-parameters > .desktop-training-parameters { padding: 0 10px 10px; }
+.desktop-training-parameters label > span { display: flex; align-items: center; gap: 4px; }
+
+.training-help { position: relative; display: inline-flex; color: var(--subtle); }
+.training-help > svg { width: 12px; height: 12px; }
+.training-help > em { position: absolute; z-index: 80; left: 50%; bottom: calc(100% + 6px); width: 220px; display: none; padding: 7px 8px; border: 1px solid var(--border-strong); border-radius: 3px; background: var(--panel-raised); box-shadow: var(--shadow-lg); color: var(--text); font-size: 7px; font-style: normal; font-weight: 500; line-height: 1.5; transform: translateX(-50%); }
+.training-help:hover > em,
+.training-help:focus-visible > em { display: block; }
+
 .desktop-training-parameters label {
   grid-template-rows: 17px 34px;
 }
+
+.desktop-training-parameters label.training-checkbox { grid-template-rows: 34px; }
 
 .desktop-training-parameters input,
 .desktop-training-parameters select {
@@ -5202,6 +5598,8 @@ html.preview-window-document {
   .training-create > div { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .training-dataset-list.is-expanded,
   .desktop-training-parameters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .training-preset-picker { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ai-clean-suggestion-groups { grid-template-columns: 1fr; }
 }
 
 /* 中等宽度改为两列，并允许筛选工具栏自然换行，避免卡片内容被压缩。 */
@@ -5219,10 +5617,29 @@ html.preview-window-document {
   .training-dataset-list.is-expanded,
   .desktop-training-parameters,
   .training-review-grid { grid-template-columns: 1fr; }
+  .training-preset-picker { grid-template-columns: 1fr; }
 
   .generation-heading-actions > small { display: none; }
   .caption-dataset-grid { grid-template-columns: 1fr; }
+  .dataset-library-actions > small { display: none; }
+  .dataset-import-backdrop { padding: 7px; }
+  .dataset-import-dialog { width: 100%; max-height: 100%; padding: 12px; }
+  .dataset-import-source, .dataset-import-fields { grid-template-columns: 1fr; }
+  .dataset-import-fields label.wide { grid-column: auto; }
+  .dataset-import-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .training-trigger-editor { align-items: stretch; flex-direction: column; }
+  .training-batch-workspace { grid-template-columns: 1fr; }
+  .training-batch-thumbnails { max-height: 240px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .training-batch-editor > article { grid-template-columns: 1fr; }
+  .training-batch-editor .training-asset-image { height: 260px; }
+  .training-batch-actions label { min-width: 100%; }
+  .training-asset-variants { grid-template-columns: 1fr 1fr; }
+  .training-asset-variants label { grid-column: 1 / -1; }
+  .training-mask-backdrop { padding: 6px; }
+  .training-mask-dialog { width: 100%; height: 100%; }
+  .training-mask-toolbar input[type="range"] { width: 84px; }
+  .training-mask-dialog > footer span { display: none; }
+  .ai-clean-options { grid-template-columns: 1fr; }
   .generation-lora-backdrop { padding: 7px; }
   .generation-lora-dialog { width: 100%; max-height: 100%; }
   .generation-lora-toolbar { align-items: stretch; flex-wrap: wrap; }

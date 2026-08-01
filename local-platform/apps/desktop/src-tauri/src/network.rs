@@ -45,16 +45,23 @@ fn windows_proxy_configuration() -> Option<(Vec<ProxyRule>, String)> {
     let internet_settings = RegKey::predef(HKEY_CURRENT_USER)
         .open_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings")
         .ok()?;
-    let enabled = internet_settings.get_value::<u32, _>("ProxyEnable").unwrap_or(0) == 1;
+    let enabled = internet_settings
+        .get_value::<u32, _>("ProxyEnable")
+        .unwrap_or(0)
+        == 1;
     if !enabled {
         return None;
     }
-    let server = internet_settings.get_value::<String, _>("ProxyServer").ok()?;
+    let server = internet_settings
+        .get_value::<String, _>("ProxyServer")
+        .ok()?;
     let rules = parse_proxy_server(&server);
     if rules.is_empty() {
         return None;
     }
-    let overrides = internet_settings.get_value::<String, _>("ProxyOverride").unwrap_or_default();
+    let overrides = internet_settings
+        .get_value::<String, _>("ProxyOverride")
+        .unwrap_or_default();
     Some((rules, normalize_proxy_bypass(&overrides)))
 }
 
@@ -66,7 +73,12 @@ fn parse_proxy_server(value: &str) -> Vec<ProxyRule> {
     }
     if !value.contains('=') {
         return normalize_proxy_url(value, false)
-            .map(|url| vec![ProxyRule { scope: ProxyScope::All, url }])
+            .map(|url| {
+                vec![ProxyRule {
+                    scope: ProxyScope::All,
+                    url,
+                }]
+            })
             .unwrap_or_default();
     }
     value
@@ -94,13 +106,24 @@ fn normalize_proxy_url(value: &str, socks: bool) -> Option<String> {
     if value.contains("://") {
         return Some(value.to_string());
     }
-    Some(format!("{}://{value}", if socks { "socks5h" } else { "http" }))
+    Some(format!(
+        "{}://{value}",
+        if socks { "socks5h" } else { "http" }
+    ))
 }
 
 /** 把 Windows 常见绕过规则转换为 reqwest NoProxy 支持的域名和 CIDR 列表。 */
 fn normalize_proxy_bypass(value: &str) -> String {
-    let mut entries = vec!["localhost".to_string(), "127.0.0.1".to_string(), "::1".to_string()];
-    for raw in value.split(';').map(str::trim).filter(|entry| !entry.is_empty()) {
+    let mut entries = vec![
+        "localhost".to_string(),
+        "127.0.0.1".to_string(),
+        "::1".to_string(),
+    ];
+    for raw in value
+        .split(';')
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+    {
         let normalized = match raw.to_ascii_lowercase().as_str() {
             "<local>" => continue,
             "127.*" => "127.0.0.0/8",
@@ -110,7 +133,10 @@ fn normalize_proxy_bypass(value: &str) -> String {
             _ if raw.contains('*') => continue,
             _ => raw,
         };
-        if !entries.iter().any(|entry| entry.eq_ignore_ascii_case(normalized)) {
+        if !entries
+            .iter()
+            .any(|entry| entry.eq_ignore_ascii_case(normalized))
+        {
             entries.push(normalized.to_string());
         }
     }
@@ -123,8 +149,18 @@ mod tests {
 
     #[test]
     fn parses_common_windows_proxy_formats() {
-        assert_eq!(parse_proxy_server("127.0.0.1:7897"), vec![ProxyRule { scope: ProxyScope::All, url: "http://127.0.0.1:7897".into() }]);
-        assert_eq!(parse_proxy_server("http=127.0.0.1:7897;https=127.0.0.1:7897;socks=127.0.0.1:7898").len(), 3);
+        assert_eq!(
+            parse_proxy_server("127.0.0.1:7897"),
+            vec![ProxyRule {
+                scope: ProxyScope::All,
+                url: "http://127.0.0.1:7897".into()
+            }]
+        );
+        assert_eq!(
+            parse_proxy_server("http=127.0.0.1:7897;https=127.0.0.1:7897;socks=127.0.0.1:7898")
+                .len(),
+            3
+        );
     }
 
     #[test]

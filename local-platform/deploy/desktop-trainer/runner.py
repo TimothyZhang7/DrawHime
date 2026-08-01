@@ -51,10 +51,19 @@ def validate_parameters(parameters: object) -> None:
     """重复校验跨进程参数，避免损坏请求进入训练脚本。"""
     if not isinstance(parameters, dict):
         raise ValueError("训练参数缺失")
+    # 旧版持久任务缺少高级字段时按历史执行方式补齐，升级后仍能恢复训练。
+    defaults = {"optimizer": "AdamW8bit", "batchSize": 1, "maxTrainSteps": None, "bucketEnabled": True,
+                "bucketNoUpscale": True, "bucketMinResolution": 256, "bucketMaxResolution": 1536,
+                "bucketResolutionSteps": 64, "textEncoderStrategy": "frozen_cached", "cacheLatents": True,
+                "saveEveryEpochs": 1, "mixedPrecision": "bf16", "gradientCheckpointing": True,
+                "flipAugmentation": False, "colorAugmentation": False, "maxGradNorm": 1.0}
+    for key, value in defaults.items():
+        parameters.setdefault(key, value)
     ranges = {
         "rank": (8, 64), "alpha": (1, 64), "epochs": (1, 20), "repeats": (1, 50),
         "resolution": (512, 1536), "gradientAccumulationSteps": (1, 4), "keepTokens": (0, 10),
-        "seed": (0, 2147483647),
+        "seed": (0, 2147483647), "batchSize": (1, 4), "bucketMinResolution": (256, 1536),
+        "bucketMaxResolution": (512, 2048), "bucketResolutionSteps": (32, 256), "saveEveryEpochs": (1, 20),
     }
     for key, (minimum, maximum) in ranges.items():
         value = parameters.get(key)
@@ -64,12 +73,27 @@ def validate_parameters(parameters: object) -> None:
         raise ValueError("Alpha 或训练分辨率不正确")
     if parameters.get("lrScheduler") not in ("constant", "cosine", "cosine_with_restarts"):
         raise ValueError("学习率调度器不正确")
+    if parameters["optimizer"] not in ("AdamW8bit", "AdamW", "Adafactor") or parameters["mixedPrecision"] not in ("bf16", "fp16"):
+        raise ValueError("优化器或训练精度不正确")
+    if parameters["textEncoderStrategy"] not in ("frozen_cached", "frozen_recompute"):
+        raise ValueError("Text Encoder 策略不正确")
     for key, minimum, maximum in (("learningRate", 0.000001, 0.01), ("warmupRatio", 0.0, 0.2), ("captionDropoutRate", 0.0, 0.3)):
         value = parameters.get(key)
         if not isinstance(value, (int, float)) or not minimum <= float(value) <= maximum:
             raise ValueError(f"训练参数 {key} 不正确")
-    if not isinstance(parameters.get("shuffleCaption"), bool):
-        raise ValueError("Caption 打乱参数不正确")
+    for key in ("shuffleCaption", "bucketEnabled", "bucketNoUpscale", "cacheLatents", "gradientCheckpointing", "flipAugmentation", "colorAugmentation"):
+        if not isinstance(parameters.get(key), bool):
+            raise ValueError(f"训练开关 {key} 不正确")
+    if parameters["bucketMinResolution"] > parameters["bucketMaxResolution"] or parameters["bucketMinResolution"] % parameters["bucketResolutionSteps"] or parameters["bucketMaxResolution"] % parameters["bucketResolutionSteps"]:
+        raise ValueError("训练分桶范围不正确")
+    if parameters["colorAugmentation"] and parameters["cacheLatents"]:
+        raise ValueError("颜色增强与 Latent 缓存不能同时启用")
+    if parameters["shuffleCaption"] and parameters["textEncoderStrategy"] == "frozen_cached":
+        raise ValueError("Caption 打乱时不能缓存 Text Encoder 输出")
+    if parameters["maxTrainSteps"] is not None and (not isinstance(parameters["maxTrainSteps"], int) or not 1 <= parameters["maxTrainSteps"] <= 100000):
+        raise ValueError("总训练步数不正确")
+    if not isinstance(parameters["maxGradNorm"], (int, float)) or not 0 <= float(parameters["maxGradNorm"]) <= 10:
+        raise ValueError("最大梯度范数不正确")
 
 
 def prepare_dataset(request: dict, workspace: Path) -> Path:
@@ -102,10 +126,17 @@ def write_dataset_config(image_dir: Path, workspace: Path, parameters: dict) -> 
     escaped = str(image_dir).replace("\\", "/").replace('"', '\\"')
     config.write_text(
         "[general]\ncaption_extension = \".txt\"\n\n"
-        f"[[datasets]]\nresolution = {parameters['resolution']}\nbatch_size = 1\nenable_bucket = true\nbucket_no_upscale = true\n\n"
+        f"[[datasets]]\nresolution = {parameters['resolution']}\nbatch_size = {int(parameters.get('batchSize', 1))}\n"
+        f"enable_bucket = {str(bool(parameters.get('bucketEnabled', True))).lower()}\n"
+        f"bucket_no_upscale = {str(bool(parameters.get('bucketNoUpscale', True))).lower()}\n"
+        f"min_bucket_reso = {int(parameters.get('bucketMinResolution', 256))}\n"
+        f"max_bucket_reso = {int(parameters.get('bucketMaxResolution', 1536))}\n"
+        f"bucket_reso_steps = {int(parameters.get('bucketResolutionSteps', 64))}\n\n"
         f"  [[datasets.subsets]]\n  image_dir = \"{escaped}\"\n  num_repeats = {parameters['repeats']}\n"
         f"  shuffle_caption = {str(parameters['shuffleCaption']).lower()}\n  keep_tokens = {parameters['keepTokens']}\n"
-        f"  caption_dropout_rate = {float(parameters['captionDropoutRate'])}\n",
+        f"  caption_dropout_rate = {float(parameters['captionDropoutRate'])}\n"
+        f"  flip_aug = {str(bool(parameters.get('flipAugmentation', False))).lower()}\n"
+        f"  color_aug = {str(bool(parameters.get('colorAugmentation', False))).lower()}\n",
         encoding="utf-8",
     )
     return config
@@ -120,6 +151,7 @@ def build_command(request: dict, config: Path, workspace: Path) -> list[str]:
     optimizer_steps = max(1, (image_passes + parameters["gradientAccumulationSteps"] - 1) // parameters["gradientAccumulationSteps"])
     warmup_steps = round(optimizer_steps * float(parameters["warmupRatio"]))
     blocks_to_swap = choose_blocks_to_swap(parameters["resolution"])
+    precision = str(parameters.get("mixedPrecision", "bf16"))
     training_entrypoint = write_training_entrypoint(workspace)
     accelerate_bootstrap = (
         "import sys;"
@@ -133,14 +165,23 @@ def build_command(request: dict, config: Path, workspace: Path) -> list[str]:
         f"--dataset_config={config}", f"--output_dir={output_dir}", f"--output_name={request['outputName']}",
         "--save_model_as=safetensors", "--network_module=networks.lora_anima", "--network_train_unet_only",
         f"--network_dim={parameters['rank']}", f"--network_alpha={parameters['alpha']}",
-        f"--learning_rate={float(parameters['learningRate'])}", "--optimizer_type=AdamW8bit", f"--lr_scheduler={parameters['lrScheduler']}",
+        f"--learning_rate={float(parameters['learningRate'])}", f"--optimizer_type={parameters.get('optimizer', 'AdamW8bit')}", f"--lr_scheduler={parameters['lrScheduler']}",
         f"--lr_warmup_steps={warmup_steps}", f"--gradient_accumulation_steps={parameters['gradientAccumulationSteps']}",
-        "--timestep_sampling=sigmoid", "--discrete_flow_shift=1.0", f"--max_train_epochs={parameters['epochs']}",
-        "--mixed_precision=bf16", "--save_precision=bf16", "--gradient_checkpointing", "--cache_latents", "--qwen_image_vae_2d",
+        "--timestep_sampling=sigmoid", "--discrete_flow_shift=1.0",
+        f"--mixed_precision={precision}", f"--save_precision={precision}", f"--max_grad_norm={float(parameters.get('maxGradNorm', 1.0))}", "--qwen_image_vae_2d",
         f"--blocks_to_swap={blocks_to_swap}", f"--seed={parameters['seed']}", "--max_data_loader_n_workers=4", "--persistent_data_loader_workers",
     ]
-    if not parameters["shuffleCaption"]:
+    if parameters.get("gradientCheckpointing", True):
+        command.append("--gradient_checkpointing")
+    if parameters.get("cacheLatents", True):
+        command.append("--cache_latents")
+    if parameters.get("textEncoderStrategy", "frozen_cached") == "frozen_cached" and not parameters["shuffleCaption"]:
         command.append("--cache_text_encoder_outputs")
+    if parameters.get("maxTrainSteps"):
+        command.append(f"--max_train_steps={int(parameters['maxTrainSteps'])}")
+    else:
+        command.append(f"--max_train_epochs={int(parameters['epochs'])}")
+    command.append(f"--save_every_n_epochs={int(parameters.get('saveEveryEpochs', 1))}")
     if parameters["lrScheduler"] == "cosine_with_restarts":
         command.append("--lr_scheduler_num_cycles=2")
     return command

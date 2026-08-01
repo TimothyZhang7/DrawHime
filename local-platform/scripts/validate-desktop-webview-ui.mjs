@@ -42,7 +42,7 @@ try {
       coreStatusText: result.coreStatusText,
       navigationPages: result.navigationPages,
       pageIsolation: result.pageIsolation,
-      coreSubmissionBlocked: result.coreSubmissionError.includes("本地生成当前不可用"),
+      coreSubmissionBlocked: isCoreSubmissionBlocked(result.coreSubmissionError),
       workflowEvidence,
       fontSettingsEvidence,
       repositoryEvidence,
@@ -270,18 +270,21 @@ async function captureResourceCenter(client, directory) {
     if (!startupTab) throw new Error('未找到启动入口');
     startupTab.click();
     await new Promise((resolve) => setTimeout(resolve, 250));
+    // 直接读取已验签目录，确认能力分流返回真实 Segmenter，而不是只验证静态启动卡片。
+    const catalog = await window.__TAURI_INTERNALS__.invoke('desktop_load_resource_catalog');
     const dependencyCards = [...document.querySelectorAll('.startup-dependency-list > article')];
     const dependencyText = dependencyCards.map((card) => card.textContent.trim()).join('\n');
     const summaryCount = document.querySelectorAll('.startup-stages > article').length;
     return {
       dependencyCards: dependencyCards.length,
+      segmenterResources: catalog.resources.filter((resource) => resource.kind === 'segmenter').length,
       summaryCount,
       primaryLabel: document.querySelector('.startup-primary > span')?.textContent || '',
       optionalModelVisible: ['Anime Bulldozer', 'MiaoMiao RealSkin', 'MiaoMiao 3D Harem', 'MiaoMiao Harem'].some((name) => dependencyText.includes(name)),
       horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
     };
   })()`);
-  if (result.dependencyCards < 4 || result.summaryCount !== 3 || !['初始化', '启动', '启动中', '运行中', '正在检测', '正在初始化', '正在自检'].includes(result.primaryLabel) || result.optionalModelVisible || result.horizontalOverflow) throw new Error(`启动页验收失败：${JSON.stringify(result)}`);
+  if (result.dependencyCards < 4 || result.segmenterResources !== 1 || result.summaryCount !== 3 || !['初始化', '启动', '启动中', '运行中', '正在检测', '正在初始化', '正在自检'].includes(result.primaryLabel) || result.optionalModelVisible || result.horizontalOverflow) throw new Error(`启动页验收失败：${JSON.stringify(result)}`);
   const listFile = 'dependencies-list.png';
   await writeFile(path.join(targetDirectory, listFile), Buffer.from(await client.captureScreenshot(), 'base64'));
   const dialog = await client.evaluate(String.raw`(async () => {
@@ -544,12 +547,19 @@ function validateProbe(result, expectNoGpu) {
   // Runtime、自检与必需依赖统一由左下角本地核心承载；其他阻断问题仍使用全局横幅。
   const centralizedCoreIssue = ["本地核心未就绪", "本地核心等待自检", "本地核心不可用", "本地核心错误", "依赖通道未配置", "依赖清单不完整"].some((label) => result.coreStatusText.includes(label));
   if (result.environmentStatus !== "ready" && result.navigationPages.some((item) => !item.bannerVisible) && !centralizedCoreIssue) throw new Error("环境异常既未显示全局横幅，也未集中显示在本地核心");
+  // 生成能力未就绪时必须由 Tauri 最终边界拒绝提交，不能只依赖前端按钮禁用。
+  if (!result.inferenceReady && !isCoreSubmissionBlocked(result.coreSubmissionError)) throw new Error(`未就绪核心未拒绝生成提交：${result.coreSubmissionError || "无错误"}`);
   if (expectNoGpu) {
     if (result.environmentStatus !== "blocked") throw new Error(`无 GPU 环境状态应为 blocked，实际为 ${result.environmentStatus}`);
     if (result.inferenceReady || result.trainingReady) throw new Error("无 GPU 环境错误开放了生成或训练能力");
     if (!result.bannerText.includes("NVIDIA GPU")) throw new Error("无 GPU 横幅缺少 NVIDIA GPU 原因");
-    if (!result.coreSubmissionError.includes("本地生成当前不可用")) throw new Error(`核心未拒绝无 GPU 生成提交：${result.coreSubmissionError || "无错误"}`);
+    if (!isCoreSubmissionBlocked(result.coreSubmissionError)) throw new Error(`核心未拒绝无 GPU 生成提交：${result.coreSubmissionError || "无错误"}`);
   }
+}
+
+/** 同时兼容硬件能力门禁与 Runtime 未启动门禁的真实错误文本。 */
+function isCoreSubmissionBlocked(message) {
+  return ["本地生成当前不可用", "本地核心未启动或不可用"].some((fragment) => String(message || "").includes(fragment));
 }
 
 /** 统一异步等待，避免高频轮询占用 Runner。 */

@@ -398,8 +398,11 @@ export const inferenceLoraViewSchema = z.object({
   description: z.string(),
   type: z.enum(["style", "character", "concept", "clothing", "pose", "other"]),
   modelFamily: z.string(),
-  /** 平台训练产物绑定精确底模；外部上传 LoRA 为 null 并继续按系列兼容。 */
+  /** 兼容旧客户端的历史字段；新兼容策略不再从训练底模隐式推导。 */
   baseModelVersionId: z.string().nullable(),
+  /** all 表示同系列全部底模，restricted 表示只允许显式底模列表。 */
+  compatibilityMode: z.enum(["all", "restricted"]),
+  compatibleModelVersionIds: z.array(z.string()),
   fileName: z.string(),
   sha256: z.string().regex(/^[a-f0-9]{64}$/),
   triggerWords: z.array(z.string()),
@@ -422,6 +425,11 @@ export const loraLibraryCreateRequestSchema = z.object({
   modelFamily: z.string().trim().min(1).max(100),
   triggerWords: z.array(z.string().trim().min(1).max(100)).max(32),
   isPrivate: z.boolean().default(false),
+  compatibilityMode: z.enum(["all", "restricted"]).default("all"),
+  compatibleModelVersionIds: z.array(z.string().uuid()).max(100).default([]),
+}).superRefine((value, context) => {
+  if (value.compatibilityMode === "restricted" && value.compatibleModelVersionIds.length === 0) context.addIssue({ code: z.ZodIssueCode.custom, path: ["compatibleModelVersionIds"], message: "限制底模时至少选择一个底模" });
+  if (value.compatibilityMode === "all" && value.compatibleModelVersionIds.length > 0) context.addIssue({ code: z.ZodIssueCode.custom, path: ["compatibleModelVersionIds"], message: "全部底模模式不接受限制列表" });
 });
 
 /** LoRA 作者在详情页可修改的元数据与外显范围。 */
@@ -432,6 +440,11 @@ export const loraLibraryUpdateRequestSchema = z.object({
   modelFamily: z.string().trim().min(1).max(100),
   triggerWords: z.array(z.string().trim().min(1).max(100)).max(32),
   isPrivate: z.boolean(),
+  compatibilityMode: z.enum(["all", "restricted"]).default("all"),
+  compatibleModelVersionIds: z.array(z.string().uuid()).max(100).default([]),
+}).superRefine((value, context) => {
+  if (value.compatibilityMode === "restricted" && value.compatibleModelVersionIds.length === 0) context.addIssue({ code: z.ZodIssueCode.custom, path: ["compatibleModelVersionIds"], message: "限制底模时至少选择一个底模" });
+  if (value.compatibilityMode === "all" && value.compatibleModelVersionIds.length > 0) context.addIssue({ code: z.ZodIssueCode.custom, path: ["compatibleModelVersionIds"], message: "全部底模模式不接受限制列表" });
 });
 
 /** LoRA 仓库条目视图。 */
@@ -446,6 +459,8 @@ export const loraLibraryEntryViewSchema = z.object({
   ownerDisplayName: z.string(),
   privacy: z.enum(["public", "private"]),
   isOwner: z.boolean(),
+  compatibilityMode: z.enum(["all", "restricted"]),
+  compatibleModelVersionIds: z.array(z.string()),
   version: z.object({ id: z.string(), fileName: z.string(), sha256: z.string(), byteSize: z.number().int().positive() }).nullable(),
   examples: z.array(z.object({ id: z.string(), width: z.number().int().nullable(), height: z.number().int().nullable(), contentUrl: z.string() })),
   /** 最近引用该 LoRA 且已经公开发布到主站图库的任务。 */
@@ -764,6 +779,8 @@ export const desktopEnvironmentReportSchema = z.object({
   os: z.object({ name: z.string(), version: z.string(), build: z.number().int().nonnegative().nullable(), arch: z.string(), supported: z.boolean() }),
   cpu: z.object({ name: z.string(), logicalCores: z.number().int().positive() }),
   memory: z.object({ totalBytes: z.number().int().nonnegative(), availableBytes: z.number().int().nonnegative(), virtualTotalBytes: z.number().int().nonnegative() }),
+  /** WMI 检测到的全部图形适配器，用于明确区分 NVIDIA、AMD、Intel 与未知厂商。 */
+  displayAdapters: z.array(z.object({ name: z.string().min(1), vendor: z.string().min(1), cudaSupported: z.boolean() })).max(16),
   gpus: z.array(z.object({ index: z.number().int().nonnegative(), uuid: z.string(), name: z.string(), vendor: z.string(), memoryTotalBytes: z.number().int().nonnegative(), memoryFreeBytes: z.number().int().nonnegative(), driverVersion: z.string(), computeCapability: z.string().nullable(), temperatureCelsius: z.number().nullable(), utilizationPercent: z.number().nullable() })),
   disks: z.array(z.object({ name: z.string(), fileSystem: z.string(), totalBytes: z.number().int().nonnegative(), availableBytes: z.number().int().nonnegative() })),
   runtime: z.object({ installed: z.boolean(), status: z.enum(["not_installed", "installed_unverified", "ready", "broken"]), rootPath: z.string() }),
@@ -833,7 +850,7 @@ export const desktopResourceSourceSchema = z.object({
 });
 
 /** 桌面签名资源类型，应用更新与普通依赖共用该稳定枚举。 */
-export const desktopResourceKindSchema = z.enum(["runtime", "model", "lora", "captioner", "trainer", "application"]);
+export const desktopResourceKindSchema = z.enum(["runtime", "model", "lora", "captioner", "segmenter", "trainer", "application"]);
 
 /** 把严格三段版本转换为可比较元组，资源签名前拒绝含糊版本。 */
 function desktopSemanticVersion(value: string): [number, number, number] | null {
@@ -1132,11 +1149,33 @@ export const desktopSoftwareUpdateViewSchema = z.object({
 /** 离线更新要求同时提供安装包和签名信封。 */
 export const desktopOfflineUpdateImportInputSchema = z.object({ installerPath: z.string().min(1), envelopePath: z.string().min(1) });
 
-/** 桌面端本地训练集及逐图 Caption 视图。 */
+/** 单个训练标签的稳定值、规范键、来源和显示顺序。 */
+export const desktopTrainingTagViewSchema = z.object({
+  value: z.string().min(1).max(200),
+  normalizedValue: z.string().min(1).max(200),
+  source: z.enum(["auto", "ai_cleaned", "manual", "imported", "trigger"]),
+  position: z.number().int().nonnegative(),
+});
+
+/** 训练图片的透明 PNG 派生版本，原图始终独立保留。 */
+export const desktopTrainingAssetDerivativeViewSchema = z.object({
+  id: z.string().uuid(),
+  kind: z.literal("background_removed"),
+  source: z.enum(["auto", "manual"]),
+  path: z.string().min(1),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  byteSize: z.number().int().positive(),
+  width: z.number().int().positive(),
+  height: z.number().int().positive(),
+  available: z.boolean(),
+  createdAt: z.string().datetime(),
+});
+
+/** 桌面端本地训练集、兼容 Caption 及逐标签来源视图。 */
 export const desktopTrainingDatasetViewSchema = z.object({
   id: z.string().uuid(),
   title: z.string().min(1).max(191),
-  type: z.enum(["character", "style", "concept"]),
+  type: z.enum(["character", "style", "object", "concept"]),
   triggerWords: z.array(z.string().min(1).max(100)).max(50),
   status: z.enum(["draft", "review_ready", "confirmed"]),
   assets: z.array(z.object({
@@ -1149,7 +1188,10 @@ export const desktopTrainingDatasetViewSchema = z.object({
     height: z.number().int().positive(),
     available: z.boolean(),
     caption: z.string().nullable(),
-    captionSource: z.enum(["auto", "manual"]).nullable(),
+    captionSource: z.enum(["auto", "ai_cleaned", "manual", "imported", "trigger"]).nullable(),
+    tags: z.array(desktopTrainingTagViewSchema).max(2000),
+    derivatives: z.array(desktopTrainingAssetDerivativeViewSchema).max(20),
+    selectedDerivativeId: z.string().uuid().nullable(),
     confirmed: z.boolean(),
     createdAt: z.string().datetime(),
     updatedAt: z.string().datetime(),
@@ -1160,6 +1202,40 @@ export const desktopTrainingDatasetViewSchema = z.object({
 
 /** 桌面端创建本地训练集的输入。 */
 export const desktopTrainingDatasetCreateInputSchema = z.object({
+  title: z.string().trim().min(1).max(191),
+  type: desktopTrainingDatasetViewSchema.shape.type,
+  triggerWords: z.array(z.string().trim().min(1).max(100)).max(50),
+});
+
+/** 桌面训练集目录或压缩包预检输入。 */
+export const desktopTrainingDatasetImportPreviewInputSchema = z.object({ sourcePath: z.string().min(1) });
+
+/** 训练集导入预检发现的单项异常。 */
+export const desktopTrainingDatasetImportAnomalySchema = z.object({
+  code: z.enum(["orphan_label", "duplicate_image", "invalid_image", "invalid_label_encoding", "invalid_path", "unsupported_file", "limit_exceeded"]),
+  severity: z.enum(["warning", "error"]),
+  path: z.string(),
+  message: z.string().min(1),
+});
+
+/** 用户确认前的受控训练集导入快照。 */
+export const desktopTrainingDatasetImportPreviewSchema = z.object({
+  id: z.string().uuid(),
+  sourceName: z.string().min(1),
+  sourceKind: z.enum(["folder", "zip", "7z", "tar", "tar_gz"]),
+  suggestedTitle: z.string().min(1).max(191),
+  imageCount: z.number().int().nonnegative(),
+  pairedTagCount: z.number().int().nonnegative(),
+  untaggedCount: z.number().int().nonnegative(),
+  anomalyCount: z.number().int().nonnegative(),
+  canImport: z.boolean(),
+  anomalies: z.array(desktopTrainingDatasetImportAnomalySchema).max(500),
+  expiresAt: z.string().datetime(),
+});
+
+/** 依据已预检快照正式创建训练集。 */
+export const desktopTrainingDatasetImportInputSchema = z.object({
+  previewId: z.string().uuid(),
   title: z.string().trim().min(1).max(191),
   type: desktopTrainingDatasetViewSchema.shape.type,
   triggerWords: z.array(z.string().trim().min(1).max(100)).max(50),
@@ -1184,6 +1260,14 @@ export const desktopTrainingCaptionUpdateInputSchema = z.object({
   caption: z.string().trim().max(10000).nullable(),
 });
 
+/** 桌面端在一次原子操作内批量添加或删除训练标签。 */
+export const desktopTrainingBatchTagsInputSchema = z.object({
+  datasetId: z.string().uuid(),
+  assetIds: z.array(z.string().uuid()).min(1).max(200).refine((items) => new Set(items).size === items.length, "训练图片不能重复选择"),
+  operation: z.enum(["add", "remove"]),
+  tags: z.array(z.string().trim().min(1).max(200)).min(1).max(2000),
+});
+
 /** 桌面端删除单张训练图片的输入。 */
 export const desktopTrainingAssetDeleteInputSchema = z.object({ datasetId: z.string().uuid(), assetId: z.string().uuid() });
 
@@ -1197,6 +1281,8 @@ export const desktopTrainingDatasetIdInputSchema = z.object({ datasetId: z.strin
 export const desktopCaptionJobCreateInputSchema = z.object({
   datasetId: z.string().uuid(),
   assetId: z.string().uuid().nullable(),
+  /** 批量工作区可明确指定图片集合；与 assetId 互斥。 */
+  assetIds: z.array(z.string().uuid()).min(1).max(200).nullable().optional(),
   generalThreshold: z.number().min(0.05).max(0.95),
   characterThreshold: z.number().min(0.05).max(0.99),
   includeCharacterTags: z.boolean(),
@@ -1215,7 +1301,7 @@ export const desktopCaptionJobViewSchema = z.object({
   id: z.string().uuid(),
   datasetId: z.string().uuid(),
   assetId: z.string().uuid().nullable(),
-  status: z.enum(["queued", "running", "succeeded", "failed", "cancelled"]),
+  status: z.enum(["queued", "running", "paused", "succeeded", "failed", "cancelled"]),
   progress: z.number().int().min(0).max(100),
   totalAssets: z.number().int().nonnegative(),
   processedAssets: z.number().int().nonnegative(),
@@ -1233,8 +1319,69 @@ export const desktopCaptionJobViewSchema = z.object({
   updatedAt: z.string().datetime(),
 });
 
+/** AI 标签清洗对单个标签给出的可审计建议。 */
+export const desktopAiCleanTagSuggestionSchema = z.object({ tag: z.string().trim().min(1).max(200), reason: z.string().trim().min(1).max(1000) });
+
+/** AI 标签清洗建议保留原标签快照，并由客户端计算最终标签。 */
+export const desktopAiCleanProposalSchema = z.object({
+  originalTags: z.array(z.string().min(1).max(200)).max(2000),
+  keep: z.array(desktopAiCleanTagSuggestionSchema).max(2000),
+  remove: z.array(desktopAiCleanTagSuggestionSchema).max(2000),
+  add: z.array(desktopAiCleanTagSuggestionSchema).max(2000),
+  finalTags: z.array(z.string().min(1).max(200)).max(2000),
+});
+
+/** AI 清洗批次中的逐图持久化状态。 */
+export const desktopAiCleanJobItemViewSchema = z.object({
+  assetId: z.string().uuid(), status: z.enum(["queued", "running", "succeeded", "failed", "cancelled"]), attemptCount: z.number().int().min(0).max(3),
+  proposal: desktopAiCleanProposalSchema.nullable(), applyStatus: z.enum(["pending", "applied", "undone"]), error: z.string().nullable(), updatedAt: z.string().datetime(),
+});
+
+/** SQLite 为事实源的 AI 标签清洗批次。 */
+export const desktopAiCleanJobViewSchema = z.object({
+  id: z.string().uuid(), datasetId: z.string().uuid(), status: z.enum(["queued", "running", "paused", "succeeded", "failed", "cancelled"]), progress: z.number().int().min(0).max(100),
+  totalAssets: z.number().int().positive().max(200), processedAssets: z.number().int().nonnegative().max(200), succeededAssets: z.number().int().nonnegative().max(200), failedAssets: z.number().int().nonnegative().max(200),
+  trainingGoal: z.string().max(4000), items: z.array(desktopAiCleanJobItemViewSchema).max(200), error: z.string().nullable(), createdAt: z.string().datetime(), completedAt: z.string().datetime().nullable(), updatedAt: z.string().datetime(),
+});
+
+/** 创建单图或批量 AI 标签清洗任务。 */
+export const desktopAiCleanJobCreateInputSchema = z.object({ datasetId: z.string().uuid(), assetIds: z.array(z.string().uuid()).min(1).max(200), trainingGoal: z.string().trim().max(4000) });
+
+/** 用户确认 AI 建议时只提交接受的删除项和新增项。 */
+export const desktopAiCleanApplyInputSchema = z.object({ jobId: z.string().uuid(), datasetId: z.string().uuid(), assetId: z.string().uuid(), removeTags: z.array(z.string().min(1).max(200)).max(2000), addTags: z.array(z.string().min(1).max(200)).max(2000) });
+
+/** 撤销一次已经应用且之后没有继续编辑的 AI 清洗。 */
+export const desktopAiCleanUndoInputSchema = z.object({ jobId: z.string().uuid(), datasetId: z.string().uuid(), assetId: z.string().uuid() });
+
+/** 创建单图或批量自动抠图任务。 */
+export const desktopBackgroundRemovalJobCreateInputSchema = z.object({ datasetId: z.string().uuid(), assetIds: z.array(z.string().uuid()).min(1).max(200) });
+
+/** 自动抠图批次中的逐图持久状态。 */
+export const desktopBackgroundRemovalJobItemViewSchema = z.object({
+  assetId: z.string().uuid(),
+  status: z.enum(["queued", "running", "succeeded", "failed", "cancelled"]),
+  derivativeId: z.string().uuid().nullable(),
+  error: z.string().nullable(),
+  updatedAt: z.string().datetime(),
+});
+
+/** SQLite 为事实源的自动抠图任务。 */
+export const desktopBackgroundRemovalJobViewSchema = z.object({
+  id: z.string().uuid(), datasetId: z.string().uuid(), status: z.enum(["queued", "running", "paused", "succeeded", "failed", "cancelled"]),
+  progress: z.number().int().min(0).max(100), totalAssets: z.number().int().positive().max(200), processedAssets: z.number().int().nonnegative().max(200),
+  succeededAssets: z.number().int().nonnegative().max(200), failedAssets: z.number().int().nonnegative().max(200), items: z.array(desktopBackgroundRemovalJobItemViewSchema).max(200),
+  error: z.string().nullable(), createdAt: z.string().datetime(), completedAt: z.string().datetime().nullable(), updatedAt: z.string().datetime(),
+});
+
+/** 手动抠图只接受与原图同尺寸的 PNG alpha 蒙版。 */
+export const desktopTrainingManualMaskInputSchema = z.object({ datasetId: z.string().uuid(), assetId: z.string().uuid(), maskPngBase64: z.string().min(16).max(200 * 1024 * 1024) });
+
+/** 选择后续训练快照使用的图片版本；空值表示原图。 */
+export const desktopTrainingAssetVariantSelectInputSchema = z.object({ datasetId: z.string().uuid(), assetId: z.string().uuid(), derivativeId: z.string().uuid().nullable() });
+
 /** 桌面端真实 LoRA 训练任务固化的用户参数。 */
 export const desktopTrainingParametersSchema = z.object({
+  preset: z.enum(["quick", "balanced", "high_quality", "extreme", "custom"]),
   rank: z.number().int().min(8).max(64),
   alpha: z.number().int().min(1).max(64),
   epochs: z.number().int().min(1).max(20),
@@ -1248,6 +1395,22 @@ export const desktopTrainingParametersSchema = z.object({
   shuffleCaption: z.boolean(),
   keepTokens: z.number().int().min(0).max(10),
   seed: z.number().int().min(0).max(2147483647),
+  optimizer: z.enum(["AdamW8bit", "AdamW", "Adafactor"]),
+  batchSize: z.number().int().min(1).max(4),
+  maxTrainSteps: z.number().int().min(1).max(100000).nullable(),
+  bucketEnabled: z.boolean(),
+  bucketNoUpscale: z.boolean(),
+  bucketMinResolution: z.number().int().min(256).max(1536),
+  bucketMaxResolution: z.number().int().min(512).max(2048),
+  bucketResolutionSteps: z.number().int().min(32).max(256),
+  textEncoderStrategy: z.enum(["frozen_cached", "frozen_recompute"]),
+  cacheLatents: z.boolean(),
+  saveEveryEpochs: z.number().int().min(1).max(20),
+  mixedPrecision: z.enum(["bf16", "fp16"]),
+  gradientCheckpointing: z.boolean(),
+  flipAugmentation: z.boolean(),
+  colorAugmentation: z.boolean(),
+  maxGradNorm: z.number().min(0).max(10),
 });
 
 /** 桌面端创建真实 LoRA 训练任务的输入。 */
@@ -1255,6 +1418,8 @@ export const desktopTrainingJobCreateInputSchema = z.object({
   datasetId: z.string().uuid(),
   modelId: z.string().uuid(),
   title: z.string().trim().min(1).max(191),
+  useAiTagProcessing: z.boolean(),
+  trainingGoal: z.string().trim().max(4000),
   parameters: desktopTrainingParametersSchema,
 });
 
@@ -1281,7 +1446,7 @@ export const desktopTrainingJobViewSchema = z.object({
   datasetId: z.string().uuid(),
   datasetTitle: z.string().min(1),
   title: z.string().min(1),
-  type: z.enum(["character", "style", "concept"]),
+  type: z.enum(["character", "style", "object", "concept"]),
   status: z.enum(["queued", "running", "succeeded", "failed", "cancelled"]),
   progress: z.number().int().min(0).max(100),
   queuePosition: z.number().int().nonnegative(),
@@ -1289,6 +1454,11 @@ export const desktopTrainingJobViewSchema = z.object({
   totalEpochs: z.number().int().positive(),
   modelId: z.string().uuid(),
   modelDisplayName: z.string().min(1),
+  useAiTagProcessing: z.boolean(),
+  trainingGoal: z.string().max(4000),
+  preprocessingStatus: z.enum(["not_requested", "queued", "running", "succeeded", "failed"]),
+  preprocessingProgress: z.number().int().min(0).max(100),
+  preprocessingError: z.string().nullable(),
   triggerWords: z.array(z.string().min(1)).max(50),
   assetCount: z.number().int().min(5).max(200),
   parameters: desktopTrainingParametersSchema,
@@ -1300,6 +1470,39 @@ export const desktopTrainingJobViewSchema = z.object({
   startedAt: z.string().datetime().nullable(),
   completedAt: z.string().datetime().nullable(),
   updatedAt: z.string().datetime(),
+});
+
+/** 训练任务中冻结的单张图片、Caption 与逐标签来源。 */
+export const desktopTrainingSnapshotAssetViewSchema = z.object({
+  sequence: z.number().int().nonnegative(),
+  fileName: z.string().min(1),
+  path: z.string().min(1),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  byteSize: z.number().int().positive(),
+  caption: z.string().min(1),
+  tags: z.array(desktopTrainingTagViewSchema).max(2000),
+  imageVariant: z.enum(["original", "background_removed"]),
+  derivativeSource: z.enum(["auto", "manual"]).nullable(),
+});
+
+/** 桌面训练任务的完整只读快照。 */
+export const desktopTrainingSnapshotViewSchema = z.object({
+  jobId: z.string().uuid(),
+  datasetId: z.string().uuid(),
+  datasetTitle: z.string().min(1),
+  loraTitle: z.string().min(1),
+  type: desktopTrainingDatasetViewSchema.shape.type,
+  status: desktopTrainingJobViewSchema.shape.status,
+  triggerWords: z.array(z.string().min(1).max(100)).max(50),
+  parameters: desktopTrainingParametersSchema,
+  assets: z.array(desktopTrainingSnapshotAssetViewSchema).min(1).max(200),
+  createdAt: z.string().datetime(),
+});
+
+/** 从只读训练快照复制新训练集时只允许提供新标题。 */
+export const desktopTrainingSnapshotCopyInputSchema = z.object({
+  jobId: z.string().uuid(),
+  title: z.string().trim().min(1).max(191),
 });
 
 /** 本地生成质量预设；custom 表示用户已手动调整专业参数。 */
@@ -1326,7 +1529,7 @@ export const desktopLocalJobCreateInputSchema = z.object({
   steps: z.number().int().min(1).max(80),
   cfg: z.number().min(0.1).max(20),
   samplerName: z.enum(["er_sde", "euler", "euler_ancestral"]),
-  schedulerName: z.enum(["normal", "simple"]),
+  schedulerName: z.enum(["normal", "simple", "beta"]),
   samplingMaxEdge: z.number().int().min(512).max(2048),
   samplingPixelBudget: z.number().int().min(262144).max(4194304),
   aspectStepThreshold: z.number().min(1).max(4),
@@ -1638,21 +1841,43 @@ export type DesktopLocalLoraView = z.infer<typeof desktopLocalLoraViewSchema>;
 export type DesktopLocalLoraImportInput = z.infer<typeof desktopLocalLoraImportInputSchema>;
 export type DesktopLocalLoraSelection = z.infer<typeof desktopLocalLoraSelectionSchema>;
 export type DesktopTrainingDatasetView = z.infer<typeof desktopTrainingDatasetViewSchema>;
+export type DesktopTrainingTagView = z.infer<typeof desktopTrainingTagViewSchema>;
+export type DesktopTrainingAssetDerivativeView = z.infer<typeof desktopTrainingAssetDerivativeViewSchema>;
 export type DesktopTrainingDatasetCreateInput = z.infer<typeof desktopTrainingDatasetCreateInputSchema>;
+export type DesktopTrainingDatasetImportPreviewInput = z.infer<typeof desktopTrainingDatasetImportPreviewInputSchema>;
+export type DesktopTrainingDatasetImportAnomaly = z.infer<typeof desktopTrainingDatasetImportAnomalySchema>;
+export type DesktopTrainingDatasetImportPreview = z.infer<typeof desktopTrainingDatasetImportPreviewSchema>;
+export type DesktopTrainingDatasetImportInput = z.infer<typeof desktopTrainingDatasetImportInputSchema>;
 export type DesktopTrainingTriggerWordsUpdateInput = z.infer<typeof desktopTrainingTriggerWordsUpdateInputSchema>;
 export type DesktopTrainingImagesAddInput = z.infer<typeof desktopTrainingImagesAddInputSchema>;
 export type DesktopTrainingCaptionUpdateInput = z.infer<typeof desktopTrainingCaptionUpdateInputSchema>;
+export type DesktopTrainingBatchTagsInput = z.infer<typeof desktopTrainingBatchTagsInputSchema>;
 export type DesktopTrainingAssetDeleteInput = z.infer<typeof desktopTrainingAssetDeleteInputSchema>;
 export type DesktopTrainingTagTranslationInput = z.infer<typeof desktopTrainingTagTranslationInputSchema>;
 export type DesktopTrainingDatasetIdInput = z.infer<typeof desktopTrainingDatasetIdInputSchema>;
 export type DesktopCaptionJobCreateInput = z.infer<typeof desktopCaptionJobCreateInputSchema>;
 export type DesktopCaptionJobItemView = z.infer<typeof desktopCaptionJobItemViewSchema>;
 export type DesktopCaptionJobView = z.infer<typeof desktopCaptionJobViewSchema>;
+export type DesktopAiCleanTagSuggestion = z.infer<typeof desktopAiCleanTagSuggestionSchema>;
+export type DesktopAiCleanProposal = z.infer<typeof desktopAiCleanProposalSchema>;
+export type DesktopAiCleanJobItemView = z.infer<typeof desktopAiCleanJobItemViewSchema>;
+export type DesktopAiCleanJobView = z.infer<typeof desktopAiCleanJobViewSchema>;
+export type DesktopAiCleanJobCreateInput = z.infer<typeof desktopAiCleanJobCreateInputSchema>;
+export type DesktopAiCleanApplyInput = z.infer<typeof desktopAiCleanApplyInputSchema>;
+export type DesktopAiCleanUndoInput = z.infer<typeof desktopAiCleanUndoInputSchema>;
+export type DesktopBackgroundRemovalJobCreateInput = z.infer<typeof desktopBackgroundRemovalJobCreateInputSchema>;
+export type DesktopBackgroundRemovalJobItemView = z.infer<typeof desktopBackgroundRemovalJobItemViewSchema>;
+export type DesktopBackgroundRemovalJobView = z.infer<typeof desktopBackgroundRemovalJobViewSchema>;
+export type DesktopTrainingManualMaskInput = z.infer<typeof desktopTrainingManualMaskInputSchema>;
+export type DesktopTrainingAssetVariantSelectInput = z.infer<typeof desktopTrainingAssetVariantSelectInputSchema>;
 export type DesktopTrainingParameters = z.infer<typeof desktopTrainingParametersSchema>;
 export type DesktopTrainingJobCreateInput = z.infer<typeof desktopTrainingJobCreateInputSchema>;
 export type DesktopTrainingAttemptView = z.infer<typeof desktopTrainingAttemptViewSchema>;
 export type DesktopTrainingSuggestionView = z.infer<typeof desktopTrainingSuggestionViewSchema>;
 export type DesktopTrainingJobView = z.infer<typeof desktopTrainingJobViewSchema>;
+export type DesktopTrainingSnapshotAssetView = z.infer<typeof desktopTrainingSnapshotAssetViewSchema>;
+export type DesktopTrainingSnapshotView = z.infer<typeof desktopTrainingSnapshotViewSchema>;
+export type DesktopTrainingSnapshotCopyInput = z.infer<typeof desktopTrainingSnapshotCopyInputSchema>;
 export type DesktopLocalJobCreateInput = z.infer<typeof desktopLocalJobCreateInputSchema>;
 export type DesktopLocalJobView = z.infer<typeof desktopLocalJobViewSchema>;
 export type DesktopGallerySyncItem = z.infer<typeof desktopGallerySyncItemSchema>;

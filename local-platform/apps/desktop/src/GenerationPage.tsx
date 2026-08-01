@@ -17,6 +17,7 @@ interface GenerationPageProps {
   websiteLoras: DesktopWebsiteLoraView[];
   websiteLoraProgress: Record<string, DesktopWebsiteLoraInstallProgress>;
   inferenceReady: boolean;
+  coreRunning: boolean;
   defaultPrivacy: DesktopSettings["defaultPrivacy"];
   onCreated: (job: DesktopLocalJobView) => void;
   onInstallWebsiteLora: (id: string) => void;
@@ -43,7 +44,7 @@ const ASPECT_RATIOS = [
 type AspectRatioId = typeof ASPECT_RATIOS[number]["id"];
 
 /** 本地生成页在页面切换时保持表单实例，任务提交后立即交给 SQLite 队列。 */
-export function GenerationPage({ models, loras, websiteLoras, websiteLoraProgress, inferenceReady, defaultPrivacy, onCreated, onInstallWebsiteLora, onOpenLoraLibrary, onTogglePreview, onError }: GenerationPageProps) {
+export function GenerationPage({ models, loras, websiteLoras, websiteLoraProgress, inferenceReady, coreRunning, defaultPrivacy, onCreated, onInstallWebsiteLora, onOpenLoraLibrary, onTogglePreview, onError }: GenerationPageProps) {
   const availableModels = useMemo(() => models.filter((model) => model.available), [models]);
   const availableLoras = useMemo(() => loras.filter((lora) => lora.available), [loras]);
   const [form, setForm] = useState<DesktopLocalJobCreateInput>(() => createInitialForm(defaultPrivacy));
@@ -86,7 +87,7 @@ export function GenerationPage({ models, loras, websiteLoras, websiteLoraProgres
   const changeLoraStrength = (id: string, key: "strength" | "clipStrength", value: number) => setForm((current) => ({ ...current, loras: current.loras.map((item) => item.id === id ? { ...item, [key]: value } : item) }));
   /** 创建任务只等待本地事务完成，不等待提示词处理或 GPU 生成。 */
   const submit = async () => {
-    if (!inferenceReady || !form.modelId || !form.prompt.trim() || busy) return;
+    if (!inferenceReady || !coreRunning || !form.modelId || !form.prompt.trim() || busy) return;
     setBusy(true);
     try { onCreated(await createDesktopLocalJob({ ...form, prompt: form.prompt.trim(), negativePrompt: form.negativePrompt?.trim() || null })); }
     catch (error) { onError(error instanceof Error ? error.message : String(error || "创建本地任务失败")); }
@@ -95,7 +96,7 @@ export function GenerationPage({ models, loras, websiteLoras, websiteLoraProgres
 
   return <div className="desktop-page generate-layout">
     <section className="section-card generation-form">
-      <header><div><span>LOCAL GENERATION</span><h2>本地生成</h2></div><div className="generation-heading-actions"><small>{inferenceReady ? "参数随任务固化 · 后台串行执行" : "GPU、Runtime 或底模未就绪"}</small><button type="button" onClick={onTogglePreview}><PictureInPicture2 />预览窗口</button></div></header>
+      <header><div><span>LOCAL GENERATION</span><h2>本地生成</h2></div><div className="generation-heading-actions"><small>{!inferenceReady ? "GPU、Runtime 或底模未就绪" : !coreRunning ? "请先在启动页面启动本地核心" : "参数随任务固化 · 后台串行执行"}</small><button type="button" onClick={onTogglePreview}><PictureInPicture2 />预览窗口</button></div></header>
       <div className="generation-form-scroll">{availableModels.length === 0 ? <div className="resource-unconfigured"><Database /><div><strong>尚无可用底模</strong><span>请先前往模型仓库安装底模，或导入已有 safetensors。</span></div></div> : <>
         <section className="generation-presets" aria-label="生成质量预设">{PRESETS.map(({ id, title, detail, Icon }) => <button key={id} type="button" className={form.qualityPreset === id ? "active" : ""} onClick={() => choosePreset(id)}><Icon /><span><strong>{title}</strong><small>{presetSummary(id, selectedModel)}</small></span><HelpTip text={detail} />{form.qualityPreset === id && <CheckCircle2 className="preset-selected" />}</button>)}</section>
         {form.qualityPreset === "custom" && <div className="generation-custom-notice"><SlidersHorizontal /><span><strong>自定义参数</strong><small>点击任一预设可恢复经过验证的整套参数。</small></span></div>}
@@ -123,7 +124,7 @@ export function GenerationPage({ models, loras, websiteLoras, websiteLoraProgres
         <label className="prompt-field"><span>提示词<HelpTip text="描述主体、画风、构图、光影和细节；开启质量前缀时只补齐缺失的模型标签。" /></span><textarea value={form.prompt} onChange={(event) => setForm((current) => ({ ...current, prompt: event.target.value }))} placeholder="支持 Anima 标签或自然语言" /></label>
         <label className="prompt-field negative"><span>负面提示词<HelpTip text="通过独立 negative conditioning 进入工作流，不会与正面提示词合并。" /></span><textarea value={form.negativePrompt || ""} onChange={(event) => setForm((current) => ({ ...current, negativePrompt: event.target.value || null }))} placeholder="可选；留空时可使用模型级默认负面词" /></label>
       </>}</div>
-      {availableModels.length > 0 && <footer><div><strong>{presetLabel(form.qualityPreset)}</strong><span>{form.steps} 步 · CFG {form.cfg} · {form.samplerName} / {form.schedulerName}</span></div><button disabled={busy || !inferenceReady || !form.modelId || !form.prompt.trim()} onClick={() => void submit()}>{busy ? <LoaderCircle className="spin" /> : <Play />}{busy ? "正在创建任务" : inferenceReady ? "提交本地任务" : "等待环境就绪"}</button></footer>}
+      {availableModels.length > 0 && <footer><div><strong>{presetLabel(form.qualityPreset)}</strong><span>{form.steps} 步 · CFG {form.cfg} · {form.samplerName} / {form.schedulerName}</span></div><button disabled={busy || !inferenceReady || !coreRunning || !form.modelId || !form.prompt.trim()} onClick={() => void submit()}>{busy ? <LoaderCircle className="spin" /> : <Play />}{busy ? "正在创建任务" : !inferenceReady ? "等待环境就绪" : !coreRunning ? "请先启动本地核心" : "提交本地任务"}</button></footer>}
     </section>
     {loraDialogOpen && <GenerationLoraDialog localLoras={compatibleLoras} websiteLoras={websiteLoras} selected={form.loras} progress={websiteLoraProgress} onToggle={toggleLora} onStrength={changeLoraStrength} onInstall={onInstallWebsiteLora} onClose={() => setLoraDialogOpen(false)} />}
   </div>;
@@ -187,25 +188,38 @@ function aspectRatioFromDimensions(width: number, height: number): AspectRatioId
 /** 把预设转换成可见参数；模型级 CFG 与采样器和生产目录保持一致。 */
 function applyPreset(form: DesktopLocalJobCreateInput, preset: PresetName, model: DesktopLocalModelView | null): DesktopLocalJobCreateInput {
   const profile = modelProfile(model);
-  const distilled = isDistilledAnimaModel(model);
-  const values = distilled
-    ? preset === "fast" ? { steps: 8, aspectAdjustedSteps: 8, samplingMaxEdge: 1280, samplingPixelBudget: 786_432 } : preset === "extreme" ? { steps: 30, aspectAdjustedSteps: 30, samplingMaxEdge: 1536, samplingPixelBudget: 1_350_000 } : { steps: 12, aspectAdjustedSteps: 12, samplingMaxEdge: 1536, samplingPixelBudget: 1_350_000 }
-    : preset === "fast" ? { steps: 20, aspectAdjustedSteps: 18, samplingMaxEdge: 1280, samplingPixelBudget: 786_432 } : preset === "extreme" ? { steps: 45, aspectAdjustedSteps: 42, samplingMaxEdge: 1792, samplingPixelBudget: 2_073_600 } : { steps: 37, aspectAdjustedSteps: 34, samplingMaxEdge: 1536, samplingPixelBudget: 1_350_000 };
-  return { ...form, qualityPreset: preset, ...values, cfg: profile.cfg, samplerName: profile.samplerName, schedulerName: profile.schedulerName, aspectStepThreshold: 1.5, upscaleMethod: "lanczos", qualityPromptEnabled: true, defaultNegativeEnabled: true };
+  const values = profile.presets[preset];
+  return { ...form, qualityPreset: preset, ...values, cfg: profile.cfg, samplerName: profile.samplerName, schedulerName: profile.schedulerName, aspectStepThreshold: profile.aspectStepThreshold, upscaleMethod: "lanczos", qualityPromptEnabled: true, defaultNegativeEnabled: true };
 }
 
-/** 识别正式底模文件名并返回与生产 GPU 一致的模型级采样组合。 */
-function modelProfile(model: DesktopLocalModelView | null): Pick<DesktopLocalJobCreateInput, "cfg" | "samplerName" | "schedulerName"> {
-  const fileName = model?.modelFileName.toLowerCase() || "";
-  if (model?.workflowKind !== "anima") return { cfg: 5, samplerName: "euler", schedulerName: "normal" };
-  if (fileName.includes("anima8step")) return { cfg: 1, samplerName: "euler_ancestral", schedulerName: "normal" };
-  if (fileName.includes("realskin") || fileName.includes("3dharem")) return { cfg: 4, samplerName: "euler_ancestral", schedulerName: "normal" };
-  if (fileName.includes("waianima")) return { cfg: 4.5, samplerName: "euler_ancestral", schedulerName: "normal" };
-  return { cfg: 4, samplerName: "er_sde", schedulerName: "simple" };
+/** 在线目录是模型参数唯一事实源；手工导入模型没有目录时才使用保守回退。 */
+function modelProfile(model: DesktopLocalModelView | null): { cfg: number; samplerName: DesktopLocalJobCreateInput["samplerName"]; schedulerName: DesktopLocalJobCreateInput["schedulerName"]; aspectStepThreshold: number; presets: Record<PresetName, Pick<DesktopLocalJobCreateInput, "steps" | "aspectAdjustedSteps" | "samplingMaxEdge" | "samplingPixelBudget">> } {
+  const profile = model?.generationProfile;
+  if (profile) {
+    // 在线目录通过共享契约限制可选值，这里再次收窄后再写入本地任务参数。
+    const samplerName = ["er_sde", "euler", "euler_ancestral"].includes(profile.sampler) ? profile.sampler as DesktopLocalJobCreateInput["samplerName"] : "er_sde";
+    const schedulerName = ["simple", "normal", "beta"].includes(profile.scheduler) ? profile.scheduler as DesktopLocalJobCreateInput["schedulerName"] : "simple";
+    return {
+      cfg: profile.cfg,
+      samplerName,
+      schedulerName,
+      aspectStepThreshold: profile.aspectStepThreshold,
+      presets: { fast: profile.presets.fast, quality: profile.presets.quality, extreme: profile.presets.extreme },
+    };
+  }
+  const checkpoint = model?.workflowKind === "checkpoint";
+  return {
+    cfg: checkpoint ? 5 : 4,
+    samplerName: checkpoint ? "euler" : "er_sde",
+    schedulerName: checkpoint ? "normal" : "simple",
+    aspectStepThreshold: 1.5,
+    presets: {
+      fast: { steps: 20, aspectAdjustedSteps: 18, samplingMaxEdge: 1280, samplingPixelBudget: 786_432 },
+      quality: { steps: 37, aspectAdjustedSteps: 34, samplingMaxEdge: 1536, samplingPixelBudget: 1_350_000 },
+      extreme: { steps: 45, aspectAdjustedSteps: 42, samplingMaxEdge: 1792, samplingPixelBudget: 2_073_600 },
+    },
+  };
 }
-
-/** 蒸馏 Anima 底模使用作者验证的低步数预设，避免套用完整底模参数后烧图。 */
-function isDistilledAnimaModel(model: DesktopLocalModelView | null): boolean { return model?.workflowKind === "anima" && model.modelFileName.toLowerCase().includes("anima8step"); }
 
 /** 质量卡片随当前底模展示真实步数和像素预算。 */
 function presetSummary(preset: PresetName, model: DesktopLocalModelView | null): string {

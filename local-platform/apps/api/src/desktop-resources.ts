@@ -13,9 +13,11 @@ const MAX_ENVELOPE_BYTES = 6 * 1024 * 1024;
 
 /** 注册无需登录但必须由桌面端本地验签的资源清单读取接口。 */
 export function registerDesktopResourceRoutes(router: ServiceRouter): void {
-  router.get("/v1/desktop/resources/manifest", async ({ response }) => {
+  router.get("/v1/desktop/resources/manifest", async ({ response, url }) => {
     try {
-      sendSuccess(response, (await loadPublishedManifest()).envelope);
+      // 旧客户端不认识新增资源枚举；只有显式声明能力的新客户端才读取扩展签名信封。
+      const extended = new Set((url.searchParams.get("capabilities") || "").split(",")).has("segmenter-v1");
+      sendSuccess(response, (await loadPublishedManifest(extended)).envelope);
     } catch (error) {
       const failure = publicationError(error);
       sendError(response, 503, failure.code, failure.message);
@@ -25,7 +27,8 @@ export function registerDesktopResourceRoutes(router: ServiceRouter): void {
   router.get("/v1/desktop/resources/:id/content", async ({ request, response, params }) => {
     let published;
     try {
-      published = await loadPublishedManifest();
+      // 内容端点优先使用扩展清单，使已声明能力的客户端可下载新组件；旧资源同样包含在扩展清单中。
+      published = await loadPublishedManifest(true).catch(() => loadPublishedManifest(false));
     } catch (error) {
       const failure = publicationError(error);
       sendError(response, 503, failure.code, failure.message);
@@ -67,10 +70,11 @@ export function registerDesktopResourceRoutes(router: ServiceRouter): void {
 }
 
 /** 读取并同时校验签名信封和内部载荷结构，签名真实性仍由桌面固定公钥判定。 */
-async function loadPublishedManifest(): Promise<{ envelope: DesktopResourceManifestEnvelope; payload: DesktopResourceManifestPayload }> {
+async function loadPublishedManifest(extended: boolean): Promise<{ envelope: DesktopResourceManifestEnvelope; payload: DesktopResourceManifestPayload }> {
   const configuredPath = process.env.DESKTOP_RESOURCE_MANIFEST_ENVELOPE_FILE?.trim();
   if (!configuredPath || configuredPath.startsWith("<")) throw publicationFailure("desktop_resource_manifest_unconfigured", "桌面资源清单尚未发布");
-  const filePath = resolve(configuredPath);
+  // 扩展信封由离线私钥独立签署并保存为同目录 sidecar，API 只做选择和契约校验。
+  const filePath = resolve(extended ? `${configuredPath}.segmenter-v1` : configuredPath);
   let metadata;
   try { metadata = await stat(filePath); }
   catch { throw publicationFailure("desktop_resource_manifest_missing", "桌面资源清单文件不存在"); }
