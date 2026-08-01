@@ -31,7 +31,7 @@ use uuid::Uuid;
 use zip::ZipArchive;
 
 // 显式声明新客户端理解 Segmenter；旧客户端无参数时继续读取不含新枚举的兼容清单。
-const MANIFEST_URL: &str = "https://www.xanime.ink/local-model-api/v1/desktop/resources/manifest?capabilities=segmenter-v1";
+const MANIFEST_URL: &str = "https://www.xanime.ink/local-model-api/v1/desktop/resources/manifest?capabilities=segmenter-v1,gpu-backends-v1";
 const MANIFEST_KEY_ID: &str = "stable-2026-07-29";
 const MANIFEST_PUBLIC_KEY: &str = "asfEBEwmIW6BPSgrLk9iNSgKqLprKisVFkq9QpJI8Pg=";
 const MAX_MANIFEST_BYTES: u64 = 5 * 1024 * 1024;
@@ -70,6 +70,7 @@ pub fn load_catalog(
     settings: &DesktopSettings,
     app_data_dir: &Path,
 ) -> Result<DesktopResourceCatalogView, String> {
+    let selected_backend = crate::environment::preferred_execution_backend();
     let Some((manifest_url, key_id, public_key)) = manifest_configuration() else {
         return Ok(DesktopResourceCatalogView {
             configured: false,
@@ -77,6 +78,7 @@ pub fn load_catalog(
             generated_at: None,
             expires_at: None,
             message: "当前安装包尚未配置经过签名的资源发布通道".into(),
+            selected_backend,
             resources: Vec::new(),
         });
     };
@@ -86,7 +88,9 @@ pub fn load_catalog(
     let resources = payload
         .resources
         .iter()
-        .filter(|item| item.kind != "application" && resource_matches_current_platform(item))
+        .filter(|item| {
+            item.kind != "application" && resource_matches_backend(item, &selected_backend)
+        })
         .map(|item| {
             let target = cache_dir.join(&item.file_name);
             let installed = installed_resource_matches(item, settings);
@@ -110,6 +114,9 @@ pub fn load_catalog(
                     .iter()
                     .map(|source| source.kind.clone())
                     .collect(),
+                compatible_backends: effective_compatible_backends(item),
+                // 旧 NVIDIA 清单在核心内迁移为固定 CUDA profile，前端依赖完整性与实际安装使用同一结果。
+                runtime_profile: effective_runtime_profile(item),
                 model_registration: item.model_registration.clone(),
             }
         })
@@ -125,6 +132,7 @@ pub fn load_catalog(
         generated_at: Some(payload.generated_at),
         expires_at: Some(payload.expires_at),
         message: message.into(),
+        selected_backend,
         resources,
     })
 }
@@ -156,11 +164,12 @@ fn install_resource_inner(
         return Err("当前安装包尚未配置经过签名的资源发布通道".into());
     };
     let (payload, _) = load_resource_manifest(manifest_url, key_id, public_key, app_data_dir)?;
+    let selected_backend = crate::environment::preferred_execution_backend();
     let item = payload
         .resources
         .iter()
         .find(|candidate| {
-            candidate.id == resource_id && resource_matches_current_platform(candidate)
+            candidate.id == resource_id && resource_matches_backend(candidate, &selected_backend)
         })
         .cloned()
         .ok_or_else(|| "资源不存在或不适用于当前系统".to_string())?;
@@ -374,11 +383,12 @@ pub fn download_resource(
         return Err("当前安装包尚未配置经过签名的资源发布通道".into());
     };
     let (payload, _) = load_resource_manifest(manifest_url, key_id, public_key, app_data_dir)?;
+    let selected_backend = crate::environment::preferred_execution_backend();
     let item = payload
         .resources
         .into_iter()
         .find(|candidate| {
-            candidate.id == resource_id && resource_matches_current_platform(candidate)
+            candidate.id == resource_id && resource_matches_backend(candidate, &selected_backend)
         })
         .ok_or_else(|| "资源不存在或不适用于当前系统".to_string())?;
     let source = item
@@ -655,7 +665,7 @@ fn verify_application_package(
         .find(|item| {
             item.kind == "application"
                 && item.file_name == file_name
-                && resource_matches_current_platform(item)
+                && resource_matches_platform(item)
         })
         .ok_or_else(|| "签名信封没有登记该 Windows 安装包".to_string())?;
     if !file_matches(installer_path, &item)? {
@@ -965,6 +975,47 @@ fn validate_item(item: &DesktopResourceManifestItem) -> Result<(), String> {
     ) {
         return Err(format!("资源类型不受支持：{}", item.id));
     }
+    if item
+        .compatible_backends
+        .iter()
+        .any(|backend| !matches!(backend.as_str(), "nvidia_cuda" | "amd_directml"))
+    {
+        return Err(format!("资源兼容后端不受支持：{}", item.id));
+    }
+    if let Some(profile) = &item.runtime_profile {
+        if item.kind != "runtime"
+            || !matches!(profile.backend.as_str(), "nvidia_cuda" | "amd_directml")
+            || !matches!(
+                profile.launch_profile.as_str(),
+                "nvidia-cuda126" | "anima-directml-fp32"
+            )
+            || (!item.compatible_backends.is_empty()
+                && !item.compatible_backends.contains(&profile.backend))
+            || !profile.capabilities.inference
+            || profile.capabilities.max_validated_batch == 0
+        {
+            return Err(format!("Runtime profile 不正确：{}", item.id));
+        }
+        if profile.launch_profile == "anima-directml-fp32"
+            && (profile.backend != crate::environment::BACKEND_AMD_DIRECTML
+                || profile.entrypoint != "directml_runner.py"
+                || profile.capabilities.training
+                || !profile.capabilities.cpu_vae_required
+                || !profile.capabilities.fp32_unet_required
+                || profile.capabilities.max_validated_edge > 512
+                || profile.capabilities.max_validated_batch != 1
+                || profile.capabilities.max_validated_loras > 1)
+        {
+            return Err(format!("AMD DirectML profile 超出已验证范围：{}", item.id));
+        }
+        if profile.launch_profile == "nvidia-cuda126"
+            && profile.backend != crate::environment::BACKEND_NVIDIA_CUDA
+        {
+            return Err(format!("CUDA profile 未绑定 NVIDIA 后端：{}", item.id));
+        }
+    } else if item.kind == "runtime" && !item.compatible_backends.is_empty() {
+        return Err(format!("新 Runtime 资源缺少受控 profile：{}", item.id));
+    }
     if item.os != "windows" || !matches!(item.arch.as_str(), "x86_64" | "aarch64") {
         return Err(format!("资源平台字段不正确：{}", item.id));
     }
@@ -1003,7 +1054,11 @@ fn validate_item(item: &DesktopResourceManifestItem) -> Result<(), String> {
             item.id
         ));
     }
-    if matches!(item.kind.as_str(), "runtime" | "captioner" | "segmenter" | "trainer") && item.archive == "raw" {
+    if matches!(
+        item.kind.as_str(),
+        "runtime" | "captioner" | "segmenter" | "trainer"
+    ) && item.archive == "raw"
+    {
         return Err(format!("运行组件必须使用归档文件：{}", item.id));
     }
     if item.kind == "application"
@@ -1293,8 +1348,30 @@ fn source_kind_name(_kind: &str) -> &'static str {
     "主站镜像"
 }
 
-fn resource_matches_current_platform(item: &DesktopResourceManifestItem) -> bool {
+fn resource_matches_platform(item: &DesktopResourceManifestItem) -> bool {
     item.os == "windows" && item.arch == std::env::consts::ARCH
+}
+
+/** 历史清单未声明后端时，仅把 Runtime/Trainer 迁移为 CUDA，其他资源继续视为公共依赖。 */
+fn effective_compatible_backends(item: &DesktopResourceManifestItem) -> Vec<String> {
+    if !item.compatible_backends.is_empty() {
+        return item.compatible_backends.clone();
+    }
+    if matches!(item.kind.as_str(), "runtime" | "trainer") {
+        return vec![crate::environment::BACKEND_NVIDIA_CUDA.into()];
+    }
+    vec![
+        crate::environment::BACKEND_NVIDIA_CUDA.into(),
+        crate::environment::BACKEND_AMD_DIRECTML.into(),
+    ]
+}
+
+/** 平台与执行后端同时匹配才允许展示、下载或安装。 */
+fn resource_matches_backend(item: &DesktopResourceManifestItem, backend: &str) -> bool {
+    resource_matches_platform(item)
+        && effective_compatible_backends(item)
+            .iter()
+            .any(|candidate| candidate == backend)
 }
 fn resource_cache_dir(app_data_dir: &Path) -> PathBuf {
     app_data_dir.join("resource-cache")
@@ -1737,15 +1814,30 @@ fn validate_extracted_resource(
     staging: &Path,
 ) -> Result<(), String> {
     if item.kind == "runtime" {
-        for required in [
-            staging.join("python_embeded").join("python.exe"),
-            staging.join("ComfyUI").join("main.py"),
+        let profile = effective_runtime_profile(item)
+            .ok_or_else(|| "Runtime 缺少受控启动 profile".to_string())?;
+        for relative in [
+            &profile.python_executable,
+            &profile.entrypoint,
+            "ComfyUI/main.py",
         ] {
+            let required = controlled_runtime_path(staging, relative)?;
             if !required.is_file() {
                 return Err(format!(
                     "Runtime 归档缺少必需文件：{}",
                     required.file_name().unwrap_or_default().to_string_lossy()
                 ));
+            }
+        }
+        if profile.backend == crate::environment::BACKEND_AMD_DIRECTML {
+            let predict = staging.join("ComfyUI/comfy/ldm/cosmos/predict2.py");
+            let source = fs::read_to_string(&predict)
+                .map_err(|_| "AMD Runtime 缺少 Anima DirectML 补丁文件".to_string())?;
+            if !source.contains("directml_apply_rope_split_half1")
+                || !source
+                    .contains("padding_mask.repeat(1, x_B_C_T_H_W.shape[2], 1, 1).unsqueeze(1)")
+            {
+                return Err("AMD Runtime 未包含已验证的 Anima DirectML 兼容补丁".into());
             }
         }
     }
@@ -1809,9 +1901,49 @@ fn validate_extracted_resource(
 }
 
 fn write_runtime_manifest(root: &Path, item: &DesktopResourceManifestItem) -> Result<(), String> {
-    let content = serde_json::to_vec_pretty(&serde_json::json!({ "schemaVersion": 1, "status": "installed", "runtimeVersion": item.version, "resourceId": item.id, "resourceSha256": item.sha256, "pythonExecutable": "python_embeded/python.exe", "entrypoint": "ComfyUI/main.py", "installedAt": Utc::now().to_rfc3339() })).map_err(|error| format!("生成 Runtime 内部清单失败：{error}"))?;
+    let profile = effective_runtime_profile(item)
+        .ok_or_else(|| "Runtime 缺少受控启动 profile".to_string())?;
+    let content = serde_json::to_vec_pretty(&serde_json::json!({ "schemaVersion": 2, "status": "installed", "runtimeVersion": item.version, "resourceId": item.id, "resourceSha256": item.sha256, "backend": profile.backend, "launchProfile": profile.launch_profile, "pythonExecutable": profile.python_executable, "entrypoint": profile.entrypoint, "capabilities": profile.capabilities, "installedAt": Utc::now().to_rfc3339() })).map_err(|error| format!("生成 Runtime 内部清单失败：{error}"))?;
     fs::write(root.join("runtime-manifest.json"), content)
         .map_err(|error| format!("写入 Runtime 内部清单失败：{error}"))
+}
+
+/** 旧版 NVIDIA Runtime 安全迁移到固定 CUDA profile；AMD 资源必须显式提供 profile。 */
+fn effective_runtime_profile(
+    item: &DesktopResourceManifestItem,
+) -> Option<crate::models::DesktopRuntimeProfile> {
+    item.runtime_profile.clone().or_else(|| {
+        (item.kind == "runtime"
+            && (item.id.contains("nvidia") || item.compatible_backends.is_empty()))
+        .then(|| crate::models::DesktopRuntimeProfile {
+            backend: crate::environment::BACKEND_NVIDIA_CUDA.into(),
+            launch_profile: "nvidia-cuda126".into(),
+            python_executable: "python_embeded/python.exe".into(),
+            entrypoint: "ComfyUI/main.py".into(),
+            capabilities: crate::models::RuntimeCapabilitiesView {
+                inference: true,
+                training: true,
+                cpu_vae_required: false,
+                fp32_unet_required: false,
+                max_validated_edge: 1536,
+                max_validated_batch: 1,
+                max_validated_loras: 64,
+            },
+        })
+    })
+}
+
+/** Runtime 清单内路径只允许相对普通组件，拒绝入口逃逸安装目录。 */
+fn controlled_runtime_path(root: &Path, relative: &str) -> Result<PathBuf, String> {
+    let path = Path::new(relative);
+    if path.is_absolute()
+        || path
+            .components()
+            .any(|component| !matches!(component, Component::Normal(_)))
+    {
+        return Err("Runtime profile 包含不安全入口路径".into());
+    }
+    Ok(root.join(path))
 }
 
 fn switch_atomically(staging: &Path, destination: &Path) -> Result<Option<PathBuf>, String> {
@@ -1937,7 +2069,7 @@ mod tests {
     use std::{net::TcpListener, thread};
 
     fn item() -> DesktopResourceManifestItem {
-        DesktopResourceManifestItem { id: "runtime.core".into(), kind: "runtime".into(), version: "1.0.0".into(), os: "windows".into(), arch: std::env::consts::ARCH.into(), file_name: "runtime.zip".into(), byte_size: 10, installed_size: 1024, sha256: "a".repeat(64), archive: "zip".into(), root_directory: None, install_directory: None, model_registration: None, application_update: None, required: true, sources: vec![DesktopResourceSource { kind: "mirror".into(), url: "https://www.xanime.ink/local-model-api/v1/desktop/resources/runtime.core/content".into() }] }
+        DesktopResourceManifestItem { id: "runtime.core".into(), kind: "runtime".into(), version: "1.0.0".into(), os: "windows".into(), arch: std::env::consts::ARCH.into(), file_name: "runtime.zip".into(), byte_size: 10, installed_size: 1024, sha256: "a".repeat(64), archive: "zip".into(), root_directory: None, install_directory: None, model_registration: None, application_update: None, compatible_backends: Vec::new(), runtime_profile: None, required: true, sources: vec![DesktopResourceSource { kind: "mirror".into(), url: "https://www.xanime.ink/local-model-api/v1/desktop/resources/runtime.core/content".into() }] }
     }
 
     fn application_item(bytes: &[u8]) -> DesktopResourceManifestItem {
@@ -1960,12 +2092,63 @@ mod tests {
                 release_notes: "测试签名更新".into(),
                 mandatory: false,
             }),
+            compatible_backends: Vec::new(),
+            runtime_profile: None,
             required: false,
             sources: vec![DesktopResourceSource {
                 kind: "mirror".into(),
                 url: "https://www.xanime.ink/local-model-api/v1/desktop/resources/application.drawhime/content".into(),
             }],
         }
+    }
+
+    #[test]
+    fn resource_catalog_separates_cuda_directml_and_shared_dependencies() {
+        let mut cuda = item();
+        cuda.id = "runtime.comfyui.nvidia-cu126".into();
+        cuda.compatible_backends = vec![crate::environment::BACKEND_NVIDIA_CUDA.into()];
+        let mut directml = item();
+        directml.id = "runtime.comfyui.amd-directml".into();
+        directml.compatible_backends = vec![crate::environment::BACKEND_AMD_DIRECTML.into()];
+        let mut shared = item();
+        shared.id = "model.anima-base.primary".into();
+        shared.kind = "model".into();
+        shared.compatible_backends.clear();
+
+        assert!(resource_matches_backend(
+            &cuda,
+            crate::environment::BACKEND_NVIDIA_CUDA
+        ));
+        assert!(!resource_matches_backend(
+            &cuda,
+            crate::environment::BACKEND_AMD_DIRECTML
+        ));
+        assert!(resource_matches_backend(
+            &directml,
+            crate::environment::BACKEND_AMD_DIRECTML
+        ));
+        assert!(!resource_matches_backend(
+            &directml,
+            crate::environment::BACKEND_NVIDIA_CUDA
+        ));
+        assert!(resource_matches_backend(
+            &shared,
+            crate::environment::BACKEND_NVIDIA_CUDA
+        ));
+        assert!(resource_matches_backend(
+            &shared,
+            crate::environment::BACKEND_AMD_DIRECTML
+        ));
+
+        let legacy = item();
+        assert!(resource_matches_backend(
+            &legacy,
+            crate::environment::BACKEND_NVIDIA_CUDA
+        ));
+        assert!(!resource_matches_backend(
+            &legacy,
+            crate::environment::BACKEND_AMD_DIRECTML
+        ));
     }
 
     fn signed_application_envelope(
@@ -2282,10 +2465,8 @@ mod tests {
 
         let onnxruntime = staging.join("site-packages").join("onnxruntime");
         fs::create_dir_all(&onnxruntime).expect("创建私有 ONNX Runtime 目录");
-        fs::write(onnxruntime.join("__init__.py"), b"# test")
-            .expect("写入私有 ONNX Runtime 标记");
-        validate_extracted_resource(&segmenter, staging)
-            .expect("完整 Segmenter 结构必须通过校验");
+        fs::write(onnxruntime.join("__init__.py"), b"# test").expect("写入私有 ONNX Runtime 标记");
+        validate_extracted_resource(&segmenter, staging).expect("完整 Segmenter 结构必须通过校验");
         fs::remove_file(staging.join("u2net.onnx")).expect("移除 Segmenter 模型");
         assert!(validate_extracted_resource(&segmenter, staging).is_err());
     }
@@ -2405,6 +2586,7 @@ mod tests {
         let settings = DesktopSettings {
             theme_mode: "system".into(),
             font_scale: 1.1,
+            content_font_scale: 1.2,
             default_privacy: "private".into(),
             auto_upload: true,
             model_root: temporary
@@ -2452,6 +2634,7 @@ mod tests {
         let settings = DesktopSettings {
             theme_mode: "system".into(),
             font_scale: 1.1,
+            content_font_scale: 1.2,
             default_privacy: "private".into(),
             auto_upload: true,
             model_root: temporary
@@ -2506,6 +2689,8 @@ mod tests {
             install_directory: None,
             model_registration: None,
             application_update: None,
+            compatible_backends: Vec::new(),
+            runtime_profile: None,
             required: true,
             sources: vec![DesktopResourceSource { kind: "mirror".into(), url: "https://www.xanime.ink/local-model-api/v1/desktop/resources/captioner.wd-vit-tagger-v3/content".into() }],
         };
@@ -2519,6 +2704,7 @@ mod tests {
         let settings = DesktopSettings {
             theme_mode: "system".into(),
             font_scale: 1.1,
+            content_font_scale: 1.2,
             default_privacy: "private".into(),
             auto_upload: true,
             model_root: temporary
@@ -2560,7 +2746,7 @@ mod tests {
         let temporary = tempfile::tempdir().expect("创建 Trainer 安装目录");
         // 发布归档门禁固定到支持完整高级训练参数的 Trainer v3。
         let item = DesktopResourceManifestItem {
-            id: "trainer.anima-sd-scripts".into(), kind: "trainer".into(), version: "anima-sd-scripts-37a1cbbc5725-py312-v3".into(), os: "windows".into(), arch: std::env::consts::ARCH.into(), file_name: "drawhime-anima-trainer-win-x64-v3.zip".into(), byte_size: 161_998_435, installed_size: 506_203_040, sha256: "aa8258aaea99306f11aec3aa2814124f5a9431b2b431b0b142e05ef77de0cc88".into(), archive: "zip".into(), root_directory: Some("drawhime-anima-trainer".into()), install_directory: None, model_registration: None, application_update: None, required: true, sources: vec![DesktopResourceSource { kind: "mirror".into(), url: "https://www.xanime.ink/local-model-api/v1/desktop/resources/trainer.anima-sd-scripts/content".into() }],
+            id: "trainer.anima-sd-scripts".into(), kind: "trainer".into(), version: "anima-sd-scripts-37a1cbbc5725-py312-v3".into(), os: "windows".into(), arch: std::env::consts::ARCH.into(), file_name: "drawhime-anima-trainer-win-x64-v3.zip".into(), byte_size: 161_998_435, installed_size: 506_203_040, sha256: "aa8258aaea99306f11aec3aa2814124f5a9431b2b431b0b142e05ef77de0cc88".into(), archive: "zip".into(), root_directory: Some("drawhime-anima-trainer".into()), install_directory: None, model_registration: None, application_update: None, compatible_backends: Vec::new(), runtime_profile: None, required: true, sources: vec![DesktopResourceSource { kind: "mirror".into(), url: "https://www.xanime.ink/local-model-api/v1/desktop/resources/trainer.anima-sd-scripts/content".into() }],
         };
         let runtime_root = temporary.path().join("runtime");
         fs::create_dir_all(runtime_root.join("current").join("python_embeded"))
@@ -2594,6 +2780,7 @@ mod tests {
         let settings = DesktopSettings {
             theme_mode: "system".into(),
             font_scale: 1.1,
+            content_font_scale: 1.2,
             default_privacy: "private".into(),
             auto_upload: true,
             model_root: model_root.to_string_lossy().into_owned(),
@@ -2623,6 +2810,7 @@ mod tests {
         let settings = DesktopSettings {
             theme_mode: "system".into(),
             font_scale: 1.1,
+            content_font_scale: 1.2,
             default_privacy: "private".into(),
             auto_upload: true,
             model_root: temporary
@@ -2663,7 +2851,7 @@ mod tests {
         for (role, directory, file_name, bytes) in definitions {
             let cache = temporary.path().join(format!("cache-{role}.safetensors"));
             fs::write(&cache, bytes).expect("写入模型缓存");
-            let item = DesktopResourceManifestItem { id: format!("model.test.{role}"), kind: "model".into(), version: "1".into(), os: "windows".into(), arch: std::env::consts::ARCH.into(), file_name: file_name.into(), byte_size: bytes.len() as u64, installed_size: bytes.len() as u64, sha256: hex::encode(Sha256::digest(bytes)), archive: "raw".into(), root_directory: None, install_directory: Some(directory.into()), model_registration: Some(crate::models::DesktopResourceModelRegistration { group_id: "model.test".into(), display_name: "测试 Anima".into(), family: "anima".into(), workflow_kind: "anima".into(), role: role.into() }), application_update: None, required: true, sources: vec![DesktopResourceSource { kind: "mirror".into(), url: format!("https://www.xanime.ink/local-model-api/v1/desktop/resources/model.test.{role}/content") }] };
+            let item = DesktopResourceManifestItem { id: format!("model.test.{role}"), kind: "model".into(), version: "1".into(), os: "windows".into(), arch: std::env::consts::ARCH.into(), file_name: file_name.into(), byte_size: bytes.len() as u64, installed_size: bytes.len() as u64, sha256: hex::encode(Sha256::digest(bytes)), archive: "raw".into(), root_directory: None, install_directory: Some(directory.into()), model_registration: Some(crate::models::DesktopResourceModelRegistration { group_id: "model.test".into(), display_name: "测试 Anima".into(), family: "anima".into(), workflow_kind: "anima".into(), role: role.into() }), application_update: None, compatible_backends: Vec::new(), runtime_profile: None, required: true, sources: vec![DesktopResourceSource { kind: "mirror".into(), url: format!("https://www.xanime.ink/local-model-api/v1/desktop/resources/model.test.{role}/content") }] };
             install_cached_resource(&settings, &item, &cache, &|_| {}).expect("安装模型组合文件");
             items.push(item);
         }
@@ -2688,6 +2876,7 @@ mod tests {
         let settings = DesktopSettings {
             theme_mode: "system".into(),
             font_scale: 1.1,
+            content_font_scale: 1.2,
             default_privacy: "private".into(),
             auto_upload: true,
             model_root: temporary

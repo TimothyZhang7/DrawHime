@@ -1,7 +1,8 @@
 //! 本模块管理桌面端唯一 ComfyUI 子进程，负责回环启动、健康探测、自检、日志与退出回收。
 
 use crate::{
-    models::{DesktopRuntimeStatusView, DesktopSettings},
+    environment::{BACKEND_AMD_DIRECTML, BACKEND_NVIDIA_CUDA},
+    models::{DesktopRuntimeStatusView, DesktopSettings, RuntimeCapabilitiesView},
     process::hide_window,
 };
 use chrono::Utc;
@@ -22,7 +23,7 @@ use uuid::Uuid;
 const STARTUP_DEADLINE: Duration = Duration::from_secs(120);
 const HEALTH_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 const RUNTIME_LEASE_MAX_BYTES: u64 = 16 * 1024;
-const REQUIRED_NODES: [&str; 8] = [
+const REQUIRED_NODES: [&str; 9] = [
     "UNETLoader",
     "CLIPLoader",
     "VAELoader",
@@ -31,6 +32,7 @@ const REQUIRED_NODES: [&str; 8] = [
     "KSampler",
     "VAEDecode",
     "SaveImage",
+    "LoraLoader",
 ];
 
 /** 当前桌面进程独占的 Runtime 控制器，只回收自己创建的子进程。 */
@@ -44,9 +46,33 @@ struct RuntimeProcess {
     port: Option<u16>,
     started_at: Option<String>,
     log_path: Option<PathBuf>,
+    backend: Option<String>,
+    device_index: Option<u32>,
+    launch_profile: Option<String>,
     error: Option<String>,
     self_tested: bool,
     lease_path: Option<PathBuf>,
+}
+
+/** 安装器写入的 Runtime 清单只允许受控入口与启动 profile。 */
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct InstalledRuntimeManifest {
+    resource_id: String,
+    backend: Option<String>,
+    launch_profile: Option<String>,
+    python_executable: Option<String>,
+    entrypoint: Option<String>,
+    capabilities: Option<RuntimeCapabilitiesView>,
+}
+
+/** 旧清单迁移后或新清单解析后的实际启动参数来源。 */
+struct ResolvedRuntimeProfile {
+    backend: String,
+    launch_profile: String,
+    python_executable: String,
+    entrypoint: String,
+    capabilities: RuntimeCapabilitiesView,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -92,6 +118,9 @@ impl RuntimeController {
                 port: None,
                 started_at: None,
                 log_path: None,
+                backend: None,
+                device_index: None,
+                launch_profile: None,
                 error: None,
                 self_tested: false,
                 lease_path,
@@ -139,17 +168,30 @@ impl RuntimeController {
             .lock()
             .map_err(|_| "Runtime 状态锁已损坏".to_string())?;
         refresh_process_state(&mut process)?;
+        let selected = crate::environment::preferred_execution_backend_view();
+        let selected_backend = selected.id;
         if process.status == "ready" {
-            if process.port.is_some_and(runtime_health_ok) {
+            if process.port.is_some_and(runtime_health_ok)
+                && process.backend.as_deref() == Some(selected_backend.as_str())
+                && process.device_index == selected.device_index
+            {
                 return Ok(process.view());
             }
+            // 显卡或驱动变化后不得继续复用另一后端的旧进程。
             stop_child(&mut process);
         }
 
         let runtime_root = Path::new(&settings.runtime_root).join("current");
-        let python = runtime_root.join("python_embeded").join("python.exe");
-        let main = runtime_root.join("ComfyUI").join("main.py");
-        validate_runtime_files(&runtime_root, &python, &main)?;
+        let profile = read_runtime_profile(&runtime_root)?;
+        if profile.backend != selected_backend {
+            return Err(format!(
+                "当前已安装 Runtime 属于 {}，与自动选择的 {} 后端不匹配，请先安装对应运行环境",
+                profile.backend, selected_backend
+            ));
+        }
+        let python = controlled_runtime_path(&runtime_root, &profile.python_executable)?;
+        let entrypoint = controlled_runtime_path(&runtime_root, &profile.entrypoint)?;
+        validate_runtime_files(&runtime_root, &python, &entrypoint)?;
         let runtime_data = app_data_dir.join("runtime-state");
         let log_dir = runtime_data.join("logs");
         fs::create_dir_all(&log_dir)
@@ -170,17 +212,18 @@ impl RuntimeController {
             .try_clone()
             .map_err(|error| format!("复制 Runtime 日志句柄失败：{error}"))?;
 
-        let main_argument = main.to_string_lossy().into_owned();
+        let entrypoint_argument = entrypoint.to_string_lossy().into_owned();
         let port_argument = port.to_string();
         let config_argument = config_path.to_string_lossy().into_owned();
         let output_argument = output_directory.to_string_lossy().into_owned();
         let mut command = Command::new(&python);
         hide_window(&mut command);
         command
-            .current_dir(runtime_root.join("ComfyUI"))
+            .current_dir(&runtime_root)
+            .args(["-s", entrypoint_argument.as_str()]);
+        append_launch_profile_arguments(&mut command, &profile, selected.device_index)?;
+        command
             .args([
-                "-s",
-                main_argument.as_str(),
                 "--windows-standalone-build",
                 "--listen",
                 "127.0.0.1",
@@ -199,6 +242,9 @@ impl RuntimeController {
         process.port = Some(port);
         process.started_at = Some(Utc::now().to_rfc3339());
         process.log_path = Some(log_path);
+        process.backend = Some(profile.backend.clone());
+        process.device_index = selected.device_index;
+        process.launch_profile = Some(profile.launch_profile.clone());
         process.error = None;
         process.self_tested = false;
         process.child = match command.spawn() {
@@ -210,7 +256,9 @@ impl RuntimeController {
             }
         };
         if let Some(child) = process.child.as_ref() {
-            if let Err(error) = persist_runtime_lease(&process, child.id(), port, &python, &main) {
+            if let Err(error) =
+                persist_runtime_lease(&process, child.id(), port, &python, &entrypoint)
+            {
                 stop_child(&mut process);
                 process.status = "failed".into();
                 process.error = Some(error);
@@ -257,6 +305,9 @@ impl RuntimeController {
         process.status = "stopped".into();
         process.port = None;
         process.started_at = None;
+        process.backend = None;
+        process.device_index = None;
+        process.launch_profile = None;
         process.error = None;
         process.self_tested = false;
         Ok(process.view())
@@ -291,12 +342,11 @@ impl RuntimeController {
             .get("devices")
             .and_then(Value::as_array)
             .ok_or_else(|| "Runtime 未返回 GPU 设备列表".to_string())?;
-        if !devices
-            .iter()
-            .any(|device| device.get("type").and_then(Value::as_str) == Some("cuda"))
-        {
-            return Err("Runtime 未检测到 CUDA 执行设备".into());
-        }
+        let backend = process
+            .backend
+            .as_deref()
+            .ok_or_else(|| "Runtime 未记录执行后端".to_string())?;
+        validate_runtime_device(devices, backend)?;
         let nodes: Value = client
             .get(format!("http://127.0.0.1:{port}/object_info"))
             .send()
@@ -338,20 +388,154 @@ impl RuntimeProcess {
                 .log_path
                 .as_ref()
                 .map(|path| path.to_string_lossy().into_owned()),
+            backend: self.backend.clone(),
+            device_index: self.device_index,
+            launch_profile: self.launch_profile.clone(),
             error: self.error.clone(),
         }
     }
 }
 
-fn validate_runtime_files(root: &Path, python: &Path, main: &Path) -> Result<(), String> {
+/** 读取并迁移受控 Runtime profile；未知后端或入口直接拒绝。 */
+fn read_runtime_profile(root: &Path) -> Result<ResolvedRuntimeProfile, String> {
+    let path = root.join("runtime-manifest.json");
+    let manifest: InstalledRuntimeManifest = serde_json::from_slice(
+        &fs::read(&path).map_err(|error| format!("读取 Runtime 内部清单失败：{error}"))?,
+    )
+    .map_err(|error| format!("解析 Runtime 内部清单失败：{error}"))?;
+    let legacy_nvidia = manifest.resource_id.contains("nvidia") && manifest.backend.is_none();
+    let backend = manifest
+        .backend
+        .or_else(|| legacy_nvidia.then(|| BACKEND_NVIDIA_CUDA.into()))
+        .ok_or_else(|| "Runtime 清单缺少执行后端".to_string())?;
+    let launch_profile = manifest
+        .launch_profile
+        .or_else(|| legacy_nvidia.then(|| "nvidia-cuda126".into()))
+        .ok_or_else(|| "Runtime 清单缺少启动 profile".to_string())?;
+    let python_executable = manifest
+        .python_executable
+        .unwrap_or_else(|| "python_embeded/python.exe".into());
+    let entrypoint = manifest
+        .entrypoint
+        .unwrap_or_else(|| "ComfyUI/main.py".into());
+    let capabilities = manifest.capabilities.unwrap_or(RuntimeCapabilitiesView {
+        inference: true,
+        training: legacy_nvidia,
+        cpu_vae_required: false,
+        fp32_unet_required: false,
+        max_validated_edge: 1536,
+        max_validated_batch: 1,
+        max_validated_loras: 64,
+    });
+    let valid = matches!(
+        (backend.as_str(), launch_profile.as_str()),
+        (BACKEND_NVIDIA_CUDA, "nvidia-cuda126") | (BACKEND_AMD_DIRECTML, "anima-directml-fp32")
+    );
+    if !valid || !capabilities.inference {
+        return Err("Runtime 清单声明了不受支持的执行后端或启动 profile".into());
+    }
+    Ok(ResolvedRuntimeProfile {
+        backend,
+        launch_profile,
+        python_executable,
+        entrypoint,
+        capabilities,
+    })
+}
+
+/** 服务端清单不能下发任意参数，所有 profile 都由客户端固定映射。 */
+fn append_launch_profile_arguments(
+    command: &mut Command,
+    profile: &ResolvedRuntimeProfile,
+    device_index: Option<u32>,
+) -> Result<(), String> {
+    match profile.launch_profile.as_str() {
+        "nvidia-cuda126" => {
+            let index =
+                device_index.ok_or_else(|| "NVIDIA CUDA profile 缺少已选择设备索引".to_string())?;
+            let index_argument = index.to_string();
+            command.args(["--cuda-device", index_argument.as_str()]);
+            Ok(())
+        }
+        "anima-directml-fp32"
+            if profile.capabilities.cpu_vae_required && profile.capabilities.fp32_unet_required =>
+        {
+            command.args([
+                "--directml",
+                "0",
+                "--cpu-vae",
+                "--fp32-unet",
+                "--use-split-cross-attention",
+            ]);
+            Ok(())
+        }
+        "anima-directml-fp32" => {
+            Err("AMD Runtime 能力清单缺少 FP32 UNet 或 CPU VAE 强制门禁".into())
+        }
+        _ => Err("Runtime 启动 profile 不受支持".into()),
+    }
+}
+
+/** 按后端验证真实 ComfyUI 设备类型和厂商，拒绝选错混合显卡。 */
+fn validate_runtime_device(devices: &[Value], backend: &str) -> Result<(), String> {
+    let matched = devices.iter().any(|device| {
+        let device_type = device
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        let name = device
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        match backend {
+            BACKEND_NVIDIA_CUDA => {
+                device_type == "cuda"
+                    && (name.is_empty() || name.contains("nvidia") || name.contains("cuda"))
+            }
+            BACKEND_AMD_DIRECTML => {
+                matches!(device_type.as_str(), "privateuseone" | "directml")
+                    && (name.is_empty()
+                        || name == "privateuseone"
+                        || name.contains("amd")
+                        || name.contains("radeon")
+                        || name.contains("directml"))
+            }
+            _ => false,
+        }
+    });
+    if matched {
+        Ok(())
+    } else if backend == BACKEND_AMD_DIRECTML {
+        Err("Runtime 未检测到与当前 AMD 显卡匹配的 DirectML 执行设备".into())
+    } else {
+        Err("Runtime 未检测到与当前 NVIDIA 显卡匹配的 CUDA 执行设备".into())
+    }
+}
+
+/** Runtime profile 只允许安装目录内的普通相对路径。 */
+fn controlled_runtime_path(root: &Path, relative: &str) -> Result<PathBuf, String> {
+    let path = Path::new(relative);
+    if path.is_absolute()
+        || path
+            .components()
+            .any(|component| !matches!(component, std::path::Component::Normal(_)))
+    {
+        return Err("Runtime profile 包含不安全入口路径".into());
+    }
+    Ok(root.join(path))
+}
+
+fn validate_runtime_files(root: &Path, python: &Path, entrypoint: &Path) -> Result<(), String> {
     if !root.join("runtime-manifest.json").is_file() {
         return Err("Runtime 尚未完成受控安装".into());
     }
     if !python.is_file() {
         return Err("Runtime 缺少便携 Python".into());
     }
-    if !main.is_file() {
-        return Err("Runtime 缺少 ComfyUI 入口".into());
+    if !entrypoint.is_file() {
+        return Err("Runtime 缺少受控启动入口".into());
     }
     Ok(())
 }
@@ -638,6 +822,100 @@ fn mark_runtime_ready(root: &Path) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    fn directml_profile() -> ResolvedRuntimeProfile {
+        ResolvedRuntimeProfile {
+            backend: BACKEND_AMD_DIRECTML.into(),
+            launch_profile: "anima-directml-fp32".into(),
+            python_executable: "python_embeded/python.exe".into(),
+            entrypoint: "directml_runner.py".into(),
+            capabilities: RuntimeCapabilitiesView {
+                inference: true,
+                training: false,
+                cpu_vae_required: true,
+                fp32_unet_required: true,
+                max_validated_edge: 512,
+                max_validated_batch: 1,
+                max_validated_loras: 1,
+            },
+        }
+    }
+
+    fn nvidia_profile() -> ResolvedRuntimeProfile {
+        ResolvedRuntimeProfile {
+            backend: BACKEND_NVIDIA_CUDA.into(),
+            launch_profile: "nvidia-cuda126".into(),
+            python_executable: "python_embeded/python.exe".into(),
+            entrypoint: "ComfyUI/main.py".into(),
+            capabilities: RuntimeCapabilitiesView {
+                inference: true,
+                training: true,
+                cpu_vae_required: false,
+                fp32_unet_required: false,
+                max_validated_edge: 1536,
+                max_validated_batch: 1,
+                max_validated_loras: 64,
+            },
+        }
+    }
+
+    #[test]
+    fn cuda_profile_uses_selected_nvidia_device_index() {
+        let mut command = Command::new("python.exe");
+        append_launch_profile_arguments(&mut command, &nvidia_profile(), Some(2))
+            .expect("CUDA profile 参数有效");
+        let arguments = command
+            .get_args()
+            .map(|value| value.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(arguments, ["--cuda-device", "2"]);
+        assert!(append_launch_profile_arguments(
+            &mut Command::new("python.exe"),
+            &nvidia_profile(),
+            None
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn directml_profile_uses_only_verified_arguments() {
+        let mut command = Command::new("python.exe");
+        append_launch_profile_arguments(&mut command, &directml_profile(), None)
+            .expect("DirectML profile 参数有效");
+        let arguments = command
+            .get_args()
+            .map(|value| value.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            arguments,
+            [
+                "--directml",
+                "0",
+                "--cpu-vae",
+                "--fp32-unet",
+                "--use-split-cross-attention"
+            ]
+        );
+        let mut unsafe_profile = directml_profile();
+        unsafe_profile.capabilities.fp32_unet_required = false;
+        assert!(append_launch_profile_arguments(
+            &mut Command::new("python.exe"),
+            &unsafe_profile,
+            None,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn runtime_device_validation_distinguishes_cuda_and_directml() {
+        let cuda = serde_json::json!({ "type": "cuda", "name": "NVIDIA GeForce RTX" });
+        // ComfyUI 在真实 DirectML 日志中会把设备名收敛为 privateuseone，厂商选择由受控 Runner 先完成。
+        let directml = serde_json::json!({ "type": "privateuseone", "name": "privateuseone" });
+        assert!(validate_runtime_device(&[cuda.clone()], BACKEND_NVIDIA_CUDA).is_ok());
+        assert!(validate_runtime_device(&[directml.clone()], BACKEND_AMD_DIRECTML).is_ok());
+        assert!(validate_runtime_device(&[cuda], BACKEND_AMD_DIRECTML).is_err());
+        assert!(validate_runtime_device(&[directml], BACKEND_NVIDIA_CUDA).is_err());
+    }
+
     #[test]
     fn runtime_controller_starts_stopped_without_external_process() {
         let controller = RuntimeController::new();
@@ -683,6 +961,7 @@ mod tests {
         let settings = DesktopSettings {
             theme_mode: "system".into(),
             font_scale: 1.1,
+            content_font_scale: 1.2,
             default_privacy: "private".into(),
             auto_upload: true,
             model_root: temporary
@@ -719,6 +998,7 @@ mod tests {
         let settings = DesktopSettings {
             theme_mode: "system".into(),
             font_scale: 1.1,
+            content_font_scale: 1.2,
             default_privacy: "private".into(),
             auto_upload: true,
             model_root: temporary

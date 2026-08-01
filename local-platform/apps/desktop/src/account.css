@@ -31,3 +31,26 @@
 .account-boundary span { margin-top:4px;color:var(--muted);line-height:1.65 }
 @media(max-width:900px){.account-page{grid-template-columns:1fr}.account-hero{grid-template-columns:auto minmax(0,1fr)}.account-actions{grid-column:1/-1;justify-content:stretch}.account-actions button{flex:1}}
 @media(max-width:640px){.account-hero{grid-template-columns:1fr;justify-items:center;text-align:center;padding:20px}.account-actions{width:100%;flex-direction:column}.account-details dl{grid-template-columns:1fr}.account-device-code strong{font-size:24px}}
+
+/* 账号页使用完整内容高度，宽屏增加信息列数，窄窗继续自然滚动。 */
+.desktop-page-host .account-page {
+  height: 100%;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+  align-items: stretch;
+}
+
+.desktop-page-host .account-details,
+.desktop-page-host .account-device-flow,
+.desktop-page-host .account-boundary {
+  min-height: 0;
+}
+
+@container (min-width: 1320px) {
+  .account-page { grid-template-columns: minmax(0, 1.5fr) minmax(320px, .5fr); }
+  .account-details dl { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media(max-width:900px) {
+  .desktop-page-host .account-page { height: auto; grid-template-rows: auto; }
+}

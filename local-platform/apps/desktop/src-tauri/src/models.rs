@@ -21,6 +21,9 @@ pub struct DesktopRuntimeStatusView {
     pub started_at: Option<String>,
     pub checked_at: String,
     pub log_path: Option<String>,
+    pub backend: Option<String>,
+    pub device_index: Option<u32>,
+    pub launch_profile: Option<String>,
     pub error: Option<String>,
 }
 
@@ -456,62 +459,6 @@ pub struct DesktopAiCleanUndoInput {
     pub asset_id: String,
 }
 
-/** 创建单图或批量自动抠图任务。 */
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DesktopBackgroundRemovalJobCreateInput {
-    pub dataset_id: String,
-    pub asset_ids: Vec<String>,
-}
-
-/** 自动抠图批次中的逐图持久状态。 */
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DesktopBackgroundRemovalJobItemView {
-    pub asset_id: String,
-    pub status: String,
-    pub derivative_id: Option<String>,
-    pub error: Option<String>,
-    pub updated_at: String,
-}
-
-/** SQLite 为事实源的自动抠图任务。 */
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DesktopBackgroundRemovalJobView {
-    pub id: String,
-    pub dataset_id: String,
-    pub status: String,
-    pub progress: u32,
-    pub total_assets: u32,
-    pub processed_assets: u32,
-    pub succeeded_assets: u32,
-    pub failed_assets: u32,
-    pub items: Vec<DesktopBackgroundRemovalJobItemView>,
-    pub error: Option<String>,
-    pub created_at: String,
-    pub completed_at: Option<String>,
-    pub updated_at: String,
-}
-
-/** 手动抠图只提交 PNG alpha 蒙版，输出路径由核心受控生成。 */
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DesktopTrainingManualMaskInput {
-    pub dataset_id: String,
-    pub asset_id: String,
-    pub mask_png_base64: String,
-}
-
-/** 选择后续训练快照使用的原图或派生版本。 */
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DesktopTrainingAssetVariantSelectInput {
-    pub dataset_id: String,
-    pub asset_id: String,
-    pub derivative_id: Option<String>,
-}
-
 /** 桌面端真实 LoRA 训练任务固化的用户参数。 */
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -816,19 +763,24 @@ pub struct DesktopEnvironmentReport {
     pub memory: MemoryView,
     pub display_adapters: Vec<DisplayAdapterView>,
     pub gpus: Vec<GpuView>,
+    pub execution_backend: ExecutionBackendView,
     pub disks: Vec<DiskView>,
     pub runtime: RuntimeView,
     pub capabilities: CapabilityView,
     pub issues: Vec<EnvironmentIssue>,
 }
 
-/** Windows WMI 可见的图形适配器及当前桌面 Runtime 能力。 */
+/** Windows WMI 可见的图形适配器及可候选的执行后端。 */
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DisplayAdapterView {
     pub name: String,
     pub vendor: String,
-    pub cuda_supported: bool,
+    pub driver_version: String,
+    pub pnp_device_id: String,
+    pub dedicated_memory_bytes: Option<u64>,
+    #[serde(default)]
+    pub supported_backends: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -863,12 +815,42 @@ pub struct GpuView {
     pub uuid: String,
     pub name: String,
     pub vendor: String,
+    pub backend: String,
     pub memory_total_bytes: u64,
     pub memory_free_bytes: u64,
+    pub memory_reliable: bool,
     pub driver_version: String,
-    pub compute_capability: Option<String>,
+    pub architecture_hint: Option<String>,
     pub temperature_celsius: Option<f64>,
     pub utilization_percent: Option<f64>,
+}
+
+/** 当前自动选中的执行后端及其已验证能力边界。 */
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecutionBackendView {
+    pub id: String,
+    pub label: String,
+    pub vendor: String,
+    pub adapter_name: Option<String>,
+    pub device_index: Option<u32>,
+    pub compatibility_mode: bool,
+    pub inference_supported: bool,
+    pub training_supported: bool,
+    pub limits: RuntimeCapabilitiesView,
+}
+
+/** Runtime 对推理、训练和任务参数的稳定能力声明。 */
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeCapabilitiesView {
+    pub inference: bool,
+    pub training: bool,
+    pub cpu_vae_required: bool,
+    pub fp32_unet_required: bool,
+    pub max_validated_edge: u32,
+    pub max_validated_batch: u32,
+    pub max_validated_loras: u32,
 }
 
 /** 签名资源清单中的单个下载来源。 */
@@ -887,6 +869,8 @@ pub struct RuntimeView {
     pub installed: bool,
     pub status: String,
     pub root_path: String,
+    pub backend: Option<String>,
+    pub launch_profile: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -915,6 +899,8 @@ pub struct DesktopSettings {
     pub theme_mode: String,
     /** 字体缩放仅允许 100%–130%，默认 110%。 */
     pub font_scale: f64,
+    /** 内容字体独立缩放，不改变页面布局与控件尺寸。 */
+    pub content_font_scale: f64,
     pub default_privacy: String,
     /** 登录账号后是否自动把新完成的本机图片加入网页图库同步队列。 */
     pub auto_upload: bool,
@@ -991,8 +977,22 @@ pub struct DesktopResourceManifestItem {
     pub install_directory: Option<String>,
     pub model_registration: Option<DesktopResourceModelRegistration>,
     pub application_update: Option<DesktopApplicationUpdateMetadata>,
+    #[serde(default)]
+    pub compatible_backends: Vec<String>,
+    pub runtime_profile: Option<DesktopRuntimeProfile>,
     pub required: bool,
     pub sources: Vec<DesktopResourceSource>,
+}
+
+/** 签名资源清单中 Runtime 的固定入口、启动 profile 与能力。 */
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopRuntimeProfile {
+    pub backend: String,
+    pub launch_profile: String,
+    pub python_executable: String,
+    pub entrypoint: String,
+    pub capabilities: RuntimeCapabilitiesView,
 }
 
 /** 签名清单中 application 更新包的版本门禁和用户说明。 */
@@ -1073,6 +1073,8 @@ pub struct DesktopResourceCatalogItemView {
     pub installed: bool,
     pub install_path: Option<String>,
     pub source_kinds: Vec<String>,
+    pub compatible_backends: Vec<String>,
+    pub runtime_profile: Option<DesktopRuntimeProfile>,
     pub model_registration: Option<DesktopResourceModelRegistration>,
 }
 
@@ -1085,6 +1087,7 @@ pub struct DesktopResourceCatalogView {
     pub generated_at: Option<String>,
     pub expires_at: Option<String>,
     pub message: String,
+    pub selected_backend: String,
     pub resources: Vec<DesktopResourceCatalogItemView>,
 }
 
@@ -1295,9 +1298,6 @@ pub struct WindowsSystemProbe {
     /** WMI 可见的全部图形适配器用于展示厂商与非 CUDA 能力边界。 */
     #[serde(default)]
     pub display_adapters: Vec<DisplayAdapterView>,
-    /** WMI 可见的 NVIDIA 适配器用于区分无显卡和驱动不可用。 */
-    #[serde(default)]
-    pub nvidia_adapter_names: Vec<String>,
     #[serde(default)]
     pub disks: Vec<DiskView>,
 }

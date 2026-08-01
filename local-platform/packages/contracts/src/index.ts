@@ -772,6 +772,40 @@ export const desktopGalleryPrivacySchema = z.enum(["public", "private"]);
 /** 桌面端本机环境的统一可用状态。 */
 export const desktopEnvironmentStatusSchema = z.enum(["ready", "installable", "blocked", "degraded"]);
 
+/** 桌面 GPU 执行后端使用稳定枚举，后续增加 ROCm 等实现时不污染厂商判断。 */
+export const desktopExecutionBackendSchema = z.enum(["nvidia_cuda", "amd_directml", "unavailable"]);
+
+/** Runtime 只能选择客户端内置的启动参数白名单，签名清单不得下发任意命令。 */
+export const desktopRuntimeLaunchProfileSchema = z.enum(["nvidia-cuda126", "anima-directml-fp32"]);
+
+/** Runtime 对推理、训练和已验证任务边界的显式能力声明。 */
+export const desktopRuntimeCapabilitiesSchema = z.object({
+  inference: z.boolean(),
+  training: z.boolean(),
+  cpuVaeRequired: z.boolean(),
+  fp32UnetRequired: z.boolean(),
+  maxValidatedEdge: z.number().int().min(64).max(8192),
+  maxValidatedBatch: z.number().int().min(1).max(64),
+  maxValidatedLoras: z.number().int().min(0).max(64),
+});
+
+/** 当前硬件自动选中的后端及其用户提交门禁。 */
+export const desktopExecutionBackendViewSchema = z.object({
+  id: desktopExecutionBackendSchema,
+  label: z.string().min(1),
+  vendor: z.string().min(1),
+  adapterName: z.string().nullable(),
+  /** CUDA 使用 nvidia-smi 稳定索引；DirectML 由受控 Runner 枚举厂商，因此保持空值。 */
+  deviceIndex: z.number().int().nonnegative().nullable(),
+  compatibilityMode: z.boolean(),
+  inferenceSupported: z.boolean(),
+  trainingSupported: z.boolean(),
+  limits: desktopRuntimeCapabilitiesSchema,
+}).superRefine((value, context) => {
+  if (value.id === "nvidia_cuda" && value.deviceIndex === null) context.addIssue({ code: "custom", path: ["deviceIndex"], message: "NVIDIA CUDA 后端必须声明已选择设备索引" });
+  if (value.id !== "nvidia_cuda" && value.deviceIndex !== null) context.addIssue({ code: "custom", path: ["deviceIndex"], message: "非 CUDA 后端不得声明 nvidia-smi 设备索引" });
+});
+
 /** 桌面端启动、复检和任务提交前使用的本机环境报告。 */
 export const desktopEnvironmentReportSchema = z.object({
   status: desktopEnvironmentStatusSchema,
@@ -779,11 +813,13 @@ export const desktopEnvironmentReportSchema = z.object({
   os: z.object({ name: z.string(), version: z.string(), build: z.number().int().nonnegative().nullable(), arch: z.string(), supported: z.boolean() }),
   cpu: z.object({ name: z.string(), logicalCores: z.number().int().positive() }),
   memory: z.object({ totalBytes: z.number().int().nonnegative(), availableBytes: z.number().int().nonnegative(), virtualTotalBytes: z.number().int().nonnegative() }),
-  /** WMI 检测到的全部图形适配器，用于明确区分 NVIDIA、AMD、Intel 与未知厂商。 */
-  displayAdapters: z.array(z.object({ name: z.string().min(1), vendor: z.string().min(1), cudaSupported: z.boolean() })).max(16),
-  gpus: z.array(z.object({ index: z.number().int().nonnegative(), uuid: z.string(), name: z.string(), vendor: z.string(), memoryTotalBytes: z.number().int().nonnegative(), memoryFreeBytes: z.number().int().nonnegative(), driverVersion: z.string(), computeCapability: z.string().nullable(), temperatureCelsius: z.number().nullable(), utilizationPercent: z.number().nullable() })),
+  /** WMI 检测到的全部适配器只声明候选后端，不再把 CUDA 当作通用显卡能力。 */
+  displayAdapters: z.array(z.object({ name: z.string().min(1), vendor: z.string().min(1), driverVersion: z.string(), pnpDeviceId: z.string(), dedicatedMemoryBytes: z.number().int().nonnegative().nullable(), supportedBackends: z.array(desktopExecutionBackendSchema.exclude(["unavailable"])).max(4) })).max(16),
+  /** 可执行设备同时包含 CUDA 探针和 AMD DirectML 候选，显存不可靠时由 memoryReliable 明示。 */
+  gpus: z.array(z.object({ index: z.number().int().nonnegative(), uuid: z.string(), name: z.string(), vendor: z.string(), backend: desktopExecutionBackendSchema.exclude(["unavailable"]), memoryTotalBytes: z.number().int().nonnegative(), memoryFreeBytes: z.number().int().nonnegative(), memoryReliable: z.boolean(), driverVersion: z.string(), architectureHint: z.string().nullable(), temperatureCelsius: z.number().nullable(), utilizationPercent: z.number().nullable() })),
+  executionBackend: desktopExecutionBackendViewSchema,
   disks: z.array(z.object({ name: z.string(), fileSystem: z.string(), totalBytes: z.number().int().nonnegative(), availableBytes: z.number().int().nonnegative() })),
-  runtime: z.object({ installed: z.boolean(), status: z.enum(["not_installed", "installed_unverified", "ready", "broken"]), rootPath: z.string() }),
+  runtime: z.object({ installed: z.boolean(), status: z.enum(["not_installed", "installed_unverified", "ready", "broken"]), rootPath: z.string(), backend: desktopExecutionBackendSchema.nullable(), launchProfile: desktopRuntimeLaunchProfileSchema.nullable() }),
   capabilities: z.object({ inference: z.boolean(), training: z.boolean(), captioning: z.boolean(), modelManagement: z.literal(true) }),
   issues: z.array(z.object({ code: z.string(), severity: z.enum(["info", "warning", "critical"]), title: z.string(), message: z.string(), action: z.string() })),
 });
@@ -793,6 +829,8 @@ export const desktopSettingsSchema = z.object({
   themeMode: z.enum(["system", "dark", "light"]),
   /** 桌面界面缩放使用受控离散比例，避免任意值破坏最小窗口布局。 */
   fontScale: z.number().min(1).max(1.3).multipleOf(0.05),
+  /** 内容文字独立缩放，重点提升提示词、标签和说明文字的中文可读性。 */
+  contentFontScale: z.number().min(1).max(1.6).multipleOf(0.05),
   dependencySource: z.literal("mirror"),
   defaultPrivacy: desktopGalleryPrivacySchema,
   /** 登录账号后是否把新完成的本机图片自动同步到网页图库。 */
@@ -867,6 +905,15 @@ export const desktopResourceModelRegistrationSchema = z.object({
   role: z.enum(["primary", "text_encoder", "vae"]),
 });
 
+/** 签名 Runtime 资源使用的固定入口、启动 profile 与能力。 */
+export const desktopRuntimeProfileSchema = z.object({
+  backend: desktopExecutionBackendSchema.exclude(["unavailable"]),
+  launchProfile: desktopRuntimeLaunchProfileSchema,
+  pythonExecutable: z.string().regex(/^[a-zA-Z0-9_./-]{1,255}$/),
+  entrypoint: z.string().regex(/^[a-zA-Z0-9_./-]{1,255}$/),
+  capabilities: desktopRuntimeCapabilitiesSchema,
+});
+
 /** 签名清单内单个可安装资源的不可变描述。 */
 export const desktopResourceManifestItemSchema = z.object({
   id: z.string().regex(/^[a-z0-9][a-z0-9._-]{1,127}$/),
@@ -890,6 +937,10 @@ export const desktopResourceManifestItemSchema = z.object({
     releaseNotes: z.string().max(20000),
     mandatory: z.boolean(),
   }).nullable().optional(),
+  /** 缺省表示 CPU/公共资源；历史 Runtime 与 Trainer 由客户端按 NVIDIA 兼容规则迁移。 */
+  compatibleBackends: z.array(desktopExecutionBackendSchema.exclude(["unavailable"])).min(1).max(4).optional(),
+  /** Runtime 专用的固定入口和能力；参数由客户端按 launchProfile 白名单生成。 */
+  runtimeProfile: desktopRuntimeProfileSchema.nullable().optional(),
   required: z.boolean(),
   sources: z.array(desktopResourceSourceSchema).length(1, "每个资源必须且只能声明一个主站镜像"),
 }).superRefine((item, context) => {
@@ -899,6 +950,24 @@ export const desktopResourceManifestItemSchema = z.object({
   }
   if (!isApplication && item.applicationUpdate) {
     context.addIssue({ code: "custom", path: ["applicationUpdate"], message: "非 application 资源不得声明软件更新元数据" });
+  }
+  if (item.runtimeProfile && item.kind !== "runtime") {
+    context.addIssue({ code: "custom", path: ["runtimeProfile"], message: "只有 runtime 资源可以声明 Runtime profile" });
+  }
+  if (item.kind === "runtime" && item.compatibleBackends && !item.runtimeProfile) {
+    context.addIssue({ code: "custom", path: ["runtimeProfile"], message: "新 Runtime 资源必须声明受控 profile" });
+  }
+  if (item.runtimeProfile && item.compatibleBackends && !item.compatibleBackends.includes(item.runtimeProfile.backend)) {
+    context.addIssue({ code: "custom", path: ["compatibleBackends"], message: "Runtime 后端必须包含在资源兼容后端中" });
+  }
+  if (item.runtimeProfile?.launchProfile === "anima-directml-fp32") {
+    const capabilities = item.runtimeProfile.capabilities;
+    if (item.runtimeProfile.backend !== "amd_directml" || item.runtimeProfile.entrypoint !== "directml_runner.py" || capabilities.training || !capabilities.cpuVaeRequired || !capabilities.fp32UnetRequired || capabilities.maxValidatedEdge > 512 || capabilities.maxValidatedBatch !== 1 || capabilities.maxValidatedLoras > 1) {
+      context.addIssue({ code: "custom", path: ["runtimeProfile"], message: "AMD DirectML profile 超出已验证能力范围" });
+    }
+  }
+  if (item.runtimeProfile?.launchProfile === "nvidia-cuda126" && item.runtimeProfile.backend !== "nvidia_cuda") {
+    context.addIssue({ code: "custom", path: ["runtimeProfile", "backend"], message: "CUDA profile 必须绑定 NVIDIA 后端" });
   }
   if (isApplication && item.applicationUpdate) {
     const target = desktopSemanticVersion(item.version);
@@ -932,6 +1001,7 @@ export const desktopResourceCatalogViewSchema = z.object({
   generatedAt: z.string().datetime().nullable(),
   expiresAt: z.string().datetime().nullable(),
   message: z.string(),
+  selectedBackend: desktopExecutionBackendSchema,
   resources: z.array(z.object({
     id: z.string(),
     kind: desktopResourceKindSchema,
@@ -945,6 +1015,8 @@ export const desktopResourceCatalogViewSchema = z.object({
     installed: z.boolean(),
     installPath: z.string().nullable(),
     sourceKinds: z.array(desktopResourceSourceSchema.shape.kind),
+    compatibleBackends: z.array(desktopExecutionBackendSchema.exclude(["unavailable"])),
+    runtimeProfile: desktopRuntimeProfileSchema.nullable().optional(),
     /** 底模资源用于在仓库页合并同组文件并提供一键安装。 */
     modelRegistration: desktopResourceModelRegistrationSchema.nullable().optional(),
   })),
@@ -981,7 +1053,13 @@ export const desktopRuntimeStatusViewSchema = z.object({
   startedAt: z.string().datetime().nullable(),
   checkedAt: z.string().datetime(),
   logPath: z.string().nullable(),
+  backend: desktopExecutionBackendSchema.nullable(),
+  deviceIndex: z.number().int().nonnegative().nullable(),
+  launchProfile: desktopRuntimeLaunchProfileSchema.nullable(),
   error: z.string().nullable(),
+}).superRefine((value, context) => {
+  if (value.backend === "nvidia_cuda" && ["starting", "ready"].includes(value.status) && value.deviceIndex === null) context.addIssue({ code: "custom", path: ["deviceIndex"], message: "运行中的 CUDA Runtime 必须声明设备索引" });
+  if (value.backend !== "nvidia_cuda" && value.deviceIndex !== null) context.addIssue({ code: "custom", path: ["deviceIndex"], message: "非 CUDA Runtime 不得声明 nvidia-smi 设备索引" });
 });
 
 /** 桌面端导入并持久登记的本地底模。 */
@@ -1352,32 +1430,6 @@ export const desktopAiCleanApplyInputSchema = z.object({ jobId: z.string().uuid(
 
 /** 撤销一次已经应用且之后没有继续编辑的 AI 清洗。 */
 export const desktopAiCleanUndoInputSchema = z.object({ jobId: z.string().uuid(), datasetId: z.string().uuid(), assetId: z.string().uuid() });
-
-/** 创建单图或批量自动抠图任务。 */
-export const desktopBackgroundRemovalJobCreateInputSchema = z.object({ datasetId: z.string().uuid(), assetIds: z.array(z.string().uuid()).min(1).max(200) });
-
-/** 自动抠图批次中的逐图持久状态。 */
-export const desktopBackgroundRemovalJobItemViewSchema = z.object({
-  assetId: z.string().uuid(),
-  status: z.enum(["queued", "running", "succeeded", "failed", "cancelled"]),
-  derivativeId: z.string().uuid().nullable(),
-  error: z.string().nullable(),
-  updatedAt: z.string().datetime(),
-});
-
-/** SQLite 为事实源的自动抠图任务。 */
-export const desktopBackgroundRemovalJobViewSchema = z.object({
-  id: z.string().uuid(), datasetId: z.string().uuid(), status: z.enum(["queued", "running", "paused", "succeeded", "failed", "cancelled"]),
-  progress: z.number().int().min(0).max(100), totalAssets: z.number().int().positive().max(200), processedAssets: z.number().int().nonnegative().max(200),
-  succeededAssets: z.number().int().nonnegative().max(200), failedAssets: z.number().int().nonnegative().max(200), items: z.array(desktopBackgroundRemovalJobItemViewSchema).max(200),
-  error: z.string().nullable(), createdAt: z.string().datetime(), completedAt: z.string().datetime().nullable(), updatedAt: z.string().datetime(),
-});
-
-/** 手动抠图只接受与原图同尺寸的 PNG alpha 蒙版。 */
-export const desktopTrainingManualMaskInputSchema = z.object({ datasetId: z.string().uuid(), assetId: z.string().uuid(), maskPngBase64: z.string().min(16).max(200 * 1024 * 1024) });
-
-/** 选择后续训练快照使用的图片版本；空值表示原图。 */
-export const desktopTrainingAssetVariantSelectInputSchema = z.object({ datasetId: z.string().uuid(), assetId: z.string().uuid(), derivativeId: z.string().uuid().nullable() });
 
 /** 桌面端真实 LoRA 训练任务固化的用户参数。 */
 export const desktopTrainingParametersSchema = z.object({
@@ -1865,11 +1917,6 @@ export type DesktopAiCleanJobView = z.infer<typeof desktopAiCleanJobViewSchema>;
 export type DesktopAiCleanJobCreateInput = z.infer<typeof desktopAiCleanJobCreateInputSchema>;
 export type DesktopAiCleanApplyInput = z.infer<typeof desktopAiCleanApplyInputSchema>;
 export type DesktopAiCleanUndoInput = z.infer<typeof desktopAiCleanUndoInputSchema>;
-export type DesktopBackgroundRemovalJobCreateInput = z.infer<typeof desktopBackgroundRemovalJobCreateInputSchema>;
-export type DesktopBackgroundRemovalJobItemView = z.infer<typeof desktopBackgroundRemovalJobItemViewSchema>;
-export type DesktopBackgroundRemovalJobView = z.infer<typeof desktopBackgroundRemovalJobViewSchema>;
-export type DesktopTrainingManualMaskInput = z.infer<typeof desktopTrainingManualMaskInputSchema>;
-export type DesktopTrainingAssetVariantSelectInput = z.infer<typeof desktopTrainingAssetVariantSelectInputSchema>;
 export type DesktopTrainingParameters = z.infer<typeof desktopTrainingParametersSchema>;
 export type DesktopTrainingJobCreateInput = z.infer<typeof desktopTrainingJobCreateInputSchema>;
 export type DesktopTrainingAttemptView = z.infer<typeof desktopTrainingAttemptViewSchema>;

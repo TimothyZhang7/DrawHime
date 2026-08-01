@@ -1,19 +1,16 @@
 //! 本模块管理桌面端独立 SQLite、目录设置和图库同步队列，不连接网页或独立平台数据库。
 
 use crate::ai_cleaner::AiCleanScheduler;
-use crate::background_removal::BackgroundRemovalScheduler;
 use crate::captioner::CaptionScheduler;
 use crate::gallery_sync::GallerySyncScheduler;
 use crate::models::{
     DesktopAiCleanApplyInput, DesktopAiCleanJobCreateInput, DesktopAiCleanJobView,
-    DesktopAiCleanUndoInput, DesktopAiSettings, DesktopBackgroundRemovalJobCreateInput,
-    DesktopBackgroundRemovalJobView, DesktopCaptionJobCreateInput, DesktopCaptionJobView,
-    DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraView,
+    DesktopAiCleanUndoInput, DesktopAiSettings, DesktopCaptionJobCreateInput,
+    DesktopCaptionJobView, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraView,
     DesktopLocalModelView, DesktopSettings, DesktopTrainingBatchTagsInput,
-    DesktopTrainingCaptionUpdateInput,
-    DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetView, DesktopTrainingJobCreateInput,
-    DesktopTrainingJobView, DesktopTrainingManualMaskInput, DesktopTrainingSnapshotCopyInput,
-    DesktopTrainingSnapshotView, DesktopTrainingAssetVariantSelectInput,
+    DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput,
+    DesktopTrainingDatasetView, DesktopTrainingJobCreateInput, DesktopTrainingJobView,
+    DesktopTrainingSnapshotCopyInput, DesktopTrainingSnapshotView,
     DesktopTrainingTriggerWordsUpdateInput, DesktopWebsiteModelView, GalleryPublicationInput,
     GallerySyncItem,
 };
@@ -38,7 +35,6 @@ pub struct DesktopState {
     pub database_path: PathBuf,
     pub scheduler: Option<LocalScheduler>,
     pub caption_scheduler: Option<CaptionScheduler>,
-    pub background_removal_scheduler: Option<BackgroundRemovalScheduler>,
     pub ai_clean_scheduler: Option<AiCleanScheduler>,
     pub training_scheduler: Option<TrainingScheduler>,
     pub gallery_sync_scheduler: Option<GallerySyncScheduler>,
@@ -55,7 +51,7 @@ impl DesktopState {
         let connection = Connection::open(&database_path)
             .map_err(|error| format!("打开桌面数据库失败：{error}"))?;
         connection.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
-            CREATE TABLE IF NOT EXISTS desktop_settings (id INTEGER PRIMARY KEY CHECK(id=1), theme_mode TEXT NOT NULL DEFAULT 'system', font_scale REAL NOT NULL DEFAULT 1.1, default_privacy TEXT NOT NULL DEFAULT 'public', auto_upload INTEGER NOT NULL DEFAULT 1, model_root TEXT NOT NULL, output_root TEXT NOT NULL, runtime_root TEXT NOT NULL, upload_concurrency INTEGER NOT NULL, wifi_only INTEGER NOT NULL, bandwidth_limit_kib INTEGER, updated_at TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS desktop_settings (id INTEGER PRIMARY KEY CHECK(id=1), theme_mode TEXT NOT NULL DEFAULT 'system', font_scale REAL NOT NULL DEFAULT 1.1, content_font_scale REAL NOT NULL DEFAULT 1.2, default_privacy TEXT NOT NULL DEFAULT 'public', auto_upload INTEGER NOT NULL DEFAULT 1, model_root TEXT NOT NULL, output_root TEXT NOT NULL, runtime_root TEXT NOT NULL, upload_concurrency INTEGER NOT NULL, wifi_only INTEGER NOT NULL, bandwidth_limit_kib INTEGER, updated_at TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS desktop_ai_settings (id INTEGER PRIMARY KEY CHECK(id=1), enabled INTEGER NOT NULL DEFAULT 0, endpoint_type TEXT NOT NULL DEFAULT 'openai_chat', base_url TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS environment_snapshots (id INTEGER PRIMARY KEY AUTOINCREMENT, report_json TEXT NOT NULL, checked_at TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS software_updates (version TEXT PRIMARY KEY, resource_id TEXT NOT NULL, file_name TEXT NOT NULL, sha256 TEXT NOT NULL, byte_size INTEGER NOT NULL, source TEXT NOT NULL, status TEXT NOT NULL, error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, applied_at TEXT);
@@ -181,6 +177,9 @@ impl DesktopState {
         connection.execute("UPDATE local_ai_clean_jobs SET status=CASE WHEN pause_requested=1 THEN 'paused' ELSE 'queued' END,updated_at=?1 WHERE status='running' AND cancel_requested=0", [&recovery_time]).map_err(|error| format!("恢复中断的 AI 清洗任务失败：{error}"))?;
         connection.execute("UPDATE local_ai_clean_job_items SET status='cancelled',updated_at=?1 WHERE status IN ('queued','running') AND job_id IN (SELECT id FROM local_ai_clean_jobs WHERE cancel_requested=1)", [&recovery_time]).map_err(|error| format!("恢复已取消的逐图 AI 清洗失败：{error}"))?;
         connection.execute("UPDATE local_ai_clean_jobs SET status='cancelled',progress=100,processed_assets=total_assets,completed_at=?1,updated_at=?1 WHERE status IN ('queued','running') AND cancel_requested=1", [&recovery_time]).map_err(|error| format!("恢复已取消的 AI 清洗任务失败：{error}"))?;
+        // 抠图功能已移除；历史任务和派生文件保留，只把未结束任务收敛为终态。
+        connection.execute("UPDATE local_background_removal_job_items SET status='cancelled',error=COALESCE(error,'抠图功能已移除'),updated_at=?1 WHERE status IN ('queued','running')", [&recovery_time]).map_err(|error| format!("收敛历史抠图任务项失败：{error}"))?;
+        connection.execute("UPDATE local_background_removal_jobs SET status='cancelled',progress=100,processed_assets=total_assets,cancel_requested=1,error=COALESCE(error,'抠图功能已移除'),completed_at=?1,updated_at=?1 WHERE status IN ('queued','running','paused')", [&recovery_time]).map_err(|error| format!("收敛历史抠图任务失败：{error}"))?;
         connection.execute("UPDATE local_caption_job_items SET status='queued',caption=NULL,error=NULL,updated_at=?1 WHERE status='running'", [&recovery_time]).map_err(|error| format!("恢复中断的逐图打标状态失败：{error}"))?;
         connection.execute("UPDATE local_training_job_attempts SET status='interrupted',error='桌面程序退出，训练任务已恢复排队',completed_at=?1 WHERE status='running'", [&recovery_time]).map_err(|error| format!("恢复中断的训练尝试失败：{error}"))?;
         connection.execute("UPDATE local_training_jobs SET status='cancelled',progress=100,completed_at=?1,updated_at=?1 WHERE status='running' AND cancel_requested=1", [&recovery_time]).map_err(|error| format!("恢复已取消的训练任务失败：{error}"))?;
@@ -198,6 +197,12 @@ impl DesktopState {
             "desktop_settings",
             "font_scale",
             "REAL NOT NULL DEFAULT 1.1",
+        )?;
+        ensure_column(
+            &connection,
+            "desktop_settings",
+            "content_font_scale",
+            "REAL NOT NULL DEFAULT 1.2",
         )?;
         ensure_column(
             &connection,
@@ -324,7 +329,6 @@ impl DesktopState {
             database_path,
             scheduler: None,
             caption_scheduler: None,
-            background_removal_scheduler: None,
             ai_clean_scheduler: None,
             training_scheduler: None,
             gallery_sync_scheduler: None,
@@ -346,11 +350,6 @@ impl DesktopState {
             app.clone(),
         )?);
         self.caption_scheduler = Some(CaptionScheduler::start(
-            self.database_path.clone(),
-            self.app_data_dir.clone(),
-            app.clone(),
-        )?);
-        self.background_removal_scheduler = Some(BackgroundRemovalScheduler::start(
             self.database_path.clone(),
             self.app_data_dir.clone(),
             app.clone(),
@@ -380,7 +379,7 @@ impl DesktopState {
             .database
             .lock()
             .map_err(|_| "桌面数据库锁已损坏".to_string())?;
-        database.query_row("SELECT theme_mode, font_scale, default_privacy, auto_upload, model_root, output_root, runtime_root, upload_concurrency, wifi_only, bandwidth_limit_kib FROM desktop_settings WHERE id=1", [], |row| Ok(DesktopSettings { theme_mode: row.get(0)?, font_scale: row.get(1)?, default_privacy: row.get(2)?, auto_upload: row.get::<_, i64>(3)? != 0, model_root: row.get(4)?, output_root: row.get(5)?, runtime_root: row.get(6)?, upload_concurrency: row.get(7)?, wifi_only: row.get::<_, i64>(8)? != 0, bandwidth_limit_kib: row.get(9)? })).map_err(|error| format!("读取桌面设置失败：{error}"))
+        database.query_row("SELECT theme_mode, font_scale, content_font_scale, default_privacy, auto_upload, model_root, output_root, runtime_root, upload_concurrency, wifi_only, bandwidth_limit_kib FROM desktop_settings WHERE id=1", [], |row| Ok(DesktopSettings { theme_mode: row.get(0)?, font_scale: row.get(1)?, content_font_scale: row.get(2)?, default_privacy: row.get(3)?, auto_upload: row.get::<_, i64>(4)? != 0, model_root: row.get(5)?, output_root: row.get(6)?, runtime_root: row.get(7)?, upload_concurrency: row.get(8)?, wifi_only: row.get::<_, i64>(9)? != 0, bandwidth_limit_kib: row.get(10)? })).map_err(|error| format!("读取桌面设置失败：{error}"))
     }
 
     /** 校验目录和上传策略后事务化更新设置。 */
@@ -393,6 +392,14 @@ impl DesktopState {
             || ((settings.font_scale * 20.0).round() - settings.font_scale * 20.0).abs() > 0.001
         {
             return Err("字体大小必须是 100%–130% 的 5% 档位".into());
+        }
+        if !settings.content_font_scale.is_finite()
+            || !(1.0..=1.6).contains(&settings.content_font_scale)
+            || ((settings.content_font_scale * 20.0).round() - settings.content_font_scale * 20.0)
+                .abs()
+                > 0.001
+        {
+            return Err("内容字体大小必须是 100%–160% 的 5% 档位".into());
         }
         if !matches!(settings.default_privacy.as_str(), "public" | "private") {
             return Err("默认图库权限不正确".into());
@@ -421,7 +428,7 @@ impl DesktopState {
             .database
             .lock()
             .map_err(|_| "桌面数据库锁已损坏".to_string())?;
-        database.execute("UPDATE desktop_settings SET theme_mode=?1, font_scale=?2, default_privacy=?3, auto_upload=?4, model_root=?5, output_root=?6, runtime_root=?7, upload_concurrency=?8, wifi_only=?9, bandwidth_limit_kib=?10, updated_at=?11 WHERE id=1", params![settings.theme_mode, settings.font_scale, settings.default_privacy, settings.auto_upload, settings.model_root, settings.output_root, settings.runtime_root, settings.upload_concurrency, settings.wifi_only, settings.bandwidth_limit_kib, Utc::now().to_rfc3339()]).map_err(|error| format!("保存桌面设置失败：{error}"))?;
+        database.execute("UPDATE desktop_settings SET theme_mode=?1, font_scale=?2, content_font_scale=?3, default_privacy=?4, auto_upload=?5, model_root=?6, output_root=?7, runtime_root=?8, upload_concurrency=?9, wifi_only=?10, bandwidth_limit_kib=?11, updated_at=?12 WHERE id=1", params![settings.theme_mode, settings.font_scale, settings.content_font_scale, settings.default_privacy, settings.auto_upload, settings.model_root, settings.output_root, settings.runtime_root, settings.upload_concurrency, settings.wifi_only, settings.bandwidth_limit_kib, Utc::now().to_rfc3339()]).map_err(|error| format!("保存桌面设置失败：{error}"))?;
         drop(database);
         self.load_settings()
     }
@@ -737,19 +744,29 @@ impl DesktopState {
 
     /** 暂停打标任务并唤醒 Worker 收敛运行中的组件。 */
     pub fn pause_caption_job(&self, id: &str) -> Result<DesktopCaptionJobView, String> {
-        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        let database = self
+            .database
+            .lock()
+            .map_err(|_| "桌面数据库锁已损坏".to_string())?;
         let job = crate::captioner::pause_job(&database, id)?;
         drop(database);
-        if let Some(scheduler) = &self.caption_scheduler { scheduler.wake(); }
+        if let Some(scheduler) = &self.caption_scheduler {
+            scheduler.wake();
+        }
         Ok(job)
     }
 
     /** 恢复暂停的打标任务并立即唤醒 Worker。 */
     pub fn resume_caption_job(&self, id: &str) -> Result<DesktopCaptionJobView, String> {
-        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        let database = self
+            .database
+            .lock()
+            .map_err(|_| "桌面数据库锁已损坏".to_string())?;
         let job = crate::captioner::resume_job(&database, id)?;
         drop(database);
-        if let Some(scheduler) = &self.caption_scheduler { scheduler.wake(); }
+        if let Some(scheduler) = &self.caption_scheduler {
+            scheduler.wake();
+        }
         Ok(job)
     }
 
@@ -765,64 +782,6 @@ impl DesktopState {
             scheduler.wake();
         }
         Ok(job)
-    }
-
-    /** 创建自动抠图任务并立即返回持久化记录。 */
-    pub fn create_background_removal_job(
-        &self,
-        input: DesktopBackgroundRemovalJobCreateInput,
-    ) -> Result<DesktopBackgroundRemovalJobView, String> {
-        let scheduler = self.background_removal_scheduler.as_ref().ok_or_else(|| "自动抠图调度器尚未启动".to_string())?;
-        let mut database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
-        let job = crate::background_removal::create_job(&mut database, input)?;
-        drop(database);
-        scheduler.wake();
-        Ok(job)
-    }
-
-    /** 返回最近的自动抠图任务。 */
-    pub fn list_background_removal_jobs(&self) -> Result<Vec<DesktopBackgroundRemovalJobView>, String> {
-        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
-        crate::background_removal::list_jobs(&database)
-    }
-
-    /** 暂停自动抠图并唤醒 Worker 收敛运行进程。 */
-    pub fn pause_background_removal_job(&self, id: &str) -> Result<DesktopBackgroundRemovalJobView, String> {
-        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
-        let job = crate::background_removal::pause_job(&database, id)?;
-        drop(database);
-        if let Some(scheduler) = &self.background_removal_scheduler { scheduler.wake(); }
-        Ok(job)
-    }
-
-    /** 恢复已经暂停的自动抠图任务。 */
-    pub fn resume_background_removal_job(&self, id: &str) -> Result<DesktopBackgroundRemovalJobView, String> {
-        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
-        let job = crate::background_removal::resume_job(&database, id)?;
-        drop(database);
-        if let Some(scheduler) = &self.background_removal_scheduler { scheduler.wake(); }
-        Ok(job)
-    }
-
-    /** 取消自动抠图任务并保留已经成功的派生文件。 */
-    pub fn cancel_background_removal_job(&self, id: &str) -> Result<DesktopBackgroundRemovalJobView, String> {
-        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
-        let job = crate::background_removal::cancel_job(&database, id)?;
-        drop(database);
-        if let Some(scheduler) = &self.background_removal_scheduler { scheduler.wake(); }
-        Ok(job)
-    }
-
-    /** 保存手动蒙版并返回最新训练集。 */
-    pub fn save_training_manual_mask(&self, input: DesktopTrainingManualMaskInput) -> Result<DesktopTrainingDatasetView, String> {
-        let mut database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
-        crate::background_removal::save_manual_mask(&mut database, &self.app_data_dir, input)
-    }
-
-    /** 选择后续训练使用的原图或派生版本。 */
-    pub fn select_training_asset_variant(&self, input: DesktopTrainingAssetVariantSelectInput) -> Result<DesktopTrainingDatasetView, String> {
-        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
-        crate::background_removal::select_variant(&database, &self.app_data_dir, input)
     }
 
     /** 创建只生成建议的 AI 标签清洗任务，并唤醒独立网络 Worker。 */
@@ -859,19 +818,29 @@ impl DesktopState {
 
     /** 暂停 AI 清洗任务并保留已经完成的建议。 */
     pub fn pause_ai_clean_job(&self, id: &str) -> Result<DesktopAiCleanJobView, String> {
-        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        let database = self
+            .database
+            .lock()
+            .map_err(|_| "桌面数据库锁已损坏".to_string())?;
         let job = crate::ai_cleaner::pause_job(&database, id)?;
         drop(database);
-        if let Some(scheduler) = &self.ai_clean_scheduler { scheduler.wake(); }
+        if let Some(scheduler) = &self.ai_clean_scheduler {
+            scheduler.wake();
+        }
         Ok(job)
     }
 
     /** 恢复暂停的 AI 清洗任务并立即唤醒 Worker。 */
     pub fn resume_ai_clean_job(&self, id: &str) -> Result<DesktopAiCleanJobView, String> {
-        let database = self.database.lock().map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        let database = self
+            .database
+            .lock()
+            .map_err(|_| "桌面数据库锁已损坏".to_string())?;
         let job = crate::ai_cleaner::resume_job(&database, id)?;
         drop(database);
-        if let Some(scheduler) = &self.ai_clean_scheduler { scheduler.wake(); }
+        if let Some(scheduler) = &self.ai_clean_scheduler {
+            scheduler.wake();
+        }
         Ok(job)
     }
 
@@ -1393,15 +1362,18 @@ mod tests {
         let mut settings = state.load_settings().expect("读取设置");
         assert_eq!(settings.theme_mode, "system");
         assert!((settings.font_scale - 1.1).abs() < f64::EPSILON);
+        assert!((settings.content_font_scale - 1.2).abs() < f64::EPSILON);
         assert_eq!(settings.default_privacy, "public");
         assert!(settings.auto_upload);
         settings.default_privacy = "public".into();
         settings.auto_upload = false;
         settings.font_scale = 1.2;
+        settings.content_font_scale = 1.4;
         let saved = state.save_settings(settings).expect("保存设置");
         assert_eq!(saved.default_privacy, "public");
         assert!(!saved.auto_upload);
         assert!((saved.font_scale - 1.2).abs() < f64::EPSILON);
+        assert!((saved.content_font_scale - 1.4).abs() < f64::EPSILON);
         let artifact = temporary.path().join("result.webp");
         fs::write(&artifact, b"verified-local-result").expect("写入结果");
         let first = state

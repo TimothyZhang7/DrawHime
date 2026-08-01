@@ -39,7 +39,7 @@
 | WebView 主题切换 | 通过 | 同一运行实例依次切换深色、亮色和跟随系统；`data-theme`、活动按钮和持久设置均收敛，切页后主题不丢失 |
 | 安装包内容边界 | 通过 | 0.1.4 静默安装后目录仅有 2 个 EXE、共 17,976,638 字节；未发现 safetensors、checkpoint、PyTorch、ONNX、LoRA、Trainer 或 Tagger 文件 |
 | WebView2 离线载荷 | 通过 | 0.1.6 NSIS 使用 Tauri `offlineInstaller` 内嵌微软 Evergreen 离线安装器；最终安装包 211,125,907 字节，首次安装不依赖联网下载 WebView2 |
-| GPU 与磁盘门禁逻辑 | 通过 | 真实生产判断函数覆盖无 NVIDIA GPU、4 GiB、6 GiB 仅生成、低可用显存与安装空间差 1 字节的边界；对应能力锁定和中文提示测试通过 |
+| GPU 与磁盘门禁逻辑 | 通过 | 真实生产判断函数覆盖无受支持 GPU、NVIDIA 4 GiB、6 GiB 仅生成、低可用显存、AMD DirectML 回落与安装空间差 1 字节的边界；对应能力锁定和中文提示测试通过 |
 | Windows 主机自动验收 | 通过 | `scripts/validate-desktop-windows-host.ps1` 在 Windows 11 10.0.26200、144 DPI 上完成 0.1.7 正式安装包静默安装、数据库文件不变、WebView2 检测、安装目录边界、Per-Monitor V2 和十秒启动；脱敏证据写入 `.private/desktop-host-validation/0.1.7` |
 | UI 一键安装全部依赖 | 通过 | 从真实安装客户端点击一次“安装全部必需资源（4）”，串行完成 Trainer v2、3.90 GiB WAI、1.11 GiB Qwen3 和 242 MiB VAE 的下载、整体哈希与原子安装；主模型约 4.5 MiB/s，其余资源约 15.5–18.1 MiB/s，总耗时 1,001 秒，最终显示“必需资源已齐全” |
 | UI 本地生成闭环 | 通过 | 一键安装完成后直接在本地生成页提交 WAI Anima 任务；SQLite 状态收敛为 `succeeded/100%`，20 步 1024×1024 在 108.8 秒完成，产物为 533,702 字节 PNG 且 SHA-256、宽高和本地路径记录完整 |
@@ -79,7 +79,7 @@
 
 | 场景 | 状态 | 必须验证的结果 |
 |---|---|---|
-| 无 NVIDIA GPU | 通过 | GitHub Actions `30477572442` 的 `windows-2022` 无 NVIDIA GPU 主机完成真实安装与 WebView 验收：环境状态为 `blocked`，生成和训练能力均为 `false`，12 个导航页持续显示环境横幅，且直接调用桌面核心创建生成任务被拒绝；模型、训练集、手动标签和记录页面仍可访问 |
+| 无受支持 GPU | 通过 | 无 NVIDIA CUDA 与 AMD DirectML 设备的 `windows-2022` 主机完成真实安装与 WebView 验收：环境状态为 `blocked`，生成和训练能力均为 `false`，全部导航页持续显示环境横幅，且直接调用桌面核心创建生成任务被拒绝；模型、训练集、手动标签和记录页面仍可访问 |
 | 4/6 GiB 显存 | 待验证 | 参数门禁和 OOM 建议准确，不损坏任务或训练集 |
 | 8 GiB 显存 | 通过 | RTX 4060 Laptop 完成本地 Anima 生成、WD 打标和 5 图 LoRA 训练 |
 | 12/16/24 GiB 显存 | 待验证 | Runtime、批量参数和训练吞吐稳定 |

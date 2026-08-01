@@ -644,6 +644,7 @@ mod tests {
         let settings = DesktopSettings {
             theme_mode: "system".into(),
             font_scale: 1.1,
+            content_font_scale: 1.2,
             default_privacy: "private".into(),
             auto_upload: true,
             model_root,

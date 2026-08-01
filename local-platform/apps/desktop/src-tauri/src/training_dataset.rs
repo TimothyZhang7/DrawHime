@@ -669,9 +669,8 @@ pub fn delete_asset(
     };
     let captioning: bool = database.query_row("SELECT EXISTS(SELECT 1 FROM local_caption_jobs WHERE dataset_id=?1 AND status IN ('queued','running','paused'))", [&input.dataset_id], |row| row.get(0)).map_err(|error| format!("检查活动打标任务失败：{error}"))?;
     let ai_cleaning: bool = database.query_row("SELECT EXISTS(SELECT 1 FROM local_ai_clean_job_items item JOIN local_ai_clean_jobs job ON job.id=item.job_id WHERE item.asset_id=?1 AND job.status IN ('queued','running','paused'))", [&input.asset_id], |row| row.get(0)).map_err(|error| format!("检查活动 AI 清洗任务失败：{error}"))?;
-    let background_removing: bool = database.query_row("SELECT EXISTS(SELECT 1 FROM local_background_removal_job_items item JOIN local_background_removal_jobs job ON job.id=item.job_id WHERE item.asset_id=?1 AND job.status IN ('queued','running','paused'))", [&input.asset_id], |row| row.get(0)).map_err(|error| format!("检查活动抠图任务失败：{error}"))?;
-    if captioning || ai_cleaning || background_removing {
-        return Err("当前图片仍有打标、AI 清洗或抠图任务运行，请完成或取消后再删除".into());
+    if captioning || ai_cleaning {
+        return Err("当前图片仍有打标或 AI 清洗任务运行，请完成或取消后再删除".into());
     }
     let dataset_root = app_data_dir.join("datasets").join(&input.dataset_id);
     let source = app_data_dir.join(&relative_path);
@@ -808,12 +807,12 @@ pub fn delete_dataset(
         return Err("训练集不存在或已经删除".into());
     }
     let active: bool = database.query_row(
-        "SELECT EXISTS(SELECT 1 FROM local_caption_jobs WHERE dataset_id=?1 AND status IN ('queued','running','paused') UNION ALL SELECT 1 FROM local_ai_clean_jobs WHERE dataset_id=?1 AND status IN ('queued','running','paused') UNION ALL SELECT 1 FROM local_background_removal_jobs WHERE dataset_id=?1 AND status IN ('queued','running','paused'))",
+        "SELECT EXISTS(SELECT 1 FROM local_caption_jobs WHERE dataset_id=?1 AND status IN ('queued','running','paused') UNION ALL SELECT 1 FROM local_ai_clean_jobs WHERE dataset_id=?1 AND status IN ('queued','running','paused'))",
         [&input.dataset_id],
         |row| row.get(0),
     ).map_err(|error| format!("检查训练集后台任务失败：{error}"))?;
     if active {
-        return Err("训练集仍有打标、AI 清洗或抠图任务，请完成或取消后再删除".into());
+        return Err("训练集仍有打标或 AI 清洗任务，请完成或取消后再删除".into());
     }
     let datasets_root = app_data_dir.join("datasets");
     let dataset_root = datasets_root.join(&input.dataset_id);
@@ -846,7 +845,10 @@ pub fn delete_dataset(
     // 数据库已隐藏训练集后再清理暂存目录；清理失败保留受控隐藏目录供存储清理功能处理。
     if staged.exists() {
         let safe_staged = staged.parent() == Some(datasets_root.as_path())
-            && staged.file_name().and_then(|value| value.to_str()).is_some_and(|value| value.starts_with(".deleting-dataset-"));
+            && staged
+                .file_name()
+                .and_then(|value| value.to_str())
+                .is_some_and(|value| value.starts_with(".deleting-dataset-"));
         if safe_staged {
             let _ = fs::remove_dir_all(&staged);
         }
@@ -878,34 +880,15 @@ pub fn confirm_dataset(
         return Err(format!("仍有 {missing} 张图片缺少 Caption"));
     }
     let mut unavailable = 0_usize;
-    let mut unavailable_derivatives = 0_usize;
     for asset in read_assets(database, app_data_dir, dataset_id)? {
         if !asset.available
             || sha256_file(Path::new(&asset.path)).ok().as_deref() != Some(asset.sha256.as_str())
         {
             unavailable += 1;
         }
-        if let Some(selected_id) = &asset.selected_derivative_id {
-            let selected = asset
-                .derivatives
-                .iter()
-                .find(|derivative| &derivative.id == selected_id);
-            if selected.is_none_or(|derivative| {
-                !derivative.available
-                    || sha256_file(Path::new(&derivative.path)).ok().as_deref()
-                        != Some(derivative.sha256.as_str())
-            }) {
-                unavailable_derivatives += 1;
-            }
-        }
     }
     if unavailable > 0 {
         return Err(format!("仍有 {unavailable} 张训练图片文件缺失或已变化"));
-    }
-    if unavailable_derivatives > 0 {
-        return Err(format!(
-            "仍有 {unavailable_derivatives} 张已选抠图版本缺失或已变化"
-        ));
     }
     let now = Utc::now().to_rfc3339();
     let transaction = database
@@ -1459,7 +1442,11 @@ mod tests {
                 &state.app_data_dir,
                 DesktopTrainingBatchTagsInput {
                     dataset_id: dataset.id.clone(),
-                    asset_ids: imported.assets.iter().map(|asset| asset.id.clone()).collect(),
+                    asset_ids: imported
+                        .assets
+                        .iter()
+                        .map(|asset| asset.id.clone())
+                        .collect(),
                     operation: "add".into(),
                     tags: vec!["Blue_Hair".into(), "blue hair".into(), "solo".into()],
                 },
@@ -1468,9 +1455,10 @@ mod tests {
         };
         for asset in &updated.assets {
             assert_eq!(asset.caption.as_deref(), Some("dh_batch, Blue_Hair, solo"));
-            assert!(asset.tags.iter().any(|tag| {
-                tag.normalized_value == "blue hair" && tag.source == "manual"
-            }));
+            assert!(asset
+                .tags
+                .iter()
+                .any(|tag| { tag.normalized_value == "blue hair" && tag.source == "manual" }));
             assert_eq!(
                 fs::read_to_string(Path::new(&asset.path).with_extension("txt"))
                     .expect("读取批量 Caption 文件"),
@@ -1484,7 +1472,11 @@ mod tests {
                 &state.app_data_dir,
                 DesktopTrainingBatchTagsInput {
                     dataset_id: dataset.id,
-                    asset_ids: updated.assets.iter().map(|asset| asset.id.clone()).collect(),
+                    asset_ids: updated
+                        .assets
+                        .iter()
+                        .map(|asset| asset.id.clone())
+                        .collect(),
                     operation: "remove".into(),
                     tags: vec!["solo".into(), "dh_batch".into()],
                 },

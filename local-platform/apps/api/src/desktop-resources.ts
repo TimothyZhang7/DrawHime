@@ -16,7 +16,8 @@ export function registerDesktopResourceRoutes(router: ServiceRouter): void {
   router.get("/v1/desktop/resources/manifest", async ({ response, url }) => {
     try {
       // 旧客户端不认识新增资源枚举；只有显式声明能力的新客户端才读取扩展签名信封。
-      const extended = new Set((url.searchParams.get("capabilities") || "").split(",")).has("segmenter-v1");
+      const capabilities = new Set((url.searchParams.get("capabilities") || "").split(","));
+      const extended = capabilities.has("segmenter-v1") || capabilities.has("gpu-backends-v1");
       sendSuccess(response, (await loadPublishedManifest(extended)).envelope);
     } catch (error) {
       const failure = publicationError(error);

@@ -38,6 +38,7 @@ try {
       inferenceReady: result.inferenceReady,
       trainingReady: result.trainingReady,
       fontScale: result.fontScale,
+      contentFontScale: result.contentFontScale,
       bannerText: result.bannerText,
       coreStatusText: result.coreStatusText,
       navigationPages: result.navigationPages,
@@ -62,7 +63,7 @@ try {
   await removeUserDataDirectory(userDataDirectory);
 }
 
-/** 通过真实 IPC 逐档验证字体比例，确认设置、全宽布局与 SQLite 持久链路一致。 */
+/** 通过真实 IPC 分别验证页面缩放和内容字体，确认两者互不串扰且 SQLite 持久链路一致。 */
 async function captureFontSettings(client, directory) {
   const targetDirectory = path.resolve(directory);
   await mkdir(targetDirectory, { recursive: true });
@@ -74,50 +75,81 @@ async function captureFontSettings(client, directory) {
     const basicTab = [...document.querySelectorAll('.workspace-tabs button')].find((button) => button.textContent.includes('基础设置'));
     basicTab?.click();
     await delay(120);
-    const label = [...document.querySelectorAll('.settings-grid label')].find((item) => item.querySelector(':scope > span')?.textContent.trim() === '字体大小');
-    const select = label?.querySelector('select');
-    const save = [...document.querySelectorAll('.settings-card footer button')].find((button) => button.textContent.includes('保存本地设置'));
-    if (!select || !save) throw new Error('未找到字体大小设置');
-    const original = Number(select.value);
-    const scales = [1, 1.1, 1.2, 1.3];
-    const samples = [];
-    const applyScale = async (scale) => {
-      select.value = String(scale);
-      select.dispatchEvent(new Event('change', { bubbles: true }));
+    const findSelect = (title) => [...document.querySelectorAll('.settings-grid label')].find((item) => item.querySelector(':scope > span')?.textContent.trim() === title)?.querySelector('select');
+    const pageSelect = findSelect('页面缩放');
+    const contentSelect = findSelect('内容字体');
+    if (!pageSelect || !contentSelect) throw new Error('未找到页面缩放或内容字体设置');
+    const originalPage = Number(pageSelect.value);
+    const originalContent = Number(contentSelect.value);
+    const pageScales = [1, 1.1, 1.2, 1.3];
+    const contentScales = [1, 1.2, 1.4, 1.6];
+    const pageSamples = [];
+    const contentSamples = [];
+    // 干净环境尚未安装底模时生成表单不会渲染，临时挂载相同选择器验证真实提示词字号规则。
+    const promptProbe = document.createElement('label');
+    promptProbe.className = 'prompt-field';
+    promptProbe.style.cssText = 'position:fixed;left:-10000px;top:0;width:320px;';
+    promptProbe.append(document.createElement('textarea'));
+    document.body.append(promptProbe);
+    const applySetting = async (title, scale) => {
+      const select = findSelect(title);
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
+      setter?.call(select, String(scale));
+      select?.dispatchEvent(new Event('change', { bubbles: true }));
       await delay(80);
+      const save = [...document.querySelectorAll('.settings-card footer button')].find((button) => button.textContent.includes('保存本地设置'));
+      if (!save) throw new Error('未找到保存本地设置按钮');
       save.click();
       await delay(350);
     };
     try {
-      for (const scale of scales) {
-        await applyScale(scale);
+      for (const scale of pageScales) {
+        await applySetting('页面缩放', scale);
         const viewportWidth = document.documentElement.clientWidth;
         // 页面已固定预留滚动条槽位，根节点应覆盖的是 body 可用内容宽度，而不是包含槽位的 HTML 宽度。
         const availableWidth = document.body.clientWidth || viewportWidth;
         const rootBounds = document.querySelector('#root')?.getBoundingClientRect();
         const mainBounds = document.querySelector('.desktop-main')?.getBoundingClientRect();
         const pageBounds = document.querySelector('.desktop-main > .workspace-page:not([hidden])')?.getBoundingClientRect();
-        samples.push({
+        pageSamples.push({
           target: scale,
           applied: Number(getComputedStyle(document.documentElement).getPropertyValue('--desktop-font-scale')),
+          contentApplied: Number(getComputedStyle(document.documentElement).getPropertyValue('--desktop-content-font-scale')),
           rootWidthCoverage: rootBounds ? rootBounds.width / availableWidth : 0,
           horizontalOverflow: document.documentElement.scrollWidth > viewportWidth,
           mainInsideViewport: !mainBounds || (mainBounds.left >= -1 && mainBounds.right <= viewportWidth + 1),
           pageInsideViewport: !pageBounds || (pageBounds.left >= -1 && pageBounds.right <= viewportWidth + 1),
         });
       }
+      await applySetting('页面缩放', originalPage);
+      for (const scale of contentScales) {
+        await applySetting('内容字体', scale);
+        const prompt = document.querySelector('.prompt-field textarea');
+        contentSamples.push({
+          target: scale,
+          applied: Number(getComputedStyle(document.documentElement).getPropertyValue('--desktop-content-font-scale')),
+          pageApplied: Number(getComputedStyle(document.documentElement).getPropertyValue('--desktop-font-scale')),
+          promptFontSize: prompt ? Number.parseFloat(getComputedStyle(prompt).fontSize) : null,
+          horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+        });
+      }
     } finally {
-      await applyScale(original);
+      await applySetting('页面缩放', originalPage);
+      await applySetting('内容字体', originalContent);
+      promptProbe.remove();
     }
-    const restored = Number(getComputedStyle(document.documentElement).getPropertyValue('--desktop-font-scale'));
+    const restoredPage = Number(getComputedStyle(document.documentElement).getPropertyValue('--desktop-font-scale'));
+    const restoredContent = Number(getComputedStyle(document.documentElement).getPropertyValue('--desktop-content-font-scale'));
     const notice = document.querySelector('.desktop-notice');
     const noticePosition = notice ? getComputedStyle(notice).position : null;
     await delay(4_300);
     const noticeCleared = !document.querySelector('.desktop-notice');
-    return { original, restored, samples, optionValues: [...select.options].map((option) => Number(option.value)), noticePosition, noticeCleared };
+    return { originalPage, originalContent, restoredPage, restoredContent, pageSamples, contentSamples, pageOptionValues: [...pageSelect.options].map((option) => Number(option.value)), contentOptionValues: [...contentSelect.options].map((option) => Number(option.value)), noticePosition, noticeCleared };
   })()`);
-  const invalidSample = result.samples.find((sample) => sample.applied !== sample.target || sample.rootWidthCoverage < 0.99 || sample.horizontalOverflow || !sample.mainInsideViewport || !sample.pageInsideViewport);
-  if (invalidSample || result.restored !== result.original || JSON.stringify(result.optionValues) !== JSON.stringify([1, 1.1, 1.2, 1.3]) || result.noticePosition !== 'fixed' || !result.noticeCleared) throw new Error(`字体与瞬时提示验收失败：${JSON.stringify(result)}`);
+  const invalidPageSample = result.pageSamples.find((sample) => sample.applied !== sample.target || sample.contentApplied !== result.originalContent || sample.rootWidthCoverage < 0.99 || sample.horizontalOverflow || !sample.mainInsideViewport || !sample.pageInsideViewport);
+  const invalidContentSample = result.contentSamples.find((sample) => sample.applied !== sample.target || sample.pageApplied !== result.originalPage || sample.promptFontSize === null || sample.horizontalOverflow);
+  const contentFontGrows = result.contentSamples.at(-1)?.promptFontSize > result.contentSamples[0]?.promptFontSize;
+  if (invalidPageSample || invalidContentSample || !contentFontGrows || result.restoredPage !== result.originalPage || result.restoredContent !== result.originalContent || JSON.stringify(result.pageOptionValues) !== JSON.stringify([1, 1.1, 1.2, 1.3]) || JSON.stringify(result.contentOptionValues) !== JSON.stringify([1, 1.2, 1.4, 1.6]) || result.noticePosition !== 'fixed' || !result.noticeCleared) throw new Error(`页面缩放、内容字体与瞬时提示验收失败：${JSON.stringify(result)}`);
   const screenshot = "font-settings.png";
   await writeFile(path.join(targetDirectory, screenshot), Buffer.from(await client.captureScreenshot(), "base64"));
   return { ...result, screenshot };
@@ -127,6 +159,22 @@ async function captureFontSettings(client, directory) {
 async function captureGenerationAndTrainingPages(client, directory) {
   const targetDirectory = path.resolve(directory);
   await mkdir(targetDirectory, { recursive: true });
+  const protectedNavigation = await client.evaluate(String.raw`(() => {
+    const buttons = [...document.querySelectorAll('.desktop-sidebar nav button')];
+    const generation = buttons.find((button) => button.textContent.trim().includes('本地生成'));
+    const training = buttons.find((button) => button.textContent.trim().includes('LoRA 训练'));
+    return {
+      generationLocked: Boolean(generation?.disabled && generation.classList.contains('core-locked') && generation.querySelector('.navigation-lock')),
+      trainingLocked: Boolean(training?.disabled && training.classList.contains('core-locked') && training.querySelector('.navigation-lock')),
+    };
+  })()`);
+  // 未运行核心时以真实锁定入口作为验收结果，不绕过门禁进入生成或训练页面。
+  if (protectedNavigation.generationLocked || protectedNavigation.trainingLocked) {
+    if (!protectedNavigation.generationLocked || !protectedNavigation.trainingLocked) throw new Error(`生成与训练核心门禁不一致：${JSON.stringify(protectedNavigation)}`);
+    const lockedFile = "core-locked-workflows.png";
+    await writeFile(path.join(targetDirectory, lockedFile), Buffer.from(await client.captureScreenshot(), "base64"));
+    return { generation: { coreLocked: true, screenshot: lockedFile }, captioning: null, training: { coreLocked: true, screenshot: lockedFile } };
+  }
   const generation = await client.evaluate(String.raw`(async () => {
     const navigation = [...document.querySelectorAll('.desktop-sidebar nav button')].find((button) => button.textContent.trim() === '本地生成');
     if (!navigation) throw new Error('未找到本地生成导航');
@@ -176,10 +224,35 @@ async function captureGenerationAndTrainingPages(client, directory) {
     if (!navigation) throw new Error('未找到训练集打标导航');
     navigation.click();
     await new Promise((resolve) => setTimeout(resolve, 250));
-    const page = document.querySelector('.captioning-page');
-    return { visible: Boolean(page?.getClientRects().length), datasetLibrary: Boolean(page?.querySelector('.caption-dataset-library')), splitWorkspaceLeaked: Boolean(page?.querySelector('.training-workspace')), trainingParametersLeaked: Boolean(page?.querySelector('.desktop-training-parameters')), horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth };
+    let page = document.querySelector('.captioning-page');
+    const titleInput = page?.querySelector('.training-create input');
+    const createButton = [...(page?.querySelectorAll('.training-create button') || [])].find((button) => button.textContent.includes('创建训练集'));
+    if (titleInput && createButton) {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(titleInput, 'UI 验收临时训练集');
+      titleInput.dispatchEvent(new Event('input', { bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      createButton.click();
+      const deadline = Date.now() + 3_000;
+      while (!document.querySelector('.captioning-detail-page') && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 80));
+      page = document.querySelector('.captioning-page');
+    }
+    const detail = page?.querySelector('.captioning-detail-page') || page;
+    const visibleText = detail?.textContent || '';
+    return {
+      visible: Boolean(page?.getClientRects().length),
+      detailVisible: Boolean(page?.classList.contains('captioning-detail-page')),
+      cleanPresetCount: detail?.querySelectorAll('.ai-clean-preset-picker button').length || 0,
+      cleanPresetLabels: [...(detail?.querySelectorAll('.ai-clean-preset-picker button strong') || [])].map((item) => item.textContent.trim()),
+      directCleanAction: [...(detail?.querySelectorAll('.ai-clean-submit button') || [])].some((button) => button.textContent.includes('清洗')),
+      legacyReviewAbsent: !visibleText.includes('AI 清洗建议') && !visibleText.includes('应用所选建议') && !visibleText.includes('撤销本次清洗'),
+      backgroundRemovalAbsent: !visibleText.includes('抠图') && !visibleText.includes('背景移除') && !visibleText.includes('训练图片版本'),
+      splitWorkspaceLeaked: Boolean(page?.querySelector('.training-workspace')),
+      trainingParametersLeaked: Boolean(page?.querySelector('.desktop-training-parameters')),
+      horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    };
   })()`);
-  if (!captioning.visible || !captioning.datasetLibrary || captioning.splitWorkspaceLeaked || captioning.trainingParametersLeaked || captioning.horizontalOverflow) throw new Error(`训练集列表页面验收失败：${JSON.stringify(captioning)}`);
+  if (!captioning.visible || !captioning.detailVisible || captioning.cleanPresetCount !== 5 || JSON.stringify(captioning.cleanPresetLabels) !== JSON.stringify(['角色身份', '画风', '服装 / 物体', '仅纠错', '自定义']) || !captioning.directCleanAction || !captioning.legacyReviewAbsent || !captioning.backgroundRemovalAbsent || captioning.splitWorkspaceLeaked || captioning.trainingParametersLeaked || captioning.horizontalOverflow) throw new Error(`训练集打标页面验收失败：${JSON.stringify(captioning)}`);
   const captioningFile = "captioning-workspace.png";
   await writeFile(path.join(targetDirectory, captioningFile), Buffer.from(await client.captureScreenshot(), "base64"));
 
@@ -189,9 +262,10 @@ async function captureGenerationAndTrainingPages(client, directory) {
     navigation.click();
     await new Promise((resolve) => setTimeout(resolve, 250));
     const page = document.querySelector('.lora-training-page');
-    return { visible: Boolean(page?.getClientRects().length), steps: page?.querySelectorAll('.training-stepper button').length || 0, captionControlsLeaked: Boolean(page?.querySelector('.caption-control')), horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth };
+    const visibleText = page?.textContent || '';
+    return { visible: Boolean(page?.getClientRects().length), steps: page?.querySelectorAll('.training-stepper button').length || 0, captionControlsLeaked: Boolean(page?.querySelector('.caption-control')), legacySnapshotOptionAbsent: !visibleText.includes('使用 AI 标签处理任务快照') && !visibleText.includes('训练目标'), horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth };
   })()`);
-  if (!training.visible || training.steps !== 3 || training.captionControlsLeaked || training.horizontalOverflow) throw new Error(`LoRA 分步骤训练页面验收失败：${JSON.stringify(training)}`);
+  if (!training.visible || training.steps !== 3 || training.captionControlsLeaked || !training.legacySnapshotOptionAbsent || training.horizontalOverflow) throw new Error(`LoRA 分步骤训练页面验收失败：${JSON.stringify(training)}`);
   const trainingFile = "training-workflow.png";
   await writeFile(path.join(targetDirectory, trainingFile), Buffer.from(await client.captureScreenshot(), "base64"));
   return { generation: { ...generation, screenshot: generationFile }, captioning: { ...captioning, screenshot: captioningFile }, training: { ...training, screenshot: trainingFile } };
@@ -208,53 +282,35 @@ async function waitForNativePreviewState(client, expectedOpen) {
   return false;
 }
 
-/** 验证图库作品子页面和全宽记录列表；存在真实数据时继续验证任务详情弹窗。 */
+/** 验证图库统一任务流；存在真实任务时继续验证完整参数子页面。 */
 async function captureGalleryPage(client, directory) {
   const targetDirectory = path.resolve(directory);
   await mkdir(targetDirectory, { recursive: true });
   const result = await client.evaluate(String.raw`(async () => {
-    const navigation = [...document.querySelectorAll('.desktop-sidebar nav button')].find((button) => button.textContent.trim() === '图库 / 记录');
-    if (!navigation) throw new Error('未找到图库 / 记录导航');
+    const navigation = [...document.querySelectorAll('.desktop-sidebar nav button')].find((button) => button.textContent.trim() === '图库');
+    if (!navigation) throw new Error('未找到图库导航');
     navigation.click();
     await new Promise((resolve) => setTimeout(resolve, 500));
+    let invalidPreviewError = '';
+    let invalidRevealError = '';
+    try { await window.__TAURI_INTERNALS__.invoke('desktop_show_gallery_preview', { id: 'ui-missing-gallery-job' }); } catch (error) { invalidPreviewError = String(error); }
+    try { await window.__TAURI_INTERNALS__.invoke('desktop_reveal_local_job_artifact', { id: 'ui-missing-gallery-job' }); } catch (error) { invalidRevealError = String(error); }
     const tabs = [...document.querySelectorAll('.desktop-main > .workspace-page:not([hidden]) > .workspace-tabs button')];
-    const galleryTab = tabs.find((button) => button.textContent.includes('图库'));
-    const recordTab = tabs.find((button) => button.textContent.includes('记录'));
-    if (!galleryTab || !recordTab) throw new Error('图库二级入口状态不正确');
-    galleryTab.click();
-    await new Promise((resolve) => setTimeout(resolve, 180));
-    if (galleryTab.getAttribute('aria-selected') !== 'true') throw new Error('图库二级入口未切换为选中状态');
-    const selectedStyle = getComputedStyle(galleryTab);
-    const idleStyle = getComputedStyle(recordTab);
-    return { tabCount: tabs.length, selectedBackground: selectedStyle.backgroundColor, idleBackground: idleStyle.backgroundColor, sourceCards: document.querySelectorAll('.gallery-card').length, redundantLocalTags: document.querySelectorAll('.gallery-card .gallery-source, .gallery-detail-tags > b').length, horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth };
+    return { pageVisible: Boolean(document.querySelector('.gallery-page')?.getClientRects().length), tabCount: tabs.length, sourceCards: document.querySelectorAll('.gallery-card').length, redundantLocalTags: document.querySelectorAll('.gallery-card .gallery-source, .gallery-detail-tags > b').length, invalidPreviewBlocked: invalidPreviewError.includes('不存在或已删除'), invalidRevealBlocked: invalidRevealError.includes('不存在或已删除'), horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth };
   })()`);
-  if (result.tabCount !== 2 || result.redundantLocalTags !== 0 || result.horizontalOverflow || result.selectedBackground === result.idleBackground) throw new Error(`图库分页样式验收失败：${JSON.stringify(result)}`);
+  if (!result.pageVisible || result.tabCount !== 0 || result.redundantLocalTags !== 0 || !result.invalidPreviewBlocked || !result.invalidRevealBlocked || result.horizontalOverflow) throw new Error(`图库统一任务流验收失败：${JSON.stringify(result)}`);
   const galleryFile = 'gallery-list.png';
   await writeFile(path.join(targetDirectory, galleryFile), Buffer.from(await client.captureScreenshot(), 'base64'));
   let galleryDetail = null;
   let galleryDetailFile = null;
   if (result.sourceCards > 0) {
-    galleryDetail = await client.evaluate(String.raw`(async () => { document.querySelector('.gallery-card')?.click(); await new Promise((resolve) => setTimeout(resolve, 180)); return { visible: Boolean(document.querySelector('.gallery-detail')), loraSection: Boolean(document.querySelector('.job-lora-gallery, .gallery-detail-section .empty-block')), parameterSection: Boolean(document.querySelector('.job-parameter-panel')) }; })()`);
-    if (!galleryDetail.visible || !galleryDetail.loraSection || !galleryDetail.parameterSection) throw new Error(`图库作品详情验收失败：${JSON.stringify(galleryDetail)}`);
+    galleryDetail = await client.evaluate(String.raw`(async () => { document.querySelector('.gallery-card')?.click(); await new Promise((resolve) => setTimeout(resolve, 180)); const actions = [...document.querySelectorAll('.gallery-detail-actions button')].map((button) => button.textContent.trim()); return { visible: Boolean(document.querySelector('.gallery-detail')), promptSection: Boolean(document.querySelector('.job-prompt-grid')), loraSection: Boolean(document.querySelector('.job-lora-gallery, .gallery-detail-section .empty-block')), parameterSection: Boolean(document.querySelector('.job-parameter-panel')), attempts: Boolean(document.querySelector('.job-attempt-list')), previewAction: actions.some((label) => label.includes('预览图片')), revealAction: actions.some((label) => label.includes('文件位置')), horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth }; })()`);
+    if (!galleryDetail.visible || !galleryDetail.promptSection || !galleryDetail.loraSection || !galleryDetail.parameterSection || !galleryDetail.attempts || !galleryDetail.previewAction || !galleryDetail.revealAction || galleryDetail.horizontalOverflow) throw new Error(`图库任务详情子页面验收失败：${JSON.stringify(galleryDetail)}`);
     galleryDetailFile = 'gallery-detail.png';
     await writeFile(path.join(targetDirectory, galleryDetailFile), Buffer.from(await client.captureScreenshot(), 'base64'));
     await client.evaluate("document.querySelector('.gallery-detail-back')?.click()");
   }
-  await client.evaluate(String.raw`(async () => { const tab = [...document.querySelectorAll('.desktop-main > .workspace-page:not([hidden]) > .workspace-tabs button')].find((button) => button.textContent.includes('记录')); tab?.click(); await new Promise((resolve) => setTimeout(resolve, 180)); })()`);
-  const recordLayout = await client.evaluate(String.raw`(() => { const rows = [...document.querySelectorAll('.local-record-list > article')]; return { rowCount: rows.length, singleColumn: rows.length < 2 || Math.abs(rows[0].getBoundingClientRect().left - rows[1].getBoundingClientRect().left) < 2, horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth }; })()`);
-  if (!recordLayout.singleColumn || recordLayout.horizontalOverflow) throw new Error(`任务记录布局验收失败：${JSON.stringify(recordLayout)}`);
-  const recordsFile = 'gallery-records.png';
-  await writeFile(path.join(targetDirectory, recordsFile), Buffer.from(await client.captureScreenshot(), 'base64'));
-  let recordDialog = null;
-  let recordDialogFile = null;
-  if (recordLayout.rowCount > 0) {
-    recordDialog = await client.evaluate(String.raw`(async () => { document.querySelector('.local-record-list > article')?.click(); await new Promise((resolve) => setTimeout(resolve, 180)); return { visible: Boolean(document.querySelector('.job-detail-dialog')), parameters: Boolean(document.querySelector('.job-parameter-panel')), attempts: Boolean(document.querySelector('.job-attempt-list')) }; })()`);
-    if (!recordDialog.visible || !recordDialog.parameters || !recordDialog.attempts) throw new Error(`任务详情弹窗验收失败：${JSON.stringify(recordDialog)}`);
-    recordDialogFile = 'gallery-record-detail.png';
-    await writeFile(path.join(targetDirectory, recordDialogFile), Buffer.from(await client.captureScreenshot(), 'base64'));
-    await client.evaluate("document.querySelector('.job-detail-dialog > header > button')?.click()");
-  }
-  return { ...result, galleryDetail, recordLayout, recordDialog, screenshots: [galleryFile, galleryDetailFile, recordsFile, recordDialogFile].filter(Boolean) };
+  return { ...result, galleryDetail, screenshots: [galleryFile, galleryDetailFile].filter(Boolean) };
 }
 
 /** 验证概览仅展示必需依赖，并确认左下角按钮可独立打开下载队列弹窗。 */
@@ -483,7 +539,7 @@ function buildProbeExpression() {
       button.click();
       await delay(50);
       const banner = document.querySelector('.environment-banner');
-      navigationPages.push({ label: button.textContent.trim(), bannerVisible: Boolean(banner && banner.getClientRects().length) });
+      navigationPages.push({ label: button.textContent.trim(), bannerVisible: Boolean(banner && banner.getClientRects().length), disabled: button.disabled, coreLocked: button.classList.contains('core-locked'), lockVisible: Boolean(button.querySelector('.navigation-lock')) });
       const visibleMainPanels = Array.from(document.querySelectorAll('.desktop-main > div')).filter((panel) => panel.getClientRects().length && panel.querySelector(':scope > .desktop-page, :scope > .workspace-tabs')).length;
       const activeWorkspace = document.querySelector('.desktop-main > .workspace-page:not([hidden])');
       const secondaryCounts = [];
@@ -494,6 +550,8 @@ function buildProbeExpression() {
       }
       pageIsolation.push({ label: button.textContent.trim(), visibleMainPanels, secondaryCounts, mainWidth: Math.round(document.querySelector('.desktop-main').getBoundingClientRect().width) });
     }
+    const environment = await window.__TAURI_INTERNALS__.invoke('desktop_inspect_environment');
+    const runtime = await window.__TAURI_INTERNALS__.invoke('desktop_runtime_status');
     let coreSubmissionError = '';
     try {
       await window.__TAURI_INTERNALS__.invoke('desktop_create_local_job', { input: {
@@ -512,6 +570,16 @@ function buildProbeExpression() {
       inferenceReady: shell.dataset.inferenceReady === 'true',
       trainingReady: shell.dataset.trainingReady === 'true',
       fontScale: Number(getComputedStyle(document.documentElement).getPropertyValue('--desktop-font-scale')),
+      contentFontScale: Number(getComputedStyle(document.documentElement).getPropertyValue('--desktop-content-font-scale')),
+      osVersion: environment.os.version,
+      osBuild: environment.os.build,
+      osSupported: environment.os.supported,
+      environmentIssueCodes: environment.issues.map((issue) => issue.code),
+      backendId: environment.executionBackend.id,
+      backendDeviceIndex: environment.executionBackend.deviceIndex,
+      runtimeStatus: runtime.status,
+      runtimeBackend: runtime.backend,
+      runtimeDeviceIndex: runtime.deviceIndex,
       bannerText: banner?.textContent?.trim() || '',
       coreStatusText: document.querySelector('.desktop-sidebar .core-status')?.textContent?.trim() || '',
       navigationPages,
@@ -538,12 +606,22 @@ async function evaluateAfterInitialReload(client, expression) {
 
 /** 对无 GPU Runner 执行强门禁；其他硬件仍至少要求导航横幅状态一致。 */
 function validateProbe(result, expectNoGpu) {
-  const expectedNavigation = ["启动 / 账号", "本地生成", "训练集打标", "LoRA 训练", "模型仓库", "LoRA 仓库", "图库 / 记录", "设置"];
+  const expectedNavigation = ["启动 / 账号", "本地生成", "训练集打标", "LoRA 训练", "模型仓库", "LoRA 仓库", "图库", "设置"];
   const actualNavigation = Array.isArray(result?.navigationPages) ? result.navigationPages.map((item) => item.label) : [];
   if (JSON.stringify(actualNavigation) !== JSON.stringify(expectedNavigation)) throw new Error(`桌面导航结构异常：${actualNavigation.join(" / ")}`);
+  const protectedNavigation = result.navigationPages.filter((item) => ["本地生成", "LoRA 训练"].includes(item.label));
+  const coreRunning = result.runtimeStatus === "ready";
+  if (protectedNavigation.length !== 2 || protectedNavigation.some((item) => coreRunning ? item.disabled || item.coreLocked || item.lockVisible : !item.disabled || !item.coreLocked || !item.lockVisible)) throw new Error(`生成与训练导航门禁未随核心状态同步：${JSON.stringify(protectedNavigation)}`);
   if (!Array.isArray(result.pageIsolation) || result.pageIsolation.some((item) => item.visibleMainPanels !== 1 || item.secondaryCounts.some((count) => count !== 1))) throw new Error("桌面主分页或二级分页存在内容堆叠");
   if (new Set(result.pageIsolation.map((item) => item.mainWidth)).size !== 1) throw new Error("桌面分页切换时滚动条导致主布局宽度抖动");
   if (!Number.isFinite(result.fontScale) || result.fontScale < 1 || result.fontScale > 1.3) throw new Error(`桌面字体缩放不正确：${result.fontScale}`);
+  if (!Number.isFinite(result.contentFontScale) || result.contentFontScale < 1 || result.contentFontScale > 1.6) throw new Error(`桌面内容字体缩放不正确：${result.contentFontScale}`);
+  const windowsVersionKnown = String(result.osVersion || '').startsWith('10.') && Number(result.osBuild) > 0;
+  if (windowsVersionKnown && Number(result.osBuild) >= 17763 && (!result.osSupported || result.environmentIssueCodes.includes('windows_version_unsupported'))) throw new Error(`受支持 Windows 被误判：${result.osVersion} / ${result.osBuild}`);
+  if (!windowsVersionKnown && result.environmentIssueCodes.includes('windows_version_unsupported')) throw new Error('Windows 版本未知时错误显示为不支持');
+  if (result.backendId === 'nvidia_cuda' && (!Number.isInteger(result.backendDeviceIndex) || result.backendDeviceIndex < 0)) throw new Error('NVIDIA CUDA 后端缺少稳定设备索引');
+  if (result.backendId !== 'nvidia_cuda' && result.backendDeviceIndex !== null) throw new Error('非 CUDA 后端错误声明 NVIDIA 设备索引');
+  if (result.runtimeStatus === 'ready' && (result.runtimeBackend !== result.backendId || result.runtimeDeviceIndex !== result.backendDeviceIndex)) throw new Error('运行中 Runtime 与当前显卡后端或设备索引不一致');
   // Runtime、自检与必需依赖统一由左下角本地核心承载；其他阻断问题仍使用全局横幅。
   const centralizedCoreIssue = ["本地核心未就绪", "本地核心等待自检", "本地核心不可用", "本地核心错误", "依赖通道未配置", "依赖清单不完整"].some((label) => result.coreStatusText.includes(label));
   if (result.environmentStatus !== "ready" && result.navigationPages.some((item) => !item.bannerVisible) && !centralizedCoreIssue) throw new Error("环境异常既未显示全局横幅，也未集中显示在本地核心");
@@ -552,7 +630,7 @@ function validateProbe(result, expectNoGpu) {
   if (expectNoGpu) {
     if (result.environmentStatus !== "blocked") throw new Error(`无 GPU 环境状态应为 blocked，实际为 ${result.environmentStatus}`);
     if (result.inferenceReady || result.trainingReady) throw new Error("无 GPU 环境错误开放了生成或训练能力");
-    if (!result.bannerText.includes("NVIDIA GPU")) throw new Error("无 GPU 横幅缺少 NVIDIA GPU 原因");
+    if (!result.bannerText.includes("NVIDIA 或 AMD GPU")) throw new Error("无 GPU 横幅缺少受支持 GPU 后端原因");
     if (!isCoreSubmissionBlocked(result.coreSubmissionError)) throw new Error(`核心未拒绝无 GPU 生成提交：${result.coreSubmissionError || "无错误"}`);
   }
 }

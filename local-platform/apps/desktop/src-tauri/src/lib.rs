@@ -2,7 +2,6 @@
 
 mod ai_assist;
 mod ai_cleaner;
-mod background_removal;
 mod auth;
 mod captioner;
 mod environment;
@@ -34,8 +33,7 @@ mod workload;
 use models::{
     DesktopAiAnalyzeInput, DesktopAiAnalyzeView, DesktopAiCleanApplyInput,
     DesktopAiCleanJobCreateInput, DesktopAiCleanJobView, DesktopAiCleanUndoInput,
-    DesktopAiSettings, DesktopAiSettingsUpdate, DesktopBackgroundRemovalJobCreateInput,
-    DesktopBackgroundRemovalJobView, DesktopBootstrapView, DesktopCaptionJobCreateInput,
+    DesktopAiSettings, DesktopAiSettingsUpdate, DesktopBootstrapView, DesktopCaptionJobCreateInput,
     DesktopCaptionJobView, DesktopEnvironmentReport, DesktopLocalJobCreateInput,
     DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView,
     DesktopLocalModelImportInput, DesktopLocalModelView, DesktopManagedFileDeleteInput,
@@ -43,13 +41,11 @@ use models::{
     DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView,
     DesktopSettings, DesktopSoftwareUpdateView, DesktopStorageCleanupInput,
     DesktopStorageCleanupView, DesktopTrainingAssetDeleteInput, DesktopTrainingBatchTagsInput,
-    DesktopTrainingCaptionUpdateInput,
-    DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetIdInput,
-    DesktopTrainingDatasetImportInput, DesktopTrainingDatasetImportPreview,
-    DesktopTrainingDatasetImportPreviewInput, DesktopTrainingDatasetView,
-    DesktopTrainingImagesAddInput, DesktopTrainingJobCreateInput, DesktopTrainingJobView,
-    DesktopTrainingAssetVariantSelectInput, DesktopTrainingManualMaskInput,
-    DesktopTrainingSnapshotCopyInput, DesktopTrainingSnapshotView,
+    DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput,
+    DesktopTrainingDatasetIdInput, DesktopTrainingDatasetImportInput,
+    DesktopTrainingDatasetImportPreview, DesktopTrainingDatasetImportPreviewInput,
+    DesktopTrainingDatasetView, DesktopTrainingImagesAddInput, DesktopTrainingJobCreateInput,
+    DesktopTrainingJobView, DesktopTrainingSnapshotCopyInput, DesktopTrainingSnapshotView,
     DesktopTrainingTagTranslationInput, DesktopTrainingTagTranslationView,
     DesktopTrainingTriggerWordsUpdateInput, DesktopWebsiteLoraView, DesktopWebsiteModelView,
     GalleryPublicationInput, GallerySyncItem,
@@ -57,13 +53,20 @@ use models::{
 use std::{
     env,
     path::PathBuf,
-    sync::atomic::{AtomicBool, Ordering},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Mutex, OnceLock,
+    },
 };
 use storage::DesktopState;
-use tauri::{Manager, PhysicalSize, State, WebviewUrl, WindowEvent};
+use tauri::{Emitter, Manager, PhysicalSize, State, WebviewUrl, WindowEvent};
+use tauri_plugin_opener::OpenerExt;
 
 /** 预览页只有完成 React 根组件挂载后才对主窗口和验收报告为可用。 */
 static GENERATION_PREVIEW_READY: AtomicBool = AtomicBool::new(false);
+/** 图库预览使用独立窗口，并只保存用户当前选中的本地任务 ID。 */
+static GALLERY_PREVIEW_READY: AtomicBool = AtomicBool::new(false);
+static GALLERY_PREVIEW_JOB_ID: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 
 /** 返回不包含会话密钥的桌面账号状态。 */
 #[tauri::command]
@@ -785,13 +788,19 @@ fn desktop_list_caption_jobs(
 
 /** 暂停本地离线打标任务。 */
 #[tauri::command]
-fn desktop_pause_caption_job(state: State<'_, DesktopState>, id: String) -> Result<DesktopCaptionJobView, String> {
+fn desktop_pause_caption_job(
+    state: State<'_, DesktopState>,
+    id: String,
+) -> Result<DesktopCaptionJobView, String> {
     state.pause_caption_job(&id)
 }
 
 /** 恢复本地离线打标任务。 */
 #[tauri::command]
-fn desktop_resume_caption_job(state: State<'_, DesktopState>, id: String) -> Result<DesktopCaptionJobView, String> {
+fn desktop_resume_caption_job(
+    state: State<'_, DesktopState>,
+    id: String,
+) -> Result<DesktopCaptionJobView, String> {
     state.resume_caption_job(&id)
 }
 
@@ -802,59 +811,6 @@ fn desktop_cancel_caption_job(
     id: String,
 ) -> Result<DesktopCaptionJobView, String> {
     state.cancel_caption_job(&id)
-}
-
-/** 创建单图或批量自动抠图任务。 */
-#[tauri::command]
-fn desktop_create_background_removal_job(
-    state: State<'_, DesktopState>,
-    input: DesktopBackgroundRemovalJobCreateInput,
-) -> Result<DesktopBackgroundRemovalJobView, String> {
-    state.create_background_removal_job(input)
-}
-
-/** 返回最近的自动抠图任务。 */
-#[tauri::command]
-fn desktop_list_background_removal_jobs(
-    state: State<'_, DesktopState>,
-) -> Result<Vec<DesktopBackgroundRemovalJobView>, String> {
-    state.list_background_removal_jobs()
-}
-
-/** 暂停自动抠图任务。 */
-#[tauri::command]
-fn desktop_pause_background_removal_job(state: State<'_, DesktopState>, id: String) -> Result<DesktopBackgroundRemovalJobView, String> {
-    state.pause_background_removal_job(&id)
-}
-
-/** 恢复自动抠图任务。 */
-#[tauri::command]
-fn desktop_resume_background_removal_job(state: State<'_, DesktopState>, id: String) -> Result<DesktopBackgroundRemovalJobView, String> {
-    state.resume_background_removal_job(&id)
-}
-
-/** 取消自动抠图任务。 */
-#[tauri::command]
-fn desktop_cancel_background_removal_job(state: State<'_, DesktopState>, id: String) -> Result<DesktopBackgroundRemovalJobView, String> {
-    state.cancel_background_removal_job(&id)
-}
-
-/** 保存手动编辑的 PNG alpha 蒙版并生成透明派生文件。 */
-#[tauri::command]
-fn desktop_save_training_manual_mask(
-    state: State<'_, DesktopState>,
-    input: DesktopTrainingManualMaskInput,
-) -> Result<DesktopTrainingDatasetView, String> {
-    state.save_training_manual_mask(input)
-}
-
-/** 选择后续训练快照使用的原图或派生版本。 */
-#[tauri::command]
-fn desktop_select_training_asset_variant(
-    state: State<'_, DesktopState>,
-    input: DesktopTrainingAssetVariantSelectInput,
-) -> Result<DesktopTrainingDatasetView, String> {
-    state.select_training_asset_variant(input)
 }
 
 /** 创建持久化 AI 标签清洗批次，只生成建议而不直接改写训练集。 */
@@ -876,13 +832,19 @@ fn desktop_list_ai_clean_jobs(
 
 /** 暂停 AI 标签清洗批次。 */
 #[tauri::command]
-fn desktop_pause_ai_clean_job(state: State<'_, DesktopState>, id: String) -> Result<DesktopAiCleanJobView, String> {
+fn desktop_pause_ai_clean_job(
+    state: State<'_, DesktopState>,
+    id: String,
+) -> Result<DesktopAiCleanJobView, String> {
     state.pause_ai_clean_job(&id)
 }
 
 /** 恢复 AI 标签清洗批次。 */
 #[tauri::command]
-fn desktop_resume_ai_clean_job(state: State<'_, DesktopState>, id: String) -> Result<DesktopAiCleanJobView, String> {
+fn desktop_resume_ai_clean_job(
+    state: State<'_, DesktopState>,
+    id: String,
+) -> Result<DesktopAiCleanJobView, String> {
     state.resume_ai_clean_job(&id)
 }
 
@@ -1015,6 +977,82 @@ fn desktop_cancel_local_job(
     state.cancel_local_job(&id)
 }
 
+/** 创建轻量原生预览窗口，并保持内容区与外框初始视觉为正方形。 */
+fn open_preview_window(
+    app: &tauri::AppHandle,
+    label: &'static str,
+    title: &str,
+    data_directory: &str,
+) -> Result<bool, String> {
+    let data_root = installed_data_root().map(Ok).unwrap_or_else(|| {
+        app.path()
+            .app_data_dir()
+            .map_err(|error| format!("读取预览窗口数据目录失败：{error}"))
+    })?;
+    let window = tauri::WebviewWindowBuilder::new(app, label, WebviewUrl::App("index.html".into()))
+        .title(title)
+        // 先沿用原有 720 高度创建隐藏窗口，随后按真实标题栏和边框补足外框宽度。
+        .inner_size(720.0, 720.0)
+        .min_inner_size(320.0, 420.0)
+        .resizable(true)
+        .minimizable(true)
+        .maximizable(true)
+        // 先在隐藏 WebView 中应用主题和任务，避免默认深色闪烁及首帧交互卡顿。
+        .visible(false)
+        .always_on_top(false)
+        // 两类动态 WebView 使用独立环境目录，避免浏览器环境锁互相影响。
+        .data_directory(data_root.join(data_directory))
+        .center()
+        .build()
+        .map_err(|error| format!("创建预览窗口失败：{error}"))?;
+    let inner_size = window
+        .inner_size()
+        .map_err(|error| format!("读取预览窗口内容区尺寸失败：{error}"))?;
+    let outer_size = window
+        .outer_size()
+        .map_err(|error| format!("读取预览窗口外框尺寸失败：{error}"))?;
+    // 原生标题栏会让 1:1 内容区呈现为竖长外框；保持当前外框高度并补宽。
+    let horizontal_frame = outer_size.width.saturating_sub(inner_size.width);
+    let vertical_frame = outer_size.height.saturating_sub(inner_size.height);
+    let target_outer_side = outer_size.height;
+    window
+        .set_size(PhysicalSize::new(
+            target_outer_side.saturating_sub(horizontal_frame),
+            target_outer_side.saturating_sub(vertical_frame),
+        ))
+        .map_err(|error| format!("设置预览窗口初始尺寸失败：{error}"))?;
+    window
+        .center()
+        .map_err(|error| format!("居中预览窗口失败：{error}"))?;
+    window.on_window_event(move |event| {
+        if matches!(event, WindowEvent::Destroyed) {
+            if label == "generation-preview" {
+                GENERATION_PREVIEW_READY.store(false, Ordering::Release);
+            } else {
+                GALLERY_PREVIEW_READY.store(false, Ordering::Release);
+                if let Ok(mut selected) = gallery_preview_job_id().lock() {
+                    *selected = None;
+                }
+            }
+        }
+    });
+    Ok(true)
+}
+
+/** 图库预览选择只保存在进程内，应用重启后不会残留无效任务。 */
+fn gallery_preview_job_id() -> &'static Mutex<Option<String>> {
+    GALLERY_PREVIEW_JOB_ID.get_or_init(|| Mutex::new(None))
+}
+
+/** 按任务 ID 从 SQLite 读取真实记录，图库和文件定位不会接受网页传入的文件路径。 */
+fn local_job_by_id(state: &DesktopState, id: &str) -> Result<DesktopLocalJobView, String> {
+    state
+        .list_local_jobs()?
+        .into_iter()
+        .find(|job| job.id == id)
+        .ok_or_else(|| "本地任务不存在或已删除".to_string())
+}
+
 /** 按实际原生窗口状态创建或关闭生成预览，主页面不维护可能失真的窗口副本状态。 */
 #[tauri::command]
 async fn desktop_toggle_generation_preview(app: tauri::AppHandle) -> Result<bool, String> {
@@ -1028,52 +1066,92 @@ async fn desktop_toggle_generation_preview(app: tauri::AppHandle) -> Result<bool
         return Ok(false);
     }
     GENERATION_PREVIEW_READY.store(false, Ordering::Release);
-    let data_root = installed_data_root().map(Ok).unwrap_or_else(|| {
-        app.path()
-            .app_data_dir()
-            .map_err(|error| format!("读取预览窗口数据目录失败：{error}"))
-    })?;
-    let window =
-        tauri::WebviewWindowBuilder::new(&app, LABEL, WebviewUrl::App("index.html".into()))
-            .title("DrawHime 生成预览")
-            // 先沿用原有 720 高度创建隐藏窗口，随后按真实标题栏和边框补足外框宽度。
-            .inner_size(720.0, 720.0)
-            .min_inner_size(320.0, 420.0)
-            .resizable(true)
-            .minimizable(true)
-            .maximizable(true)
-            // 先在隐藏 WebView 中应用主题和最新任务，避免默认深色闪烁及首帧交互卡顿。
-            .visible(false)
-            .always_on_top(false)
-            // 动态 WebView 使用独立环境目录，避免与主窗口环境选项冲突后永久停留在 about:blank。
-            .data_directory(data_root.join("webview-preview"))
-            .center()
-            .build()
-            .map_err(|error| format!("创建生成预览窗口失败：{error}"))?;
-    let inner_size = window
-        .inner_size()
-        .map_err(|error| format!("读取生成预览内容区尺寸失败：{error}"))?;
-    let outer_size = window
-        .outer_size()
-        .map_err(|error| format!("读取生成预览外框尺寸失败：{error}"))?;
-    // 原生标题栏会让 1:1 内容区呈现为竖长外框；保持当前外框高度并补宽，确保用户看到的初始窗口严格为正方形。
-    let horizontal_frame = outer_size.width.saturating_sub(inner_size.width);
-    let vertical_frame = outer_size.height.saturating_sub(inner_size.height);
-    let target_outer_side = outer_size.height;
+    open_preview_window(&app, LABEL, "DrawHime 生成预览", "webview-preview")
+}
+
+/** 打开或复用图库预览窗口，切换作品时通过事件更新同一个轻量 WebView。 */
+#[tauri::command]
+async fn desktop_show_gallery_preview(
+    app: tauri::AppHandle,
+    state: State<'_, DesktopState>,
+    id: String,
+) -> Result<bool, String> {
+    let job = local_job_by_id(state.inner(), &id)?;
+    let artifact = job
+        .artifact
+        .ok_or_else(|| "该任务尚无可预览图片".to_string())?;
+    if !PathBuf::from(&artifact.path).is_file() {
+        return Err("图片文件不存在或已被移动".to_string());
+    }
+    *gallery_preview_job_id()
+        .lock()
+        .map_err(|_| "图库预览状态当前不可用".to_string())? = Some(id.clone());
+    if let Some(window) = app.get_webview_window("gallery-preview") {
+        window
+            .emit("desktop-gallery-preview-selected", id)
+            .map_err(|error| format!("更新图库预览图片失败：{error}"))?;
+        window
+            .show()
+            .map_err(|error| format!("显示图库预览窗口失败：{error}"))?;
+        window
+            .set_focus()
+            .map_err(|error| format!("聚焦图库预览窗口失败：{error}"))?;
+        return Ok(true);
+    }
+    GALLERY_PREVIEW_READY.store(false, Ordering::Release);
+    open_preview_window(
+        &app,
+        "gallery-preview",
+        "DrawHime 图片预览",
+        "webview-gallery-preview",
+    )
+}
+
+/** 图库预览窗口只读取当前选择的一条持久任务。 */
+#[tauri::command]
+fn desktop_gallery_preview_job(
+    state: State<'_, DesktopState>,
+) -> Result<Option<DesktopLocalJobView>, String> {
+    let id = gallery_preview_job_id()
+        .lock()
+        .map_err(|_| "图库预览状态当前不可用".to_string())?
+        .clone();
+    id.map(|value| local_job_by_id(state.inner(), &value))
+        .transpose()
+}
+
+/** 仅允许两个预览窗口关闭自身，避免网页命令关闭主工作区。 */
+#[tauri::command]
+fn desktop_close_preview_window(window: tauri::WebviewWindow) -> Result<bool, String> {
+    match window.label() {
+        "generation-preview" => GENERATION_PREVIEW_READY.store(false, Ordering::Release),
+        "gallery-preview" => GALLERY_PREVIEW_READY.store(false, Ordering::Release),
+        _ => return Err("只有图片预览窗口可以调用关闭命令".to_string()),
+    }
     window
-        .set_size(PhysicalSize::new(
-            target_outer_side.saturating_sub(horizontal_frame),
-            target_outer_side.saturating_sub(vertical_frame),
-        ))
-        .map_err(|error| format!("设置生成预览初始尺寸失败：{error}"))?;
-    window
-        .center()
-        .map_err(|error| format!("居中生成预览窗口失败：{error}"))?;
-    window.on_window_event(|event| {
-        if matches!(event, WindowEvent::Destroyed) {
-            GENERATION_PREVIEW_READY.store(false, Ordering::Release);
-        }
-    });
+        .close()
+        .map_err(|error| format!("关闭图片预览窗口失败：{error}"))?;
+    Ok(false)
+}
+
+/** 文件管理器定位只接受任务 ID，文件路径始终来自 SQLite 产物记录。 */
+#[tauri::command]
+fn desktop_reveal_local_job_artifact(
+    app: tauri::AppHandle,
+    state: State<'_, DesktopState>,
+    id: String,
+) -> Result<bool, String> {
+    let job = local_job_by_id(state.inner(), &id)?;
+    let artifact = job
+        .artifact
+        .ok_or_else(|| "该任务尚无可定位图片".to_string())?;
+    let path = PathBuf::from(artifact.path);
+    if !path.is_file() {
+        return Err("图片文件不存在或已被移动".to_string());
+    }
+    app.opener()
+        .reveal_item_in_dir(path)
+        .map_err(|error| format!("在文件夹中显示图片失败：{error}"))?;
     Ok(true)
 }
 
@@ -1082,16 +1160,18 @@ async fn desktop_toggle_generation_preview(app: tauri::AppHandle) -> Result<bool
 async fn desktop_mark_generation_preview_ready(
     window: tauri::WebviewWindow,
 ) -> Result<bool, String> {
-    if window.label() != "generation-preview" {
-        return Err("只有生成预览窗口可以登记就绪状态".to_string());
-    }
+    let ready = match window.label() {
+        "generation-preview" => &GENERATION_PREVIEW_READY,
+        "gallery-preview" => &GALLERY_PREVIEW_READY,
+        _ => return Err("只有图片预览窗口可以登记就绪状态".to_string()),
+    };
     window
         .show()
         .map_err(|error| format!("显示生成预览窗口失败：{error}"))?;
     window
         .set_focus()
         .map_err(|error| format!("聚焦生成预览窗口失败：{error}"))?;
-    GENERATION_PREVIEW_READY.store(true, Ordering::Release);
+    ready.store(true, Ordering::Release);
     Ok(true)
 }
 
@@ -1105,12 +1185,12 @@ fn desktop_generation_preview_open(app: tauri::AppHandle) -> bool {
 /** 预览窗口可在普通 Windows 层级与置顶层级间切换，不强制遮挡主窗口。 */
 #[tauri::command]
 async fn desktop_set_generation_preview_always_on_top(
-    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
     always_on_top: bool,
 ) -> Result<bool, String> {
-    let window = app
-        .get_webview_window("generation-preview")
-        .ok_or_else(|| "生成预览窗口尚未打开".to_string())?;
+    if !["generation-preview", "gallery-preview"].contains(&window.label()) {
+        return Err("只有图片预览窗口可以切换置顶状态".to_string());
+    }
     window
         .set_always_on_top(always_on_top)
         .map_err(|error| format!("切换预览窗口层级失败：{error}"))?;
@@ -1243,13 +1323,6 @@ pub fn run() {
             desktop_pause_caption_job,
             desktop_resume_caption_job,
             desktop_cancel_caption_job,
-            desktop_create_background_removal_job,
-            desktop_list_background_removal_jobs,
-            desktop_pause_background_removal_job,
-            desktop_resume_background_removal_job,
-            desktop_cancel_background_removal_job,
-            desktop_save_training_manual_mask,
-            desktop_select_training_asset_variant,
             desktop_create_ai_clean_job,
             desktop_list_ai_clean_jobs,
             desktop_pause_ai_clean_job,
@@ -1269,6 +1342,10 @@ pub fn run() {
             desktop_load_preview_settings,
             desktop_cancel_local_job,
             desktop_toggle_generation_preview,
+            desktop_show_gallery_preview,
+            desktop_gallery_preview_job,
+            desktop_close_preview_window,
+            desktop_reveal_local_job_artifact,
             desktop_mark_generation_preview_ready,
             desktop_generation_preview_open,
             desktop_set_generation_preview_always_on_top

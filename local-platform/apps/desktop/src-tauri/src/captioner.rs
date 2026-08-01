@@ -227,8 +227,16 @@ fn update_control(
 ) -> Result<DesktopCaptionJobView, String> {
     validate_uuid(id, "打标任务 ID")?;
     let now = Utc::now().to_rfc3339();
-    let transaction = database.unchecked_transaction().map_err(|error| format!("开启打标任务控制事务失败：{error}"))?;
-    let exists: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM local_caption_jobs WHERE id=?1)", [id], |row| row.get(0)).map_err(|error| format!("读取打标任务失败：{error}"))?;
+    let transaction = database
+        .unchecked_transaction()
+        .map_err(|error| format!("开启打标任务控制事务失败：{error}"))?;
+    let exists: bool = transaction
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM local_caption_jobs WHERE id=?1)",
+            [id],
+            |row| row.get(0),
+        )
+        .map_err(|error| format!("读取打标任务失败：{error}"))?;
     if !exists {
         return Err("打标任务不存在".into());
     }
@@ -243,7 +251,9 @@ fn update_control(
         }
         _ => return Err("未知打标任务控制操作".into()),
     }
-    transaction.commit().map_err(|error| format!("提交打标任务控制失败：{error}"))?;
+    transaction
+        .commit()
+        .map_err(|error| format!("提交打标任务控制失败：{error}"))?;
     read_job(database, id)?.ok_or_else(|| "打标任务不存在".into())
 }
 
@@ -1209,18 +1219,53 @@ mod tests {
     fn queued_caption_job_supports_pause_resume_and_cancel() {
         let temporary = tempfile::tempdir().expect("创建打标控制测试目录");
         let state = DesktopState::initialize(temporary.path()).expect("初始化桌面状态");
-        let dataset = state.create_training_dataset(DesktopTrainingDatasetCreateInput { title: "打标控制".into(), r#type: "character".into(), trigger_words: vec![] }).expect("创建训练集");
+        let dataset = state
+            .create_training_dataset(DesktopTrainingDatasetCreateInput {
+                title: "打标控制".into(),
+                r#type: "character".into(),
+                trigger_words: vec![],
+            })
+            .expect("创建训练集");
         let source = temporary.path().join("caption-control.png");
-        RgbImage::from_pixel(32, 32, Rgb([24, 48, 72])).save(&source).expect("写入打标控制图片");
+        RgbImage::from_pixel(32, 32, Rgb([24, 48, 72]))
+            .save(&source)
+            .expect("写入打标控制图片");
         let imported = {
             let mut database = state.database.lock().expect("锁定打标控制数据库");
-            training_dataset::add_images(&mut database, &state.app_data_dir, DesktopTrainingImagesAddInput { dataset_id: dataset.id.clone(), source_paths: vec![source.to_string_lossy().into_owned()] }).expect("导入打标控制图片")
+            training_dataset::add_images(
+                &mut database,
+                &state.app_data_dir,
+                DesktopTrainingImagesAddInput {
+                    dataset_id: dataset.id.clone(),
+                    source_paths: vec![source.to_string_lossy().into_owned()],
+                },
+            )
+            .expect("导入打标控制图片")
         };
         let mut database = state.database.lock().expect("锁定打标任务数据库");
-        let job = create_job(&mut database, DesktopCaptionJobCreateInput { dataset_id: dataset.id, asset_id: Some(imported.assets[0].id.clone()), asset_ids: None, general_threshold: 0.35, character_threshold: 0.85, include_character_tags: false }).expect("创建打标控制任务");
-        assert_eq!(pause_job(&database, &job.id).expect("暂停打标任务").status, "paused");
-        assert!(claim_next_job(&mut database, &state.app_data_dir).expect("检查暂停队列").is_none());
-        assert_eq!(resume_job(&database, &job.id).expect("恢复打标任务").status, "queued");
+        let job = create_job(
+            &mut database,
+            DesktopCaptionJobCreateInput {
+                dataset_id: dataset.id,
+                asset_id: Some(imported.assets[0].id.clone()),
+                asset_ids: None,
+                general_threshold: 0.35,
+                character_threshold: 0.85,
+                include_character_tags: false,
+            },
+        )
+        .expect("创建打标控制任务");
+        assert_eq!(
+            pause_job(&database, &job.id).expect("暂停打标任务").status,
+            "paused"
+        );
+        assert!(claim_next_job(&mut database, &state.app_data_dir)
+            .expect("检查暂停队列")
+            .is_none());
+        assert_eq!(
+            resume_job(&database, &job.id).expect("恢复打标任务").status,
+            "queued"
+        );
         let cancelled = cancel_job(&database, &job.id).expect("取消打标任务");
         assert_eq!(cancelled.status, "cancelled");
         assert_eq!(cancelled.items[0].status, "cancelled");

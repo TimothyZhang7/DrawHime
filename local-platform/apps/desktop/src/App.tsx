@@ -1,27 +1,26 @@
 /**
  * 本文件实现桌面生成、任务、模型、Runtime、资源、环境、图库同步和本地设置的响应式工作区。
  */
-import type { DesktopAccountView, DesktopAiCleanJobView, DesktopBackgroundRemovalJobView, DesktopBootstrapView, DesktopCaptionJobView, DesktopLocalJobView, DesktopLocalLoraView, DesktopLocalModelView, DesktopManagedFileRemovalView, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopSettings, DesktopSoftwareUpdateView, DesktopStorageCleanupView, DesktopTrainingDatasetView, DesktopTrainingJobView, DesktopWebsiteLoraInstallProgress, DesktopWebsiteLoraView, DesktopWebsiteModelInstallProgress, DesktopWebsiteModelView } from "@drawhime/contracts";
+import type { DesktopAccountView, DesktopAiCleanJobView, DesktopBootstrapView, DesktopCaptionJobView, DesktopLocalJobView, DesktopLocalLoraView, DesktopLocalModelView, DesktopManagedFileRemovalView, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopSettings, DesktopSoftwareUpdateView, DesktopStorageCleanupView, DesktopTrainingDatasetView, DesktopTrainingJobView, DesktopWebsiteLoraInstallProgress, DesktopWebsiteLoraView, DesktopWebsiteModelInstallProgress, DesktopWebsiteModelView } from "@drawhime/contracts";
 import type { DesktopAiSettings, DesktopAiSettingsUpdate } from "@drawhime/contracts";
-import { AlertTriangle, BookOpenCheck, CheckCircle2, Database, Download, Eraser, FlaskConical, FolderCog, Gauge, HardDrive, Image, Images, KeyRound, Layers3, LoaderCircle, Monitor, Moon, PackageCheck, RefreshCw, Save, ScanSearch, Settings2, ShieldCheck, Sparkles, Sun, Tags, Trash2, Upload } from "lucide-react";
+import { AlertTriangle, BookOpenCheck, CheckCircle2, Database, Download, Eraser, FlaskConical, FolderCog, Gauge, HardDrive, Image, Images, KeyRound, Layers3, LoaderCircle, LockKeyhole, Monitor, Moon, PackageCheck, RefreshCw, Save, ScanSearch, Settings2, ShieldCheck, Sparkles, Sun, Tags, Trash2, Upload } from "lucide-react";
 import { Copy } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from "react";
-import { applyDesktopSoftwareUpdate, cancelDesktopLocalJob, cleanupDesktopStorage, downloadDesktopResource, downloadDesktopSoftwareUpdate, importDesktopOfflineUpdate, inspectDesktopEnvironment, installDesktopResource, installDesktopWebsiteLora, installDesktopWebsiteModel, listDesktopAiCleanJobs, listDesktopBackgroundRemovalJobs, listDesktopCaptionJobs, listDesktopLocalJobs, listDesktopLocalLoras, listDesktopLocalModels, listDesktopTrainingDatasets, listDesktopTrainingJobs, listenDesktopAiCleanJobUpdates, listenDesktopBackgroundRemovalJobUpdates, listenDesktopCaptionJobUpdates, listenDesktopLocalJobUpdates, listenDesktopResourceInstallProgress, listenDesktopResourceProgress, listenDesktopTrainingJobUpdates, listenDesktopWebsiteLoraProgress, listenDesktopWebsiteModelProgress, loadDesktopAccountStatus, loadDesktopBootstrap, loadDesktopResourceCatalog, loadDesktopRuntimeStatus, loadDesktopSoftwareUpdateStatus, loadDesktopWebsiteLoras, loadDesktopWebsiteModels, pauseDesktopResourceDownload, rollbackDesktopSoftwareUpdate, saveDesktopSettings, selfTestDesktopRuntime, startDesktopRuntime, toggleDesktopGenerationPreview } from "./desktop-api";
+import { applyDesktopSoftwareUpdate, cancelDesktopLocalJob, cleanupDesktopStorage, downloadDesktopResource, downloadDesktopSoftwareUpdate, importDesktopOfflineUpdate, inspectDesktopEnvironment, installDesktopResource, installDesktopWebsiteLora, installDesktopWebsiteModel, listDesktopAiCleanJobs, listDesktopCaptionJobs, listDesktopLocalJobs, listDesktopLocalLoras, listDesktopLocalModels, listDesktopTrainingDatasets, listDesktopTrainingJobs, listenDesktopAiCleanJobUpdates, listenDesktopCaptionJobUpdates, listenDesktopLocalJobUpdates, listenDesktopResourceInstallProgress, listenDesktopResourceProgress, listenDesktopTrainingJobUpdates, listenDesktopWebsiteLoraProgress, listenDesktopWebsiteModelProgress, loadDesktopAccountStatus, loadDesktopBootstrap, loadDesktopResourceCatalog, loadDesktopRuntimeStatus, loadDesktopSoftwareUpdateStatus, loadDesktopWebsiteLoras, loadDesktopWebsiteModels, pauseDesktopResourceDownload, revealDesktopLocalJobArtifact, rollbackDesktopSoftwareUpdate, saveDesktopSettings, selfTestDesktopRuntime, showDesktopGalleryPreview, startDesktopRuntime, toggleDesktopGenerationPreview } from "./desktop-api";
 import { analyzeDesktopImage, loadDesktopAiSettings, saveDesktopAiSettings, testDesktopAiSettings } from "./desktop-api";
 import { AccountPage } from "./AccountPage";
 import { LoraRepositoryPage, ModelRepositoryPage } from "./RepositoryPages";
-import { coreResources, desktopCoreState, DownloadQueueDialog, visibleEnvironmentIssues } from "./ResourceCenter";
+import { coreDependencyProblem, coreResources, desktopCoreState, DownloadQueueDialog, visibleEnvironmentIssues } from "./ResourceCenter";
 import { StartupPage, type StartupPhase } from "./StartupPage";
-import { LocalGalleryPage, LocalJobsPage } from "./LocalGalleryPages";
+import { LocalGalleryPage } from "./LocalGalleryPages";
 import { GenerationPage } from "./GenerationPage";
 import { CaptioningPage, LoraTrainingPage } from "./TrainingPages";
 
 type DesktopPage = "overview" | "generate" | "captioning" | "training" | "models" | "loras" | "gallery" | "settings";
 type OverviewSection = "start" | "account";
-type GallerySection = "gallery" | "jobs";
 type SettingsSection = "general" | "ai" | "updates";
 
 const navigation = [
@@ -31,7 +30,7 @@ const navigation = [
   { id: "training" as const, label: "LoRA 训练", Icon: BookOpenCheck },
   { id: "models" as const, label: "模型仓库", Icon: Database },
   { id: "loras" as const, label: "LoRA 仓库", Icon: Layers3 },
-  { id: "gallery" as const, label: "图库 / 记录", Icon: Image },
+  { id: "gallery" as const, label: "图库", Icon: Image },
   { id: "settings" as const, label: "设置", Icon: Settings2 },
 ];
 
@@ -48,13 +47,20 @@ function cacheWhileHidden<Props extends object>(Component: ComponentType<Props>)
   return memo(CachedPage, (previous, next) => !next.active || samePageDataProps(previous, next));
 }
 
+/** 实时事件按 ID 合并到现有列表，单帧内只保留每个任务的最新状态。 */
+function mergeRealtimeItems<Item extends { id: string; createdAt: string }>(current: Item[], pending: Record<string, Item>): Item[] {
+  const pendingItems = Object.values(pending);
+  if (!pendingItems.length) return current;
+  const pendingIds = new Set(pendingItems.map((item) => item.id));
+  return [...pendingItems, ...current.filter((item) => !pendingIds.has(item.id))].sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+}
+
 const StableGenerationPage = cacheWhileHidden(GenerationPage);
 const StableModelRepositoryPage = cacheWhileHidden(ModelRepositoryPage);
 const StableLoraRepositoryPage = cacheWhileHidden(LoraRepositoryPage);
 const StableCaptioningPage = cacheWhileHidden(CaptioningPage);
 const StableLoraTrainingPage = cacheWhileHidden(LoraTrainingPage);
 const StableLocalGalleryPage = cacheWhileHidden(LocalGalleryPage);
-const StableLocalJobsPage = cacheWhileHidden(LocalJobsPage);
 const StableStartupPage = cacheWhileHidden(StartupPage);
 const StableAccountPage = cacheWhileHidden(AccountPage);
 const StableSettingsPage = cacheWhileHidden(SettingsPage);
@@ -65,7 +71,6 @@ const StableUpdatesPage = cacheWhileHidden(UpdatesPage);
 export function App() {
   const [page, setPage] = useState<DesktopPage>("overview");
   const [overviewSection, setOverviewSection] = useState<OverviewSection>("start");
-  const [gallerySection, setGallerySection] = useState<GallerySection>("gallery");
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("general");
   const [bootstrap, setBootstrap] = useState<DesktopBootstrapView | null>(null);
   const [resourceCatalog, setResourceCatalog] = useState<DesktopResourceCatalogView | null>(null);
@@ -80,7 +85,6 @@ export function App() {
   const [softwareUpdate, setSoftwareUpdate] = useState<DesktopSoftwareUpdateView | null>(null);
   const [trainingDatasets, setTrainingDatasets] = useState<DesktopTrainingDatasetView[]>([]);
   const [captionJobs, setCaptionJobs] = useState<DesktopCaptionJobView[]>([]);
-  const [backgroundRemovalJobs, setBackgroundRemovalJobs] = useState<DesktopBackgroundRemovalJobView[]>([]);
   const [aiCleanJobs, setAiCleanJobs] = useState<DesktopAiCleanJobView[]>([]);
   const [trainingJobs, setTrainingJobs] = useState<DesktopTrainingJobView[]>([]);
   const [jobs, setJobs] = useState<DesktopLocalJobView[]>([]);
@@ -92,9 +96,28 @@ export function App() {
   const [startupPhase, setStartupPhase] = useState<StartupPhase>(null);
   const [resourceBulkBusy, setResourceBulkBusy] = useState(false);
   const [downloadQueueOpen, setDownloadQueueOpen] = useState(false);
+  const [cancellingJobIds, setCancellingJobIds] = useState<Set<string>>(() => new Set());
   const [message, setMessage] = useState("");
   const environmentCheckRunning = useRef(false);
+  const runtimeCheckRunning = useRef(false);
+  const installedResourceRefresh = useRef<Promise<void> | null>(null);
+  const pendingResourceProgress = useRef<Record<string, DesktopResourceDownloadView>>({});
+  const resourceProgressFrame = useRef<number | null>(null);
+  const pendingInstallProgress = useRef<Record<string, DesktopResourceInstallView>>({});
+  const installProgressFrame = useRef<number | null>(null);
+  const pendingWebsiteModelProgress = useRef<Record<string, DesktopWebsiteModelInstallProgress>>({});
+  const pendingWebsiteLoraProgress = useRef<Record<string, DesktopWebsiteLoraInstallProgress>>({});
+  const websiteProgressFrame = useRef<number | null>(null);
+  const websiteModelInstalls = useRef<Set<string>>(new Set());
+  const websiteLoraInstalls = useRef<Set<string>>(new Set());
+  const cancellingJobs = useRef<Set<string>>(new Set());
+  const pendingCaptionJobs = useRef<Record<string, DesktopCaptionJobView>>({});
+  const pendingAiCleanJobs = useRef<Record<string, DesktopAiCleanJobView>>({});
+  const pendingTrainingJobs = useRef<Record<string, DesktopTrainingJobView>>({});
+  const pendingLocalJobs = useRef<Record<string, DesktopLocalJobView>>({});
+  const realtimeJobFrame = useRef<number | null>(null);
   const lastEnvironmentCheckAt = useRef(0);
+  const windowsVersionRetryCount = useRef(0);
   const captionDatasetRefresh = useRef<number | null>(null);
   const websiteModelsLoaded = useRef(false);
   const websiteLorasLoaded = useRef(false);
@@ -104,7 +127,63 @@ export function App() {
   const accountStatus = useRef<DesktopAccountView["status"]>("signed_out");
   const bootstrapReady = bootstrap !== null;
 
-  useEffect(() => { void loadDesktopBootstrap().then(async (state) => { lastEnvironmentCheckAt.current = Date.now(); setBootstrap(state); const accountRequest = loadDesktopAccountStatus().catch((): DesktopAccountView => ({ status: "offline", identity: null, expiresAt: null, message: "账号服务当前未连接；全部本地功能继续可用" })); const [catalog, nextModels, nextJobs, nextLoras, nextTrainingDatasets, nextCaptionJobs, nextBackgroundRemovalJobs, nextAiCleanJobs, nextTrainingJobs, nextAccount] = await Promise.all([loadDesktopResourceCatalog(), listDesktopLocalModels(), listDesktopLocalJobs(), listDesktopLocalLoras(), listDesktopTrainingDatasets(), listDesktopCaptionJobs(), listDesktopBackgroundRemovalJobs(), listDesktopAiCleanJobs(), listDesktopTrainingJobs(), accountRequest]); setResourceCatalog(catalog); setModels(nextModels); setJobs(nextJobs); setLoras(nextLoras); setTrainingDatasets(nextTrainingDatasets); setCaptionJobs(nextCaptionJobs); setBackgroundRemovalJobs(nextBackgroundRemovalJobs); setAiCleanJobs(nextAiCleanJobs); setTrainingJobs(nextTrainingJobs); setAccount(nextAccount); }).catch((error) => setMessage(errorMessage(error))).finally(() => setLoading(false)); }, []);
+  /** 打标、清洗、训练和生成进度共用一帧刷新，GPU 高频上报时主界面仍保持响应。 */
+  const scheduleRealtimeJobFlush = useCallback(() => {
+    if (realtimeJobFrame.current !== null) return;
+    realtimeJobFrame.current = window.requestAnimationFrame(() => {
+      const captions = pendingCaptionJobs.current;
+      const cleanJobs = pendingAiCleanJobs.current;
+      const trainings = pendingTrainingJobs.current;
+      const localJobs = pendingLocalJobs.current;
+      pendingCaptionJobs.current = {};
+      pendingAiCleanJobs.current = {};
+      pendingTrainingJobs.current = {};
+      pendingLocalJobs.current = {};
+      realtimeJobFrame.current = null;
+      if (Object.keys(captions).length) setCaptionJobs((current) => mergeRealtimeItems(current, captions));
+      if (Object.keys(cleanJobs).length) setAiCleanJobs((current) => mergeRealtimeItems(current, cleanJobs));
+      if (Object.keys(trainings).length) setTrainingJobs((current) => mergeRealtimeItems(current, trainings));
+      if (Object.keys(localJobs).length) setJobs((current) => mergeRealtimeItems(current, localJobs));
+    });
+  }, []);
+
+  useEffect(() => () => {
+    if (realtimeJobFrame.current !== null) window.cancelAnimationFrame(realtimeJobFrame.current);
+    realtimeJobFrame.current = null;
+    pendingCaptionJobs.current = {};
+    pendingAiCleanJobs.current = {};
+    pendingTrainingJobs.current = {};
+    pendingLocalJobs.current = {};
+  }, []);
+
+  /** 安装事件与命令返回共用一次状态收敛，避免重复扫描磁盘或被环境复检门禁跳过。 */
+  const refreshInstalledResourceState = useCallback((): Promise<void> => {
+    if (installedResourceRefresh.current) return installedResourceRefresh.current;
+    const request = Promise.all([
+      loadDesktopResourceCatalog(),
+      inspectDesktopEnvironment(),
+      loadDesktopRuntimeStatus(),
+      listDesktopLocalModels(),
+      listDesktopLocalLoras(),
+    ]).then(([catalog, environment, runtime, nextModels, nextLoras]) => {
+      const installedIds = new Set(catalog.resources.filter((resource) => resource.installed).map((resource) => resource.id));
+      setResourceCatalog(catalog);
+      setBootstrap((current) => current ? { ...current, environment, runtime } : current);
+      setModels(nextModels);
+      setLoras(nextLoras);
+      setResourceProgress((current) => Object.fromEntries(Object.entries(current).filter(([resourceId]) => !installedIds.has(resourceId))));
+      setInstallProgress((current) => Object.fromEntries(Object.entries(current).map(([resourceId, progress]) => installedIds.has(resourceId) ? [resourceId, { ...progress, status: "installed", progress: 100, error: null }] : [resourceId, progress])));
+      lastEnvironmentCheckAt.current = Date.now();
+    });
+    installedResourceRefresh.current = request;
+    // 先吞掉清理链自身的拒绝，原始请求仍向调用方保留真实错误。
+    void request.then(() => undefined, () => undefined).finally(() => {
+      if (installedResourceRefresh.current === request) installedResourceRefresh.current = null;
+    });
+    return request;
+  }, []);
+
+  useEffect(() => { void loadDesktopBootstrap().then(async (state) => { lastEnvironmentCheckAt.current = Date.now(); setBootstrap(state); const accountRequest = loadDesktopAccountStatus().catch((): DesktopAccountView => ({ status: "offline", identity: null, expiresAt: null, message: "账号服务当前未连接；全部本地功能继续可用" })); const [catalog, nextModels, nextJobs, nextLoras, nextTrainingDatasets, nextCaptionJobs, nextAiCleanJobs, nextTrainingJobs, nextAccount] = await Promise.all([loadDesktopResourceCatalog(), listDesktopLocalModels(), listDesktopLocalJobs(), listDesktopLocalLoras(), listDesktopTrainingDatasets(), listDesktopCaptionJobs(), listDesktopAiCleanJobs(), listDesktopTrainingJobs(), accountRequest]); setResourceCatalog(catalog); setModels(nextModels); setJobs(nextJobs); setLoras(nextLoras); setTrainingDatasets(nextTrainingDatasets); setCaptionJobs(nextCaptionJobs); setAiCleanJobs(nextAiCleanJobs); setTrainingJobs(nextTrainingJobs); setAccount(nextAccount); }).catch((error) => setMessage(errorMessage(error))).finally(() => setLoading(false)); }, []);
   useEffect(() => { void loadDesktopSoftwareUpdateStatus().then(setSoftwareUpdate).catch((error) => setMessage(errorMessage(error))); }, []);
   /** 主站仓库按需读取并合并同一时刻的并发请求，避免启动阶段缓存全部示例图。 */
   const ensureWebsiteModels = useCallback((forceRefresh = false): Promise<void> => {
@@ -150,67 +229,119 @@ export function App() {
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     void listenDesktopResourceProgress((progress) => {
-      setResourceProgress((current) => ({ ...current, [progress.resourceId]: progress }));
+      // 下载事件可能每秒触发数十次，按动画帧合并后再提交 React 状态，避免拖慢主界面。
+      pendingResourceProgress.current[progress.resourceId] = progress;
+      if (resourceProgressFrame.current === null) {
+        resourceProgressFrame.current = window.requestAnimationFrame(() => {
+          const pending = pendingResourceProgress.current;
+          pendingResourceProgress.current = {};
+          resourceProgressFrame.current = null;
+          setResourceProgress((current) => ({ ...current, ...pending }));
+        });
+      }
       if (progress.status === "downloaded") setMessage((current) => isTransientNetworkNotice(current) ? "" : current);
     }).then((dispose) => { unlisten = dispose; }).catch((error) => setMessage(errorMessage(error)));
-    return () => unlisten?.();
+    return () => {
+      unlisten?.();
+      if (resourceProgressFrame.current !== null) window.cancelAnimationFrame(resourceProgressFrame.current);
+      resourceProgressFrame.current = null;
+      pendingResourceProgress.current = {};
+    };
   }, []);
   useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    void listenDesktopBackgroundRemovalJobUpdates((job) => {
-      setBackgroundRemovalJobs((current) => [job, ...current.filter((item) => item.id !== job.id)].sort((left, right) => right.createdAt.localeCompare(left.createdAt)));
-      if (captionDatasetRefresh.current !== null) window.clearTimeout(captionDatasetRefresh.current);
-      captionDatasetRefresh.current = window.setTimeout(() => void listDesktopTrainingDatasets().then(setTrainingDatasets).catch((error) => setMessage(errorMessage(error))), 120);
-    }).then((dispose) => { unlisten = dispose; }).catch((error) => setMessage(errorMessage(error)));
-    return () => unlisten?.();
-  }, []);
-  useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    void listenDesktopWebsiteModelProgress((progress) => setWebsiteModelProgress((current) => ({ ...current, [progress.modelId]: progress }))).then((dispose) => { unlisten = dispose; }).catch((error) => setMessage(errorMessage(error)));
-    return () => unlisten?.();
-  }, []);
-  useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    void listenDesktopWebsiteLoraProgress((progress) => setWebsiteLoraProgress((current) => ({ ...current, [progress.loraId]: progress }))).then((dispose) => { unlisten = dispose; }).catch((error) => setMessage(errorMessage(error)));
-    return () => unlisten?.();
+    let disposed = false;
+    let unlistenModel: (() => void) | undefined;
+    let unlistenLora: (() => void) | undefined;
+    // 网站仓库下载同样会高频上报，模型和 LoRA 共用一帧合并，避免根组件连续重绘全部页面。
+    const scheduleProgressFlush = () => {
+      if (websiteProgressFrame.current !== null) return;
+      websiteProgressFrame.current = window.requestAnimationFrame(() => {
+        const modelPending = pendingWebsiteModelProgress.current;
+        const loraPending = pendingWebsiteLoraProgress.current;
+        pendingWebsiteModelProgress.current = {};
+        pendingWebsiteLoraProgress.current = {};
+        websiteProgressFrame.current = null;
+        if (Object.keys(modelPending).length) setWebsiteModelProgress((current) => ({ ...current, ...modelPending }));
+        if (Object.keys(loraPending).length) setWebsiteLoraProgress((current) => ({ ...current, ...loraPending }));
+      });
+    };
+    void listenDesktopWebsiteModelProgress((progress) => {
+      pendingWebsiteModelProgress.current[progress.modelId] = progress;
+      scheduleProgressFlush();
+    }).then((dispose) => { if (disposed) dispose(); else unlistenModel = dispose; }).catch((error) => setMessage(errorMessage(error)));
+    void listenDesktopWebsiteLoraProgress((progress) => {
+      pendingWebsiteLoraProgress.current[progress.loraId] = progress;
+      scheduleProgressFlush();
+    }).then((dispose) => { if (disposed) dispose(); else unlistenLora = dispose; }).catch((error) => setMessage(errorMessage(error)));
+    return () => {
+      disposed = true;
+      unlistenModel?.();
+      unlistenLora?.();
+      if (websiteProgressFrame.current !== null) window.cancelAnimationFrame(websiteProgressFrame.current);
+      websiteProgressFrame.current = null;
+      pendingWebsiteModelProgress.current = {};
+      pendingWebsiteLoraProgress.current = {};
+    };
   }, []);
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     void listenDesktopCaptionJobUpdates((job) => {
-      setCaptionJobs((current) => [job, ...current.filter((item) => item.id !== job.id)].sort((left, right) => right.createdAt.localeCompare(left.createdAt)));
+      pendingCaptionJobs.current[job.id] = job;
+      scheduleRealtimeJobFlush();
       if (captionDatasetRefresh.current !== null) window.clearTimeout(captionDatasetRefresh.current);
       captionDatasetRefresh.current = window.setTimeout(() => void listDesktopTrainingDatasets().then(setTrainingDatasets).catch((error) => setMessage(errorMessage(error))), 120);
     }).then((dispose) => { unlisten = dispose; }).catch((error) => setMessage(errorMessage(error)));
     return () => { unlisten?.(); if (captionDatasetRefresh.current !== null) window.clearTimeout(captionDatasetRefresh.current); };
-  }, []);
+  }, [scheduleRealtimeJobFlush]);
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     void listenDesktopAiCleanJobUpdates((job) => {
-      setAiCleanJobs((current) => [job, ...current.filter((item) => item.id !== job.id)].sort((left, right) => right.createdAt.localeCompare(left.createdAt)));
+      pendingAiCleanJobs.current[job.id] = job;
+      scheduleRealtimeJobFlush();
+      // AI 清洗完成项会直接写回当前训练集，短延迟合并刷新避免逐图事件触发高频读取。
+      if (captionDatasetRefresh.current !== null) window.clearTimeout(captionDatasetRefresh.current);
+      captionDatasetRefresh.current = window.setTimeout(() => void listDesktopTrainingDatasets().then(setTrainingDatasets).catch((error) => setMessage(errorMessage(error))), 120);
     }).then((dispose) => { unlisten = dispose; }).catch((error) => setMessage(errorMessage(error)));
-    return () => unlisten?.();
-  }, []);
+    return () => { unlisten?.(); if (captionDatasetRefresh.current !== null) window.clearTimeout(captionDatasetRefresh.current); };
+  }, [scheduleRealtimeJobFlush]);
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     void listenDesktopTrainingJobUpdates((job) => {
-      setTrainingJobs((current) => [job, ...current.filter((item) => item.id !== job.id)].sort((left, right) => right.createdAt.localeCompare(left.createdAt)));
+      pendingTrainingJobs.current[job.id] = job;
+      scheduleRealtimeJobFlush();
       if (job.status === "succeeded") void listDesktopLocalLoras().then(setLoras).catch((error) => setMessage(errorMessage(error)));
     }).then((dispose) => { unlisten = dispose; }).catch((error) => setMessage(errorMessage(error)));
     return () => unlisten?.();
-  }, []);
+  }, [scheduleRealtimeJobFlush]);
   useEffect(() => {
     let unlisten: (() => void) | undefined;
-    void listenDesktopLocalJobUpdates((job) => setJobs((current) => [job, ...current.filter((item) => item.id !== job.id)].sort((left, right) => right.createdAt.localeCompare(left.createdAt)))).then((dispose) => { unlisten = dispose; }).catch((error) => setMessage(errorMessage(error)));
+    void listenDesktopLocalJobUpdates((job) => { pendingLocalJobs.current[job.id] = job; scheduleRealtimeJobFlush(); }).then((dispose) => { unlisten = dispose; }).catch((error) => setMessage(errorMessage(error)));
     return () => unlisten?.();
-  }, []);
+  }, [scheduleRealtimeJobFlush]);
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     void listenDesktopResourceInstallProgress((progress) => {
-      setInstallProgress((current) => ({ ...current, [progress.resourceId]: progress }));
-      if (progress.status === "installed") setMessage((current) => isTransientNetworkNotice(current) ? "" : current);
+      pendingInstallProgress.current[progress.resourceId] = progress;
+      if (installProgressFrame.current === null) {
+        installProgressFrame.current = window.requestAnimationFrame(() => {
+          const pending = pendingInstallProgress.current;
+          pendingInstallProgress.current = {};
+          installProgressFrame.current = null;
+          setInstallProgress((current) => ({ ...current, ...pending }));
+        });
+      }
+      if (progress.status === "installed") {
+        setMessage((current) => isTransientNetworkNotice(current) ? "" : current);
+        void refreshInstalledResourceState().catch(() => setMessage("安装已完成，但状态刷新失败，请点击重新检测"));
+      }
     }).then((dispose) => { unlisten = dispose; }).catch((error) => setMessage(errorMessage(error)));
-    return () => unlisten?.();
-  }, []);
+    return () => {
+      unlisten?.();
+      if (installProgressFrame.current !== null) window.cancelAnimationFrame(installProgressFrame.current);
+      installProgressFrame.current = null;
+      pendingInstallProgress.current = {};
+    };
+  }, [refreshInstalledResourceState]);
   /** 顶部操作提示是瞬时反馈，超时类错误不会在后续页面中永久残留。 */
   useEffect(() => {
     if (!message) return undefined;
@@ -225,11 +356,68 @@ export function App() {
     return () => { window.clearInterval(timer); document.removeEventListener("visibilitychange", onVisibility); };
   }, [bootstrapReady]);
   useEffect(() => {
-    if (!bootstrapReady) return;
-    // checkedAt 每次轮询都会变化；只有可见生命周期字段变化时才更新根状态。
-    const timer = window.setInterval(() => void loadDesktopRuntimeStatus().then((runtime) => setBootstrap((current) => current && !sameRuntimeState(current.runtime, runtime) ? { ...current, runtime } : current)).catch(() => undefined), 5_000);
-    return () => window.clearInterval(timer);
-  }, [bootstrapReady]);
+    const versionUnknown = bootstrap?.environment.issues.some((issue) => issue.code === "windows_version_unknown") ?? false;
+    if (!versionUnknown) {
+      windowsVersionRetryCount.current = 0;
+      return undefined;
+    }
+    if (windowsVersionRetryCount.current >= 2) return undefined;
+    // 启动阶段的 CIM/注册表瞬时空值使用短退避自动复检，避免等待 90 秒周期检查。
+    const delay = windowsVersionRetryCount.current === 0 ? 1_000 : 3_000;
+    const timer = window.setTimeout(() => {
+      windowsVersionRetryCount.current += 1;
+      void recheck(true);
+    }, delay);
+    return () => window.clearTimeout(timer);
+  }, [bootstrap?.environment.checkedAt]);
+  useEffect(() => {
+    if (!bootstrapReady) return undefined;
+    let cancelled = false;
+    let timer: number | null = null;
+    const runtimeTransitioning = startupPhase === "starting" || startupPhase === "self_testing" || ["starting", "stopping"].includes(bootstrap?.runtime.status || "");
+    const interval = runtimeTransitioning ? 1_000 : bootstrap?.runtime.status === "ready" ? 5_000 : 3_000;
+    /** Runtime 轮询串行执行且只提交真实状态变化，避免后台窗口和慢磁盘产生重叠请求。 */
+    const poll = async () => {
+      if (cancelled || document.visibilityState !== "visible") return;
+      if (runtimeCheckRunning.current) {
+        timer = window.setTimeout(() => void poll(), Math.min(interval, 500));
+        return;
+      }
+      runtimeCheckRunning.current = true;
+      try {
+        const runtime = await loadDesktopRuntimeStatus();
+        setBootstrap((current) => current && !sameRuntimeState(current.runtime, runtime) ? { ...current, runtime } : current);
+      } catch {
+        // 单次状态读取失败不覆盖最后一次可信状态，下个可见周期继续收敛。
+      } finally {
+        runtimeCheckRunning.current = false;
+        if (!cancelled && document.visibilityState === "visible") timer = window.setTimeout(() => void poll(), interval);
+      }
+    };
+    const refreshVisibleRuntime = () => {
+      if (document.visibilityState !== "visible" || runtimeCheckRunning.current) return;
+      if (timer !== null) window.clearTimeout(timer);
+      timer = null;
+      void poll();
+    };
+    timer = window.setTimeout(() => void poll(), interval);
+    document.addEventListener("visibilitychange", refreshVisibleRuntime);
+    window.addEventListener("focus", refreshVisibleRuntime);
+    return () => {
+      cancelled = true;
+      if (timer !== null) window.clearTimeout(timer);
+      document.removeEventListener("visibilitychange", refreshVisibleRuntime);
+      window.removeEventListener("focus", refreshVisibleRuntime);
+    };
+  }, [bootstrap?.runtime.status, bootstrapReady, startupPhase]);
+
+  useEffect(() => {
+    if (!bootstrapReady || bootstrap?.runtime.status === "ready" || !["generate", "training"].includes(page)) return;
+    // 核心异常退出时立即离开 GPU 操作页，防止缓存页面继续接受用户输入或触发操作。
+    setPage("overview");
+    setOverviewSection("start");
+    setMessage("本地核心未运行，已返回启动页面");
+  }, [bootstrap?.runtime.status, bootstrapReady, page]);
 
   useEffect(() => {
     if (!bootstrap) return;
@@ -240,13 +428,14 @@ export function App() {
       document.documentElement.dataset.theme = resolved;
       document.documentElement.style.colorScheme = resolved;
       document.documentElement.style.setProperty("--desktop-font-scale", String(bootstrap.settings.fontScale));
+      document.documentElement.style.setProperty("--desktop-content-font-scale", String(bootstrap.settings.contentFontScale));
       document.documentElement.style.setProperty("--desktop-viewport-height", `${100 / bootstrap.settings.fontScale}vh`);
       void getCurrentWindow().setTheme(resolved).catch(() => undefined);
     };
     applyTheme();
     media.addEventListener("change", applyTheme);
     return () => media.removeEventListener("change", applyTheme);
-  }, [bootstrap?.settings.themeMode, bootstrap?.settings.fontScale]);
+  }, [bootstrap?.settings.themeMode, bootstrap?.settings.fontScale, bootstrap?.settings.contentFontScale]);
 
   /** 快速复检结果立即覆盖旧状态，GPU 恢复前警告不会消失。 */
   const recheck = async (quiet = false) => {
@@ -273,10 +462,10 @@ export function App() {
   };
 
   /** 资源目录刷新始终重新执行远端签名和有效期校验。 */
-  const reloadResourceCatalog = async () => {
+  const reloadResourceCatalog = async (): Promise<DesktopResourceCatalogView | null> => {
     setCatalogLoading(true);
-    try { setResourceCatalog(await loadDesktopResourceCatalog()); setMessage((current) => isTransientNetworkNotice(current) ? "" : current); }
-    catch (error) { setMessage(errorMessage(error)); }
+    try { const catalog = await loadDesktopResourceCatalog(); setResourceCatalog(catalog); setMessage((current) => isTransientNetworkNotice(current) ? "" : current); return catalog; }
+    catch (error) { setMessage(errorMessage(error)); return null; }
     finally { setCatalogLoading(false); }
   };
 
@@ -291,13 +480,32 @@ export function App() {
   /** 安装使用已验证缓存；完成后同步刷新资源状态与 Runtime 环境门禁。 */
   const installResource = async (resourceId: string) => {
     setInstallProgress((current) => ({ ...current, [resourceId]: { resourceId, status: "verifying", progress: 0, installPath: null, rollbackPath: null, error: null } }));
-    try { const progress = await installDesktopResource(resourceId); setInstallProgress((current) => ({ ...current, [resourceId]: progress })); const [, , nextModels] = await Promise.all([reloadResourceCatalog(), recheck(true), listDesktopLocalModels()]); setModels(nextModels); setMessage((current) => isTransientNetworkNotice(current) ? "" : current); return true; }
-    catch (error) { const message = errorMessage(error); setInstallProgress((current) => ({ ...current, [resourceId]: { resourceId, status: "failed", progress: current[resourceId]?.progress || 0, installPath: null, rollbackPath: null, error: message } })); if (message.includes("已隔离")) setResourceProgress((current) => ({ ...current, [resourceId]: { resourceId, status: "failed", sourceKind: current[resourceId]?.sourceKind || null, downloadedBytes: 0, totalBytes: resourceCatalog?.resources.find((item) => item.id === resourceId)?.byteSize || current[resourceId]?.totalBytes || 1, bytesPerSecond: 0, etaSeconds: null, targetPath: null, error: message } })); await reloadResourceCatalog(); setMessage(message); return false; }
+    try {
+      const progress = await installDesktopResource(resourceId);
+      setInstallProgress((current) => ({ ...current, [resourceId]: progress }));
+    } catch (error) {
+      const message = errorMessage(error);
+      setInstallProgress((current) => ({ ...current, [resourceId]: { resourceId, status: "failed", progress: current[resourceId]?.progress || 0, installPath: null, rollbackPath: null, error: message } }));
+      if (message.includes("已隔离")) setResourceProgress((current) => ({ ...current, [resourceId]: { resourceId, status: "failed", sourceKind: current[resourceId]?.sourceKind || null, downloadedBytes: 0, totalBytes: resourceCatalog?.resources.find((item) => item.id === resourceId)?.byteSize || current[resourceId]?.totalBytes || 1, bytesPerSecond: 0, etaSeconds: null, targetPath: null, error: message } }));
+      await reloadResourceCatalog();
+      setMessage(message);
+      return false;
+    }
+    try {
+      await refreshInstalledResourceState();
+      setMessage((current) => isTransientNetworkNotice(current) ? "" : current);
+    } catch {
+      // 安装结果与后续状态读取分开处理，避免把真实成功的安装误报为失败。
+      setMessage("安装已完成，但状态刷新失败，请点击重新检测");
+    }
+    return true;
   };
 
   /** 初始化严格按签名清单顺序安装核心资源，任一失败即停止并保留断点。 */
   const installCoreResources = async (catalog: DesktopResourceCatalogView, forceResourceIds: string[] = []): Promise<boolean> => {
     if (!catalog.configured || resourceBulkBusy) return false;
+    const dependencyProblem = coreDependencyProblem(catalog);
+    if (dependencyProblem) { setMessage(dependencyProblem); return false; }
     setResourceBulkBusy(true);
     try {
       const pending = coreResources(catalog).filter((item) => !item.installed || forceResourceIds.includes(item.id));
@@ -338,6 +546,8 @@ export function App() {
       const blockingIssue = visibleEnvironmentIssues(environment).find((issue) => issue.severity === "critical" && issue.code !== "runtime_broken");
       if (blockingIssue) throw new Error(`${blockingIssue.title}：${blockingIssue.message}`);
       if (!catalog.configured) throw new Error(catalog.message);
+      const dependencyProblem = coreDependencyProblem(catalog);
+      if (dependencyProblem) throw new Error(dependencyProblem);
       const required = coreResources(catalog);
       if (required.length === 0) throw new Error("签名清单缺少 Runtime、必需组件或 Anima Base");
       const runtimeRepairIds = environment.runtime.status === "broken" ? required.filter((resource) => resource.kind === "runtime").map((resource) => resource.id) : [];
@@ -348,6 +558,8 @@ export function App() {
       }
       const nextCatalog = await loadDesktopResourceCatalog();
       setResourceCatalog(nextCatalog);
+      const nextDependencyProblem = coreDependencyProblem(nextCatalog);
+      if (nextDependencyProblem) throw new Error(nextDependencyProblem);
       if (coreResources(nextCatalog).some((resource) => !resource.installed)) throw new Error("必需依赖尚未全部安装，请在下载队列中查看失败原因");
       let runtime = await loadDesktopRuntimeStatus();
       if (runtime.status !== "ready") {
@@ -387,18 +599,31 @@ export function App() {
   };
   /** 网站 LoRA 安装后同时刷新本机与网站目录的安装状态。 */
   const installWebsiteLora = async (id: string) => {
+    if (websiteLoraInstalls.current.has(id)) return;
+    websiteLoraInstalls.current.add(id);
+    const totalBytes = websiteLoras.find((item) => item.id === id)?.byteSize || websiteLoraProgress[id]?.totalBytes || 1;
+    // 命令返回首个事件前立即锁定条目，防止双击创建两个相同下载任务。
+    setWebsiteLoraProgress((current) => ({ ...current, [id]: { loraId: id, status: "downloading", downloadedBytes: current[id]?.downloadedBytes || 0, totalBytes, bytesPerSecond: 0, error: null } }));
     try { loraImported(await installDesktopWebsiteLora(id)); setWebsiteLoras(await loadDesktopWebsiteLoras()); websiteLorasLoaded.current = true; }
-    catch (error) { const message = errorMessage(error); setWebsiteLoraProgress((current) => ({ ...current, [id]: { loraId: id, status: "failed", downloadedBytes: current[id]?.downloadedBytes || 0, totalBytes: current[id]?.totalBytes || 1, bytesPerSecond: 0, error: message } })); setMessage(message); }
+    catch (error) { const message = errorMessage(error); delete pendingWebsiteLoraProgress.current[id]; setWebsiteLoraProgress((current) => ({ ...current, [id]: { loraId: id, status: "failed", downloadedBytes: current[id]?.downloadedBytes || 0, totalBytes: current[id]?.totalBytes || totalBytes, bytesPerSecond: 0, error: message } })); setMessage(message); }
+    finally { websiteLoraInstalls.current.delete(id); }
   };
   /** 所有仓库底模不依赖签名资源组，直接按主站目录 SHA-256 安装并刷新本机模型。 */
   const installWebsiteModel = async (id: string) => {
+    if (websiteModelInstalls.current.has(id)) return;
+    websiteModelInstalls.current.add(id);
+    const totalBytes = websiteModels.find((item) => item.id === id)?.download?.byteSize || websiteModelProgress[id]?.totalBytes || 1;
+    // 模型下载使用与 LoRA 相同的同步门禁，避免事件尚未抵达时重复提交。
+    setWebsiteModelProgress((current) => ({ ...current, [id]: { modelId: id, status: "downloading", downloadedBytes: current[id]?.downloadedBytes || 0, totalBytes, bytesPerSecond: 0, error: null } }));
     try { modelImported(await installDesktopWebsiteModel(id)); setWebsiteModels(await loadDesktopWebsiteModels()); websiteModelsLoaded.current = true; }
     catch (error) {
       const message = errorMessage(error);
-      const totalBytes = websiteModels.find((item) => item.id === id)?.download?.byteSize || websiteModelProgress[id]?.totalBytes || 1;
+      // 丢弃同一帧尚未提交的旧下载事件，失败状态必须成为最终可见状态。
+      delete pendingWebsiteModelProgress.current[id];
       setWebsiteModelProgress((current) => ({ ...current, [id]: { modelId: id, status: "failed", downloadedBytes: current[id]?.downloadedBytes || 0, totalBytes, bytesPerSecond: 0, error: message } }));
       setMessage(message);
     }
+    finally { websiteModelInstalls.current.delete(id); }
   };
   /** 训练集任一步骤成功后按 ID 更新并置顶，页面实例保持当前输入。 */
   const trainingDatasetUpdated = (dataset: DesktopTrainingDatasetView) => {
@@ -410,29 +635,47 @@ export function App() {
   };
   /** 打标任务按 ID 实时更新，数据库事件是进度事实源。 */
   const captionJobUpdated = (job: DesktopCaptionJobView) => {
+    delete pendingCaptionJobs.current[job.id];
     setCaptionJobs((current) => [job, ...current.filter((item) => item.id !== job.id)].sort((left, right) => right.createdAt.localeCompare(left.createdAt)));
   };
   /** AI 清洗任务按 ID 更新；建议应用后由页面单独回写训练集。 */
   const aiCleanJobUpdated = (job: DesktopAiCleanJobView) => {
+    delete pendingAiCleanJobs.current[job.id];
     setAiCleanJobs((current) => [job, ...current.filter((item) => item.id !== job.id)].sort((left, right) => right.createdAt.localeCompare(left.createdAt)));
   };
   /** 训练提交和取消均按 ID 更新同一条持久化任务。 */
   const trainingJobUpdated = (job: DesktopTrainingJobView) => {
+    delete pendingTrainingJobs.current[job.id];
     setTrainingJobs((current) => [job, ...current.filter((item) => item.id !== job.id)].sort((left, right) => right.createdAt.localeCompare(left.createdAt)));
     // 训练产物由 Rust 核心原子登记，成功事件后立即刷新 LoRA 仓库，页面无需重启才能使用。
     if (job.status === "succeeded" && job.outputLoraId) void listDesktopLocalLoras().then(setLoras).catch((error) => setMessage(errorMessage(error)));
   };
   const jobCreated = (job: DesktopLocalJobView) => {
+    delete pendingLocalJobs.current[job.id];
     setJobs((current) => [job, ...current.filter((item) => item.id !== job.id)]);
     setMessage("本地任务已进入持久队列");
   };
   const cancelJob = async (id: string) => {
-    try { const job = await cancelDesktopLocalJob(id); setJobs((current) => current.map((item) => item.id === id ? job : item)); setMessage("已提交取消请求"); }
+    if (cancellingJobs.current.has(id)) return;
+    cancellingJobs.current.add(id);
+    setCancellingJobIds((current) => new Set(current).add(id));
+    try { const job = await cancelDesktopLocalJob(id); delete pendingLocalJobs.current[id]; setJobs((current) => current.map((item) => item.id === id ? job : item)); setMessage("已提交取消请求"); }
     catch (error) { setMessage(errorMessage(error)); }
+    finally { cancellingJobs.current.delete(id); setCancellingJobIds((current) => { const next = new Set(current); next.delete(id); return next; }); }
   };
   /** 预览窗口以 Rust 中的真实窗口状态为准，关闭或最小化不会影响当前生成表单。 */
   const toggleGenerationPreview = async () => {
     try { await toggleDesktopGenerationPreview(); }
+    catch (error) { setMessage(errorMessage(error)); }
+  };
+  /** 图库图片使用独立原生窗口预览，不改变生成页面的实时预览状态。 */
+  const showGalleryPreview = async (id: string) => {
+    try { await showDesktopGalleryPreview(id); }
+    catch (error) { setMessage(errorMessage(error)); }
+  };
+  /** 文件位置由 Rust 核心按任务 ID 解析，前端不接触可伪造的磁盘路径。 */
+  const revealGalleryArtifact = async (id: string) => {
+    try { await revealDesktopLocalJobArtifact(id); }
     catch (error) { setMessage(errorMessage(error)); }
   };
 
@@ -440,22 +683,23 @@ export function App() {
   const visibleIssues = visibleEnvironmentIssues(bootstrap.environment);
   const critical = visibleIssues.find((issue) => issue.severity === "critical") || visibleIssues[0];
   const requiredResources = coreResources(resourceCatalog);
-  const startupInitialized = requiredResources.length > 0 && requiredResources.every((resource) => resource.installed) && bootstrap.environment.runtime.status === "ready";
+  const startupInitialized = !coreDependencyProblem(resourceCatalog) && requiredResources.length > 0 && requiredResources.every((resource) => resource.installed) && bootstrap.environment.runtime.status === "ready";
   const coreState = desktopCoreState(bootstrap, resourceCatalog);
-  return <div className="desktop-shell" data-environment-status={bootstrap.environment.status} data-inference-ready={bootstrap.environment.capabilities.inference} data-training-ready={bootstrap.environment.capabilities.training}>
-    <aside className="desktop-sidebar"><header><div className="desktop-mark">D</div><div><strong>DrawHime</strong><span>DESKTOP</span></div></header><nav>{navigation.map(({ id, label, Icon }) => <button key={id} className={page === id ? "active" : ""} onClick={() => setPage(id)}><Icon size={17} />{label}{((id === "overview" && (bootstrap.environment.status !== "ready" || account.status !== "connected")) || (id === "gallery" && jobs.some((job) => ["queued", "running"].includes(job.status)))) && <i />}</button>)}</nav><div className="theme-switch sidebar-theme-switch" aria-label="界面主题">{(["system", "dark", "light"] as const).map((mode) => { const Icon = mode === "system" ? Monitor : mode === "dark" ? Moon : Sun; return <button key={mode} className={bootstrap.settings.themeMode === mode ? "active" : ""} aria-label={themeModeLabel(mode)} title={themeModeLabel(mode)} disabled={themeSaving} onClick={() => void changeTheme(mode)}><Icon /></button>; })}</div><button type="button" className={`core-status is-${coreState.kind}`} onClick={() => setDownloadQueueOpen(true)} aria-label={`${coreState.label}，查看下载队列`}><Download className="core-status-icon" /><span>本地核心 · 点击查看队列</span><strong>{coreState.label}</strong><small>{coreState.detail}</small></button></aside>
+  const coreRunning = bootstrap.runtime.status === "ready";
+  return <div className="desktop-shell" data-environment-status={bootstrap.environment.status} data-inference-ready={bootstrap.environment.capabilities.inference} data-training-ready={bootstrap.environment.capabilities.training} data-core-running={coreRunning}>
+    <aside className="desktop-sidebar"><header><div className="desktop-mark">D</div><div><strong>DrawHime</strong><span>DESKTOP</span></div></header><nav>{navigation.map(({ id, label, Icon }) => { const coreLocked = !coreRunning && (id === "generate" || id === "training"); return <button key={id} className={`${page === id ? "active" : ""} ${coreLocked ? "core-locked" : ""}`} disabled={coreLocked} aria-disabled={coreLocked} title={coreLocked ? "请先在启动页面启动本地核心" : undefined} onClick={() => setPage(id)}><Icon size={17} />{label}{coreLocked ? <LockKeyhole className="navigation-lock" /> : ((id === "overview" && (bootstrap.environment.status !== "ready" || account.status !== "connected")) || (id === "gallery" && jobs.some((job) => ["queued", "running"].includes(job.status)))) && <i />}</button>; })}</nav><div className="theme-switch sidebar-theme-switch" aria-label="界面主题">{(["system", "dark", "light"] as const).map((mode) => { const Icon = mode === "system" ? Monitor : mode === "dark" ? Moon : Sun; return <button key={mode} className={bootstrap.settings.themeMode === mode ? "active" : ""} aria-label={themeModeLabel(mode)} title={themeModeLabel(mode)} disabled={themeSaving} onClick={() => void changeTheme(mode)}><Icon /></button>; })}</div><button type="button" className={`core-status is-${coreState.kind}`} onClick={() => setDownloadQueueOpen(true)} aria-label={`${coreState.label}，查看下载队列`}><Download className="core-status-icon" /><span>本地核心 · 点击查看队列</span><strong>{coreState.label}</strong><small>{coreState.detail}</small></button></aside>
     <main className="desktop-main">
       <header className="desktop-topbar"><div className="desktop-title"><span>本地模型工作站</span><strong>{pageTitle(page)}</strong></div></header>
        {bootstrap.environment.status !== "ready" && critical && <section className={`environment-banner is-${critical.severity}`}><AlertTriangle /><div><strong>{critical.title}</strong><span>{critical.message}</span></div><button onClick={() => { setPage("overview"); setOverviewSection("start"); }}>查看启动状态</button></section>}
       {message && <div className="desktop-notice" role="status" aria-live="polite"><span>{message}</span><button aria-label="关闭提示" onClick={() => setMessage("")}>×</button></div>}
-      <div hidden={page !== "generate"}><StableGenerationPage active={page === "generate"} models={models} loras={loras} websiteLoras={websiteLoras} websiteLoraProgress={websiteLoraProgress} inferenceReady={bootstrap.environment.capabilities.inference} coreRunning={bootstrap.runtime.status === "ready"} defaultPrivacy={bootstrap.settings.defaultPrivacy} onCreated={jobCreated} onInstallWebsiteLora={(id) => void installWebsiteLora(id)} onOpenLoraLibrary={() => void ensureWebsiteLoras()} onTogglePreview={() => void toggleGenerationPreview()} onError={setMessage} /></div>
-      <div hidden={page !== "models"}><StableModelRepositoryPage active={page === "models"} models={models} websiteModels={websiteModels} jobs={jobs} websiteProgress={websiteModelProgress} accountConnected={account.status === "connected"} modelRoot={bootstrap.settings.modelRoot} onRefresh={() => void refreshRepositories()} onInstallWebsite={(id) => void installWebsiteModel(id)} onImported={modelImported} onDeleted={(result) => void managedFileDeleted(result)} onOpenSettings={() => { setPage("settings"); setSettingsSection("general"); }} onError={setMessage} /></div>
-      <div hidden={page !== "loras"}><StableLoraRepositoryPage active={page === "loras"} loras={loras} websiteLoras={websiteLoras} jobs={jobs} trainingJobs={trainingJobs} progress={websiteLoraProgress} accountConnected={account.status === "connected"} modelRoot={bootstrap.settings.modelRoot} onRefresh={() => void refreshRepositories()} onInstall={(id) => void installWebsiteLora(id)} onImported={loraImported} onDatasetCopied={trainingDatasetUpdated} onDeleted={(result) => void managedFileDeleted(result)} onError={setMessage} /></div>
-      <div hidden={page !== "captioning"}><StableCaptioningPage active={page === "captioning"} datasets={trainingDatasets} captionJobs={captionJobs} backgroundRemovalJobs={backgroundRemovalJobs} aiCleanJobs={aiCleanJobs} captioningReady={bootstrap.environment.capabilities.captioning} segmenterReady={Boolean(resourceCatalog?.resources.some((resource) => resource.kind === "segmenter" && resource.installed))} onUpdated={trainingDatasetUpdated} onDeleted={trainingDatasetDeleted} onCaptionJobUpdated={captionJobUpdated} onBackgroundRemovalJobUpdated={(job) => setBackgroundRemovalJobs((current) => [job, ...current.filter((item) => item.id !== job.id)].sort((left, right) => right.createdAt.localeCompare(left.createdAt)))} onAiCleanJobUpdated={aiCleanJobUpdated} onOpenResources={() => setDownloadQueueOpen(true)} onError={setMessage} /></div>
-      <div hidden={page !== "training"}><StableLoraTrainingPage active={page === "training"} datasets={trainingDatasets} trainingJobs={trainingJobs} models={models} trainingReady={bootstrap.environment.capabilities.training} coreRunning={bootstrap.runtime.status === "ready"} onTrainingJobUpdated={trainingJobUpdated} onOpenResources={() => { setPage("overview"); setOverviewSection("start"); }} onError={setMessage} /></div>
-       <div hidden={page !== "overview"} className="workspace-page"><WorkspaceTabs label="启动与账号" value={overviewSection} onChange={(value) => setOverviewSection(value as OverviewSection)} items={[{ id: "start", label: "启动", status: bootstrap.runtime.status === "ready" ? "运行中" : startupInitialized ? "可启动" : "待初始化" }, { id: "account", label: "账号", status: account.status === "connected" ? "已连接" : "未连接" }]} /><div hidden={overviewSection !== "start"}><StableStartupPage active={page === "overview" && overviewSection === "start"} state={bootstrap} catalog={resourceCatalog} progress={resourceProgress} installProgress={installProgress} phase={startupPhase} checking={checking} bulkBusy={resourceBulkBusy} onPrimary={() => void runStartup()} onRecheck={() => void recheck()} onOpenQueue={() => setDownloadQueueOpen(true)} onInstallRequired={() => resourceCatalog && void installCoreResources(resourceCatalog)} onDownload={(resourceId) => void downloadResource(resourceId)} onPause={(resourceId) => void pauseDesktopResourceDownload(resourceId)} onInstall={(resourceId) => void installResource(resourceId)} /></div><div hidden={overviewSection !== "account"}><StableAccountPage active={page === "overview" && overviewSection === "account"} account={account} onChanged={setAccount} onError={setMessage} /></div></div>
-      <div hidden={page !== "gallery"} className="workspace-page"><WorkspaceTabs label="图库与本地记录" value={gallerySection} onChange={(value) => setGallerySection(value as GallerySection)} items={[{ id: "gallery", label: "图库", status: `${jobs.filter((job) => job.artifact).length} 张` }, { id: "jobs", label: "记录", status: `${jobs.length} 项` }]} /><div hidden={gallerySection !== "gallery"}><StableLocalGalleryPage active={page === "gallery" && gallerySection === "gallery"} jobs={jobs} loras={loras} websiteLoras={websiteLoras} /></div><div hidden={gallerySection !== "jobs"}><StableLocalJobsPage active={page === "gallery" && gallerySection === "jobs"} jobs={jobs} loras={loras} websiteLoras={websiteLoras} onCancel={(id) => void cancelJob(id)} /></div></div>
-      <div hidden={page !== "settings"} className="workspace-page"><WorkspaceTabs label="应用设置" value={settingsSection} onChange={(value) => setSettingsSection(value as SettingsSection)} items={[{ id: "general", label: "基础设置" }, { id: "ai", label: "AI 辅助" }, { id: "updates", label: "软件更新", status: softwareUpdateStatusLabel(softwareUpdate?.status || "unavailable") }]} /><div hidden={settingsSection !== "general"}><StableSettingsPage active={page === "settings" && settingsSection === "general"} value={bootstrap.settings} onSaved={(settings) => { setBootstrap((current) => current ? { ...current, settings } : current); setMessage("本地设置已保存"); void reloadResourceCatalog(); }} onError={setMessage} /></div><div hidden={settingsSection !== "ai"}><StableAiSettingsCard active={page === "settings" && settingsSection === "ai"} onMessage={setMessage} /></div><div hidden={settingsSection !== "updates"}><StableUpdatesPage active={page === "settings" && settingsSection === "updates"} value={softwareUpdate} onChanged={setSoftwareUpdate} onError={setMessage} /></div></div>
+      <div className="desktop-page-host" hidden={page !== "generate"}><StableGenerationPage active={page === "generate"} models={models} loras={loras} websiteLoras={websiteLoras} websiteLoraProgress={websiteLoraProgress} executionBackend={bootstrap.environment.executionBackend} inferenceReady={bootstrap.environment.capabilities.inference} coreRunning={bootstrap.runtime.status === "ready"} defaultPrivacy={bootstrap.settings.defaultPrivacy} onCreated={jobCreated} onInstallWebsiteLora={(id) => void installWebsiteLora(id)} onOpenLoraLibrary={() => void ensureWebsiteLoras()} onTogglePreview={() => void toggleGenerationPreview()} onError={setMessage} /></div>
+      <div className="desktop-page-host" hidden={page !== "models"}><StableModelRepositoryPage active={page === "models"} models={models} websiteModels={websiteModels} jobs={jobs} websiteProgress={websiteModelProgress} accountConnected={account.status === "connected"} modelRoot={bootstrap.settings.modelRoot} onRefresh={() => void refreshRepositories()} onInstallWebsite={(id) => void installWebsiteModel(id)} onImported={modelImported} onDeleted={(result) => void managedFileDeleted(result)} onOpenSettings={() => { setPage("settings"); setSettingsSection("general"); }} onError={setMessage} /></div>
+      <div className="desktop-page-host" hidden={page !== "loras"}><StableLoraRepositoryPage active={page === "loras"} loras={loras} websiteLoras={websiteLoras} jobs={jobs} trainingJobs={trainingJobs} progress={websiteLoraProgress} accountConnected={account.status === "connected"} modelRoot={bootstrap.settings.modelRoot} onRefresh={() => void refreshRepositories()} onInstall={(id) => void installWebsiteLora(id)} onImported={loraImported} onDatasetCopied={trainingDatasetUpdated} onDeleted={(result) => void managedFileDeleted(result)} onError={setMessage} /></div>
+      <div className="desktop-page-host" hidden={page !== "captioning"}><StableCaptioningPage active={page === "captioning"} datasets={trainingDatasets} captionJobs={captionJobs} aiCleanJobs={aiCleanJobs} captioningReady={bootstrap.environment.capabilities.captioning} onUpdated={trainingDatasetUpdated} onDeleted={trainingDatasetDeleted} onCaptionJobUpdated={captionJobUpdated} onAiCleanJobUpdated={aiCleanJobUpdated} onOpenResources={() => setDownloadQueueOpen(true)} onError={setMessage} /></div>
+      <div className="desktop-page-host" hidden={page !== "training"}><StableLoraTrainingPage active={page === "training"} datasets={trainingDatasets} trainingJobs={trainingJobs} models={models} trainingReady={bootstrap.environment.capabilities.training} coreRunning={bootstrap.runtime.status === "ready"} onTrainingJobUpdated={trainingJobUpdated} onOpenResources={() => { setPage("overview"); setOverviewSection("start"); }} onError={setMessage} /></div>
+       <div hidden={page !== "overview"} className="desktop-page-host workspace-page"><WorkspaceTabs label="启动与账号" value={overviewSection} onChange={(value) => setOverviewSection(value as OverviewSection)} items={[{ id: "start", label: "启动", status: bootstrap.runtime.status === "ready" ? "运行中" : startupInitialized ? "可启动" : "待初始化" }, { id: "account", label: "账号", status: account.status === "connected" ? "已连接" : "未连接" }]} /><div hidden={overviewSection !== "start"}><StableStartupPage active={page === "overview" && overviewSection === "start"} state={bootstrap} catalog={resourceCatalog} progress={resourceProgress} installProgress={installProgress} phase={startupPhase} checking={checking} bulkBusy={resourceBulkBusy} onPrimary={() => void runStartup()} onRecheck={() => void recheck()} onOpenQueue={() => setDownloadQueueOpen(true)} onInstallRequired={() => resourceCatalog && void installCoreResources(resourceCatalog)} onDownload={(resourceId) => void downloadResource(resourceId)} onPause={(resourceId) => void pauseDesktopResourceDownload(resourceId)} onInstall={(resourceId) => void installResource(resourceId)} /></div><div hidden={overviewSection !== "account"}><StableAccountPage active={page === "overview" && overviewSection === "account"} account={account} onChanged={setAccount} onError={setMessage} /></div></div>
+      <div className="desktop-page-host" hidden={page !== "gallery"}><StableLocalGalleryPage active={page === "gallery"} jobs={jobs} loras={loras} websiteLoras={websiteLoras} cancellingJobIds={cancellingJobIds} onCancel={(id) => void cancelJob(id)} onPreview={(id) => void showGalleryPreview(id)} onReveal={(id) => void revealGalleryArtifact(id)} /></div>
+      <div hidden={page !== "settings"} className="desktop-page-host workspace-page"><WorkspaceTabs label="应用设置" value={settingsSection} onChange={(value) => setSettingsSection(value as SettingsSection)} items={[{ id: "general", label: "基础设置" }, { id: "ai", label: "AI 辅助" }, { id: "updates", label: "软件更新", status: softwareUpdateStatusLabel(softwareUpdate?.status || "unavailable") }]} /><div hidden={settingsSection !== "general"}><StableSettingsPage active={page === "settings" && settingsSection === "general"} value={bootstrap.settings} onSaved={(settings) => { setBootstrap((current) => current ? { ...current, settings } : current); setMessage("本地设置已保存"); void reloadResourceCatalog(); }} onError={setMessage} /></div><div hidden={settingsSection !== "ai"}><StableAiSettingsCard active={page === "settings" && settingsSection === "ai"} onMessage={setMessage} /></div><div hidden={settingsSection !== "updates"}><StableUpdatesPage active={page === "settings" && settingsSection === "updates"} value={softwareUpdate} onChanged={setSoftwareUpdate} onError={setMessage} /></div></div>
     </main><DownloadQueueDialog open={downloadQueueOpen} catalog={resourceCatalog} progress={resourceProgress} installProgress={installProgress} bulkBusy={resourceBulkBusy} onClose={() => setDownloadQueueOpen(false)} onDownload={(resourceId) => void downloadResource(resourceId)} onPause={(resourceId) => void pauseDesktopResourceDownload(resourceId)} onInstall={(resourceId) => void installResource(resourceId)} />
   </div>;
 }
@@ -494,12 +738,12 @@ function SettingsPage({ value, onSaved, onError }: { value: DesktopSettings; onS
   const [busy, setBusy] = useState(false);
   const [cleanupBusy, setCleanupBusy] = useState<"scan" | "clean" | null>(null);
   const [cleanup, setCleanup] = useState<DesktopStorageCleanupView | null>(null);
-  useEffect(() => setForm((current) => ({ ...current, themeMode: value.themeMode, fontScale: value.fontScale, dependencySource: "mirror" })), [value.themeMode, value.fontScale]);
+  useEffect(() => setForm((current) => ({ ...current, themeMode: value.themeMode, fontScale: value.fontScale, contentFontScale: value.contentFontScale, dependencySource: "mirror" })), [value.themeMode, value.fontScale, value.contentFontScale]);
   const changed = useMemo(() => JSON.stringify(form) !== JSON.stringify(value), [form, value]);
   const save = async () => { setBusy(true); try { onSaved(await saveDesktopSettings({ ...form, dependencySource: "mirror" })); setCleanup(null); } catch (error) { onError(errorMessage(error)); } finally { setBusy(false); } };
   const scan = async () => { if (cleanupBusy) return; setCleanupBusy("scan"); try { setCleanup(await cleanupDesktopStorage({ execute: false })); } catch (error) { onError(errorMessage(error)); } finally { setCleanupBusy(null); } };
   const clean = async () => { if (!cleanup?.totalFiles || cleanup.executed || cleanupBusy || !window.confirm(`确认清理 ${cleanup.totalFiles} 项受管残留并释放 ${formatResourceBytes(cleanup.totalBytes)}？作品、训练集和当前模型不会删除。`)) return; setCleanupBusy("clean"); try { const result = await cleanupDesktopStorage({ execute: true }); setCleanup(result); onError(`存储清理完成，释放 ${formatResourceBytes(result.totalBytes)}`); } catch (error) { onError(errorMessage(error)); } finally { setCleanupBusy(null); } };
-  return <div className="desktop-page settings-page"><section className="section-card settings-card"><header><div><span>LOCAL SETTINGS</span><h2>界面、下载与存储</h2></div><ShieldCheck /></header><div className="settings-grid"><label><span>界面主题</span><select value={form.themeMode} onChange={(event) => setForm({ ...form, themeMode: event.target.value as DesktopSettings["themeMode"] })}><option value="system">跟随系统</option><option value="dark">深色</option><option value="light">亮色</option></select><small>保存后同步更新窗口与页面</small></label><label><span>字体大小</span><select value={form.fontScale} onChange={(event) => setForm({ ...form, fontScale: Number(event.target.value) })}><option value={1}>紧凑（100%）</option><option value={1.1}>默认（110%）</option><option value={1.2}>较大（120%）</option><option value={1.3}>特大（130%）</option></select><small>调整整个工作区文字和控件比例</small></label><label><span>默认图库权限</span><select value={form.defaultPrivacy} onChange={(event) => setForm({ ...form, defaultPrivacy: event.target.value as DesktopSettings["defaultPrivacy"] })}><option value="public">公开</option><option value="private">私有</option></select><small>自动上传默认公开，每次生成仍可单独覆盖</small></label><label><span>上传并发数</span><select value={form.uploadConcurrency} onChange={(event) => setForm({ ...form, uploadConcurrency: Number(event.target.value) })}>{[1, 2, 3, 4].map((value) => <option key={value} value={value}>{value}</option>)}</select><small>弱网环境建议 1–2</small></label><PathField label="模型目录" value={form.modelRoot} /><PathField label="作品目录" value={form.outputRoot} /><PathField label="Runtime 目录" value={form.runtimeRoot} /><label className="settings-check"><input type="checkbox" checked={form.autoUpload} onChange={(event) => setForm({ ...form, autoUpload: event.target.checked })} /><span>登录后自动上传新图片到网页图库</span></label><label className="settings-check"><input type="checkbox" checked={form.wifiOnly} onChange={(event) => setForm({ ...form, wifiOnly: event.target.checked })} /><span>仅在非计费网络同步图库</span></label></div><footer><button disabled={!changed || busy} onClick={() => void save()}>{busy ? <LoaderCircle className="spin" /> : <FolderCog />}{busy ? "保存中" : "保存本地设置"}</button></footer></section><section className="section-card storage-cleanup-card"><header><div><span>STORAGE CARE</span><h2>存储清理</h2></div><HardDrive /></header><div className="storage-cleanup-summary"><i><Eraser /></i><span><strong>{cleanup ? formatResourceBytes(cleanup.totalBytes) : "等待扫描"}</strong><small>{cleanup ? cleanup.executed ? `${cleanup.totalFiles} 项受管残留已清理` : `${cleanup.totalFiles} 个受管文件或目录可清理` : "只扫描客户端创建且已无引用的文件"}</small></span><button disabled={Boolean(cleanupBusy)} onClick={() => void scan()}>{cleanupBusy === "scan" ? <LoaderCircle className="spin" /> : <ScanSearch />}{cleanup ? "重新扫描" : "扫描存储"}</button></div>{cleanup && <div className="storage-cleanup-categories">{cleanup.categories.length ? cleanup.categories.map((category) => <div key={category.key}><span><strong>{category.label}</strong><small>{category.fileCount} 项</small></span><b>{formatResourceBytes(category.byteSize)}</b></div>) : <div className="storage-cleanup-empty"><CheckCircle2 />没有发现可安全清理的受管文件</div>}</div>}<footer><span><ShieldCheck />不会删除作品、训练集、当前 Runtime、当前模型或未知文件</span><button className="danger" disabled={!cleanup?.totalFiles || cleanup.executed || Boolean(cleanupBusy)} onClick={() => void clean()}>{cleanupBusy === "clean" ? <LoaderCircle className="spin" /> : cleanup?.executed ? <CheckCircle2 /> : <Trash2 />}{cleanupBusy === "clean" ? "正在清理" : cleanup?.executed ? "清理完成" : "确认清理"}</button></footer></section></div>;
+  return <div className="desktop-page settings-page"><section className="section-card settings-card"><header><div><span>LOCAL SETTINGS</span><h2>界面、下载与存储</h2></div><ShieldCheck /></header><div className="settings-grid"><label><span>界面主题</span><select value={form.themeMode} onChange={(event) => setForm({ ...form, themeMode: event.target.value as DesktopSettings["themeMode"] })}><option value="system">跟随系统</option><option value="dark">深色</option><option value="light">亮色</option></select><small>保存后同步更新窗口与页面</small></label><label><span>页面缩放</span><select value={form.fontScale} onChange={(event) => setForm({ ...form, fontScale: Number(event.target.value) })}><option value={1}>紧凑（100%）</option><option value={1.1}>默认（110%）</option><option value={1.2}>较大（120%）</option><option value={1.3}>特大（130%）</option></select><small>同时调整控件与页面布局密度</small></label><label><span>内容字体</span><select value={form.contentFontScale} onChange={(event) => setForm({ ...form, contentFontScale: Number(event.target.value) })}><option value={1}>紧凑（100%）</option><option value={1.2}>默认（120%）</option><option value={1.4}>较大（140%）</option><option value={1.6}>特大（160%）</option></select><small>独立放大提示词、标签和说明文字</small></label><label><span>默认图库权限</span><select value={form.defaultPrivacy} onChange={(event) => setForm({ ...form, defaultPrivacy: event.target.value as DesktopSettings["defaultPrivacy"] })}><option value="public">公开</option><option value="private">私有</option></select><small>自动上传默认公开，每次生成仍可单独覆盖</small></label><label><span>上传并发数</span><select value={form.uploadConcurrency} onChange={(event) => setForm({ ...form, uploadConcurrency: Number(event.target.value) })}>{[1, 2, 3, 4].map((value) => <option key={value} value={value}>{value}</option>)}</select><small>弱网环境建议 1–2</small></label><PathField label="模型目录" value={form.modelRoot} /><PathField label="作品目录" value={form.outputRoot} /><PathField label="Runtime 目录" value={form.runtimeRoot} /><label className="settings-check"><input type="checkbox" checked={form.autoUpload} onChange={(event) => setForm({ ...form, autoUpload: event.target.checked })} /><span>登录后自动上传新图片到网页图库</span></label><label className="settings-check"><input type="checkbox" checked={form.wifiOnly} onChange={(event) => setForm({ ...form, wifiOnly: event.target.checked })} /><span>仅在非计费网络同步图库</span></label></div><footer><button disabled={!changed || busy} onClick={() => void save()}>{busy ? <LoaderCircle className="spin" /> : <FolderCog />}{busy ? "保存中" : "保存本地设置"}</button></footer></section><section className="section-card storage-cleanup-card"><header><div><span>STORAGE CARE</span><h2>存储清理</h2></div><HardDrive /></header><div className="storage-cleanup-summary"><i><Eraser /></i><span><strong>{cleanup ? formatResourceBytes(cleanup.totalBytes) : "等待扫描"}</strong><small>{cleanup ? cleanup.executed ? `${cleanup.totalFiles} 项受管残留已清理` : `${cleanup.totalFiles} 个受管文件或目录可清理` : "只扫描客户端创建且已无引用的文件"}</small></span><button disabled={Boolean(cleanupBusy)} onClick={() => void scan()}>{cleanupBusy === "scan" ? <LoaderCircle className="spin" /> : <ScanSearch />}{cleanup ? "重新扫描" : "扫描存储"}</button></div>{cleanup && <div className="storage-cleanup-categories">{cleanup.categories.length ? cleanup.categories.map((category) => <div key={category.key}><span><strong>{category.label}</strong><small>{category.fileCount} 项</small></span><b>{formatResourceBytes(category.byteSize)}</b></div>) : <div className="storage-cleanup-empty"><CheckCircle2 />没有发现可安全清理的受管文件</div>}</div>}<footer><span><ShieldCheck />不会删除作品、训练集、当前 Runtime、当前模型或未知文件</span><button className="danger" disabled={!cleanup?.totalFiles || cleanup.executed || Boolean(cleanupBusy)} onClick={() => void clean()}>{cleanupBusy === "clean" ? <LoaderCircle className="spin" /> : cleanup?.executed ? <CheckCircle2 /> : <Trash2 />}{cleanupBusy === "clean" ? "正在清理" : cleanup?.executed ? "清理完成" : "确认清理"}</button></footer></section></div>;
 }
 
 /** AI 设置卡统一管理真实 OpenAI 兼容端点、系统凭据和图片分析验证。 */
@@ -544,11 +788,11 @@ function AiSettingsCard({ onMessage }: { onMessage: (message: string) => void })
 function PathField({ label, value }: { label: string; value: string }) {
   return <label className="path-field"><span>{label}</span><input value={value} readOnly /><small>路径由安装时选择的位置统一管理。</small></label>;
 }
-function pageTitle(page: DesktopPage): string { return { overview: "启动 / 账号", generate: "本地生成", captioning: "训练集打标", training: "LoRA 训练", models: "模型仓库", loras: "LoRA 仓库", gallery: "图库 / 记录", settings: "设置" }[page]; }
+function pageTitle(page: DesktopPage): string { return { overview: "启动 / 账号", generate: "本地生成", captioning: "训练集打标", training: "LoRA 训练", models: "模型仓库", loras: "LoRA 仓库", gallery: "图库", settings: "设置" }[page]; }
 
 /** Runtime 的检查时间不影响页面外显，排除该字段可避免每五秒重绘整个工作区。 */
 function sameRuntimeState(previous: DesktopBootstrapView["runtime"], next: DesktopBootstrapView["runtime"]): boolean {
-  return previous.status === next.status && previous.pid === next.pid && previous.port === next.port && previous.startedAt === next.startedAt && previous.logPath === next.logPath && previous.error === next.error;
+  return previous.status === next.status && previous.pid === next.pid && previous.port === next.port && previous.startedAt === next.startedAt && previous.logPath === next.logPath && previous.backend === next.backend && previous.deviceIndex === next.deviceIndex && previous.launchProfile === next.launchProfile && previous.error === next.error;
 }
 
 /** LoRA 类型统一使用中文外显，数据库和契约仍保存稳定英文枚举。 */

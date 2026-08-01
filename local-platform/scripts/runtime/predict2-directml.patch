@@ -1,0 +1,35 @@
+diff --git a/ComfyUI/comfy/ldm/cosmos/predict2.py b/ComfyUI/comfy/ldm/cosmos/predict2.py
+--- a/ComfyUI/comfy/ldm/cosmos/predict2.py
++++ b/ComfyUI/comfy/ldm/cosmos/predict2.py
+@@ -21,2 +21,9 @@ import comfy.ldm.common_dit
++def directml_apply_rope_split_half1(x: torch.Tensor, freqs_cis: torch.Tensor) -> torch.Tensor:
++    """不经过自定义算子存储包装执行 split-half RoPE。"""
++    pairs = x.reshape(*x.shape[:-1], 2, -1).movedim(-2, -1).unsqueeze(-2).to(freqs_cis.dtype)
++    output = freqs_cis[..., 0] * pairs[..., 0] + freqs_cis[..., 1] * pairs[..., 1]
++    return output.movedim(-1, -2).reshape(*x.shape).type_as(x)
++
++
+ # ---------------------- Feed Forward Network -----------------------
+ class GPT2FeedForward(nn.Module):
+@@ -165,5 +172,9 @@ class Attention(nn.Module):
+             k = self.k_norm(k)
+             v = self.v_norm(v)
+             if self.is_selfattn and rope_emb is not None:  # only apply to self-attention!
+-                q, k = comfy.quant_ops.ck.apply_rope_split_half(q, k, rope_emb)
++                if q.device.type == "privateuseone":
++                    q = directml_apply_rope_split_half1(q, rope_emb)
++                    k = directml_apply_rope_split_half1(k, rope_emb)
++                else:
++                    q, k = comfy.quant_ops.ck.apply_rope_split_half(q, k, rope_emb)
+             return q, k, v
+@@ -780,7 +791,7 @@ class MiniTrainDIT(nn.Module):
+                 padding_mask = transforms.functional.resize(
+                     padding_mask, list(x_B_C_T_H_W.shape[-2:]), interpolation=transforms.InterpolationMode.NEAREST
+                 )
+-            x_B_C_T_H_W = torch.cat(
+-                [x_B_C_T_H_W, padding_mask.unsqueeze(1).repeat(1, 1, x_B_C_T_H_W.shape[2], 1, 1)], dim=1
+-            )
++            # DirectML 的 repeat 内核最多接受四维张量，先重复时间轴再恢复通道维。
++            repeated_padding_mask = padding_mask.repeat(1, x_B_C_T_H_W.shape[2], 1, 1).unsqueeze(1)
++            x_B_C_T_H_W = torch.cat([x_B_C_T_H_W, repeated_padding_mask], dim=1)
+         x_B_T_H_W_D = self.x_embedder(x_B_C_T_H_W)

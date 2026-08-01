@@ -1,4 +1,4 @@
-//! 本模块在桌面进程内串行协调生成与训练，避免两个 Runtime 同时争用同一张 NVIDIA GPU。
+//! 本模块在桌面进程内串行协调生成与训练，避免多个任务同时争用当前 GPU 执行后端。
 
 use std::sync::{
     atomic::{AtomicBool, Ordering},

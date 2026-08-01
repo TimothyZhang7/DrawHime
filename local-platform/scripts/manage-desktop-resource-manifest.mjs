@@ -15,8 +15,9 @@ else if (command === "sign") await signManifest(argumentsMap);
 else if (command === "normalize") await normalizeManifest(argumentsMap);
 else if (command === "add-anima-models") await addAnimaModels(argumentsMap);
 else if (command === "add-component") await addComponent(argumentsMap);
+else if (command === "add-runtime") await addRuntime(argumentsMap);
 else if (command === "legacy-compatible") await createLegacyCompatibleManifest(argumentsMap);
-else throw new Error("用法：generate --private-key PATH --public-key PATH；sign --payload PATH --private-key PATH --output PATH --key-id ID；normalize --payload PATH --output PATH；add-anima-models --payload PATH --output PATH；legacy-compatible --payload PATH --output PATH；或 add-component --payload PATH --output PATH --id ID --kind KIND --version VERSION --file-name NAME --byte-size BYTES --installed-size BYTES --sha256 HASH --root-directory NAME --required true|false");
+else throw new Error("用法：generate --private-key PATH --public-key PATH；sign --payload PATH --private-key PATH --output PATH --key-id ID；normalize --payload PATH --output PATH；add-anima-models --payload PATH --output PATH；legacy-compatible --payload PATH --output PATH；add-runtime --payload PATH --metadata PATH --output PATH；或 add-component --payload PATH --output PATH --id ID --kind KIND --version VERSION --file-name NAME --byte-size BYTES --installed-size BYTES --sha256 HASH --root-directory NAME --required true|false");
 
 /** 解析明确的 --key value 参数，拒绝遗漏值和重复键。 */
 function parseArguments(values) {
@@ -165,6 +166,27 @@ async function addComponent(options) {
   process.stdout.write(`已登记可选组件 ${id}：${outputPath}\n`);
 }
 
+/** 使用真实构建摘要增加或替换一个后端专属 Runtime，不接受手工省略能力字段。 */
+async function addRuntime(options) {
+  const payloadPath = requiredPath(options, "payload");
+  const metadataPath = requiredPath(options, "metadata");
+  const outputPath = requiredPath(options, "output");
+  const raw = JSON.parse(await readFile(payloadPath, "utf8"));
+  const metadata = JSON.parse(await readFile(metadataPath, "utf8"));
+  if (!Array.isArray(raw.resources)) throw new Error("资源清单缺少 resources 数组");
+  if (metadata.kind !== "runtime" || !metadata.runtimeProfile || !Array.isArray(metadata.compatibleBackends)) throw new Error("Runtime 构建摘要缺少后端 profile");
+  const { upstream: _upstream, sources: _sources, ...runtime } = metadata;
+  const item = { ...runtime, installDirectory: null, modelRegistration: null, applicationUpdate: null, sources: [{ kind: "mirror", url: `https://www.xanime.ink/local-model-api/v1/desktop/resources/${runtime.id}/content` }] };
+  const minimumExpiry = new Date(Date.now() + 180 * 24 * 60 * 60 * 1000);
+  const currentExpiry = new Date(raw.expiresAt);
+  const candidate = { ...raw, generatedAt: new Date().toISOString(), expiresAt: currentExpiry > minimumExpiry ? currentExpiry.toISOString() : minimumExpiry.toISOString(), resources: [...raw.resources.filter((resource) => resource.id !== item.id), item] };
+  const parsed = desktopResourceManifestPayloadSchema.safeParse(candidate);
+  if (!parsed.success) throw new Error(`Runtime 资源未通过契约校验：${parsed.error.issues[0]?.message || "未知字段错误"}`);
+  await mkdir(dirname(outputPath), { recursive: true });
+  await writeFile(outputPath, `${JSON.stringify(parsed.data, null, 2)}\n`, "utf8");
+  process.stdout.write(`已登记 ${item.runtimeProfile.backend} Runtime：${outputPath}\n`);
+}
+
 /** 为不认识 Segmenter 枚举的旧客户端生成独立签名兼容载荷，不修改扩展清单。 */
 async function createLegacyCompatibleManifest(options) {
   const payloadPath = requiredPath(options, "payload");
@@ -174,7 +196,7 @@ async function createLegacyCompatibleManifest(options) {
   const candidate = {
     ...raw,
     generatedAt: new Date().toISOString(),
-    resources: raw.resources.filter((resource) => resource.kind !== "segmenter"),
+    resources: raw.resources.filter((resource) => resource.kind !== "segmenter" && (!Array.isArray(resource.compatibleBackends) || resource.compatibleBackends.includes("nvidia_cuda"))).map(({ compatibleBackends: _compatibleBackends, runtimeProfile: _runtimeProfile, ...resource }) => resource),
   };
   const parsed = desktopResourceManifestPayloadSchema.safeParse(candidate);
   if (!parsed.success) throw new Error(`旧客户端兼容清单未通过契约校验：${parsed.error.issues[0]?.message || "未知字段错误"}`);

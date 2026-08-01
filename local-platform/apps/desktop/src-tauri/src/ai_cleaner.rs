@@ -1,4 +1,4 @@
-//! 本模块实现 SQLite 为事实源的 AI 标签清洗队列、建议应用和可校验撤销。
+//! 本模块实现 SQLite 为事实源的 AI 标签清洗队列，并把结果直接写回用户选中的训练集。
 
 use crate::{
     ai_assist,
@@ -37,6 +37,7 @@ pub struct AiCleanScheduler {
 
 struct CleanExecutionItem {
     job_id: String,
+    dataset_id: String,
     asset_id: String,
     image_path: PathBuf,
     dataset_type: String,
@@ -278,7 +279,7 @@ pub fn apply_proposal(
         &input.asset_id,
         &relative_path,
         &tags,
-        Some((&input.job_id, "applied")),
+        Some((&input.job_id, "applied", None)),
     )?;
     training_dataset::read_dataset_with_assets(database, app_data_dir, &input.dataset_id)
 }
@@ -313,7 +314,7 @@ pub fn undo_proposal(
         &input.asset_id,
         &relative_path,
         &before,
-        Some((&input.job_id, "undone")),
+        Some((&input.job_id, "undone", None)),
     )?;
     training_dataset::read_dataset_with_assets(database, app_data_dir, &input.dataset_id)
 }
@@ -333,7 +334,7 @@ fn clean_loop(
     );
     while !stopping.load(Ordering::SeqCst) {
         match claim_next_item(&database, app_data_dir) {
-            Ok(Some(item)) => execute_item(&database, app, stopping, item),
+            Ok(Some(item)) => execute_item(&database, app_data_dir, app, stopping, item),
             Ok(None) => match claim_next_snapshot_item(&database, app_data_dir) {
                 Ok(Some(item)) => execute_snapshot_item(&database, app, stopping, item),
                 Ok(None) => wait_for_work(wake_signal, stopping),
@@ -407,6 +408,7 @@ fn claim_next_item(
         .map_err(|error| format!("提交 AI 清洗领取事务失败：{error}"))?;
     Ok(Some(CleanExecutionItem {
         job_id: row.0,
+        dataset_id: row.1,
         asset_id: row.2,
         image_path: app_data_dir.join(row.3),
         dataset_type: row.4,
@@ -421,6 +423,7 @@ fn claim_next_item(
 
 fn execute_item(
     database: &Connection,
+    app_data_dir: &Path,
     app: &AppHandle,
     stopping: &AtomicBool,
     item: CleanExecutionItem,
@@ -455,22 +458,46 @@ fn execute_item(
         emit_job(database, app, &item.job_id);
         return;
     } else if let Ok(proposal) = result {
-        match serde_json::to_string(&proposal) {
-            Ok(json) => {
-                let _ = database.execute("UPDATE local_ai_clean_job_items SET status='succeeded',proposal_json=?3,error=NULL,updated_at=?4 WHERE job_id=?1 AND asset_id=?2 AND status='running'", params![item.job_id,item.asset_id,json,now]);
-            }
-            Err(error) => finish_item_error(
-                database,
-                &item,
-                &format!("序列化 AI 清洗建议失败：{error}"),
-                &now,
-            ),
+        if let Err(error) = apply_direct_proposal(database, app_data_dir, &item, &proposal) {
+            finish_item_error(database, &item, &error, &now);
         }
     } else if let Err(error) = result {
         finish_item_error(database, &item, &error, &now);
     }
     let _ = refresh_job(database, &item.job_id, &now);
     emit_job(database, app, &item.job_id);
+}
+
+/** AI 结果通过本地边界校验后直接原子写回训练集，不再要求用户逐图应用建议。 */
+fn apply_direct_proposal(
+    database: &Connection,
+    app_data_dir: &Path,
+    item: &CleanExecutionItem,
+    proposal: &DesktopAiCleanProposal,
+) -> Result<(), String> {
+    let current = training_tags::read_tags(database, &item.asset_id)?;
+    ensure_original_unchanged(&current, &item.original_tags)?;
+    let tags = reconcile_proposal_tags(&current, &item.trigger_words, proposal)?;
+    let proposal_json = serde_json::to_string(proposal)
+        .map_err(|error| format!("序列化 AI 清洗结果失败：{error}"))?;
+    let relative_path: String = database
+        .query_row(
+            "SELECT relative_path FROM local_training_assets WHERE id=?1 AND dataset_id=?2",
+            params![item.asset_id, item.dataset_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| format!("读取 AI 清洗图片失败：{error}"))?
+        .ok_or_else(|| "训练图片不存在".to_string())?;
+    save_applied_tags(
+        database,
+        app_data_dir,
+        &item.dataset_id,
+        &item.asset_id,
+        &relative_path,
+        &tags,
+        Some((&item.job_id, "applied", Some(&proposal_json))),
+    )
 }
 
 fn finish_item_error(database: &Connection, item: &CleanExecutionItem, error: &str, now: &str) {
@@ -537,6 +564,22 @@ fn apply_snapshot_proposal(
     trigger_words: &[String],
     proposal: &DesktopAiCleanProposal,
 ) -> Result<(String, String, String), String> {
+    let tags = reconcile_proposal_tags(original, trigger_words, proposal)?;
+    let caption = training_tags::caption_from_tags(&tags)
+        .ok_or_else(|| "AI 清洗后的训练快照标签不能为空".to_string())?;
+    let tags_json =
+        serde_json::to_string(&tags).map_err(|error| format!("序列化训练快照标签失败：{error}"))?;
+    let proposal_json = serde_json::to_string(proposal)
+        .map_err(|error| format!("序列化训练快照 AI 建议失败：{error}"))?;
+    Ok((caption, tags_json, proposal_json))
+}
+
+/** 按 AI 最终标签重建逐标签来源，触发词无论上游是否返回都必须保留。 */
+fn reconcile_proposal_tags(
+    original: &[TrainingTag],
+    trigger_words: &[String],
+    proposal: &DesktopAiCleanProposal,
+) -> Result<Vec<TrainingTag>, String> {
     let final_keys = proposal
         .final_tags
         .iter()
@@ -557,14 +600,7 @@ fn apply_snapshot_proposal(
         .filter(|tag| !original_keys.contains(&training_tags::normalize_tag(tag)))
         .cloned()
         .collect::<Vec<_>>();
-    let tags = training_tags::reconcile_ai_clean_tags(original, &remove, &add, trigger_words)?;
-    let caption = training_tags::caption_from_tags(&tags)
-        .ok_or_else(|| "AI 清洗后的训练快照标签不能为空".to_string())?;
-    let tags_json =
-        serde_json::to_string(&tags).map_err(|error| format!("序列化训练快照标签失败：{error}"))?;
-    let proposal_json = serde_json::to_string(proposal)
-        .map_err(|error| format!("序列化训练快照 AI 建议失败：{error}"))?;
-    Ok((caption, tags_json, proposal_json))
+    training_tags::reconcile_ai_clean_tags(original, &remove, &add, trigger_words)
 }
 
 fn finish_snapshot_item_error(
@@ -636,7 +672,13 @@ fn refresh_job(database: &Connection, id: &str, now: &str) -> Result<(), String>
     } else {
         processed * 100 / total
     };
-    let (pause_requested, cancel_requested): (bool, bool) = database.query_row("SELECT pause_requested,cancel_requested FROM local_ai_clean_jobs WHERE id=?1", [id], |row| Ok((row.get(0)?,row.get(1)?))).map_err(|error| format!("读取 AI 清洗控制状态失败：{error}"))?;
+    let (pause_requested, cancel_requested): (bool, bool) = database
+        .query_row(
+            "SELECT pause_requested,cancel_requested FROM local_ai_clean_jobs WHERE id=?1",
+            [id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|error| format!("读取 AI 清洗控制状态失败：{error}"))?;
     let terminal = queued == 0 && running == 0;
     let status = if pause_requested && !terminal {
         "paused"
@@ -741,7 +783,7 @@ fn save_applied_tags(
     asset_id: &str,
     relative_path: &str,
     tags: &[TrainingTag],
-    item_update: Option<(&str, &str)>,
+    item_update: Option<(&str, &str, Option<&str>)>,
 ) -> Result<(), String> {
     let caption = training_tags::caption_from_tags(tags)
         .ok_or_else(|| "AI 清洗后的标签不能为空".to_string())?;
@@ -757,22 +799,34 @@ fn save_applied_tags(
         let transaction = database
             .unchecked_transaction()
             .map_err(|error| format!("开启 AI 清洗应用事务失败：{error}"))?;
-        let operation = if item_update.is_some_and(|(_, status)| status == "undone") {
+        let operation = if item_update.is_some_and(|(_, status, _)| status == "undone") {
             "ai_clean_undo"
         } else {
             "ai_clean_apply"
+        };
+        let change_reason = if item_update.is_some_and(|(_, _, proposal)| proposal.is_some()) {
+            "AI 按用户选择的清洗预设直接更新"
+        } else {
+            "用户确认 AI 标签清洗"
         };
         let change_id = training_tags::replace_tags(
             &transaction,
             asset_id,
             tags,
             operation,
-            Some("用户确认 AI 标签清洗"),
+            Some(change_reason),
             &now,
         )?;
         if transaction.execute("UPDATE local_training_assets SET caption=?3,caption_source=?4,confirmed=0,updated_at=?5 WHERE id=?1 AND dataset_id=?2", params![asset_id,dataset_id,caption,caption_source,now]).map_err(|error| format!("保存 AI 清洗标签失败：{error}"))? != 1 { return Err("训练图片不存在".into()); }
-        if let Some((job_id, apply_status)) = item_update {
-            transaction.execute("UPDATE local_ai_clean_job_items SET apply_status=?3,applied_change_id=CASE WHEN ?3='applied' THEN ?4 ELSE NULL END,updated_at=?5 WHERE job_id=?1 AND asset_id=?2", params![job_id,asset_id,apply_status,change_id,now]).map_err(|error| format!("保存 AI 清洗应用状态失败：{error}"))?;
+        if let Some((job_id, apply_status, proposal_json)) = item_update {
+            let changed = if let Some(proposal_json) = proposal_json {
+                transaction.execute("UPDATE local_ai_clean_job_items SET status='succeeded',proposal_json=?5,apply_status=?3,applied_change_id=?4,error=NULL,updated_at=?6 WHERE job_id=?1 AND asset_id=?2 AND status='running'", params![job_id,asset_id,apply_status,change_id,proposal_json,now])
+            } else {
+                transaction.execute("UPDATE local_ai_clean_job_items SET apply_status=?3,applied_change_id=CASE WHEN ?3='applied' THEN ?4 ELSE NULL END,updated_at=?5 WHERE job_id=?1 AND asset_id=?2", params![job_id,asset_id,apply_status,change_id,now])
+            }.map_err(|error| format!("保存 AI 清洗应用状态失败：{error}"))?;
+            if changed != 1 {
+                return Err("AI 清洗任务状态已经变化，请重新执行".into());
+            }
         }
         transaction
             .execute(
@@ -893,7 +947,7 @@ mod tests {
     use std::fs;
 
     #[test]
-    fn applied_ai_clean_tags_sync_caption_and_can_be_undone() {
+    fn direct_ai_clean_syncs_caption_preserves_trigger_and_can_be_undone() {
         let temporary = tempfile::tempdir().expect("创建 AI 清洗临时目录");
         let state = DesktopState::initialize(temporary.path()).expect("初始化桌面状态");
         let dataset = state
@@ -958,20 +1012,31 @@ mod tests {
         let now = Utc::now().to_rfc3339();
         {
             let database = state.database.lock().expect("锁定 AI 清洗数据库");
-            database.execute("INSERT INTO local_ai_clean_jobs (id,dataset_id,status,progress,total_assets,processed_assets,succeeded_assets,training_goal,created_at,completed_at,updated_at) VALUES (?1,?2,'succeeded',100,1,1,1,'固定身份',?3,?3,?3)", params![job_id,dataset.id,now]).expect("登记 AI 清洗任务");
-            database.execute("INSERT INTO local_ai_clean_job_items (job_id,asset_id,status,attempt_count,original_tags_json,proposal_json,apply_status,updated_at) VALUES (?1,?2,'succeeded',1,?3,?4,'pending',?5)", params![job_id,asset_id,serde_json::to_string(&proposal.original_tags).expect("序列化原标签"),serde_json::to_string(&proposal).expect("序列化建议"),now]).expect("登记 AI 清洗建议");
-            let applied = apply_proposal(
+            database.execute("INSERT INTO local_ai_clean_jobs (id,dataset_id,status,progress,total_assets,training_goal,created_at,updated_at) VALUES (?1,?2,'running',0,1,'固定身份',?3,?3)", params![job_id,dataset.id,now]).expect("登记 AI 清洗任务");
+            database.execute("INSERT INTO local_ai_clean_job_items (job_id,asset_id,status,attempt_count,original_tags_json,apply_status,updated_at) VALUES (?1,?2,'running',1,?3,'pending',?4)", params![job_id,asset_id,serde_json::to_string(&proposal.original_tags).expect("序列化原标签"),now]).expect("登记运行中的 AI 清洗图片");
+            apply_direct_proposal(
                 &database,
                 &state.app_data_dir,
-                DesktopAiCleanApplyInput {
+                &CleanExecutionItem {
                     job_id: job_id.clone(),
                     dataset_id: dataset.id.clone(),
                     asset_id: asset_id.clone(),
-                    remove_tags: vec!["blue hair".into()],
-                    add_tags: vec!["indoors".into()],
+                    image_path: PathBuf::from(&asset.path),
+                    dataset_type: "character".into(),
+                    trigger_words: vec!["clean_token".into()],
+                    training_goal: "固定身份".into(),
+                    original_tags: proposal.original_tags.clone(),
+                    attempt_count: 1,
                 },
+                &proposal,
             )
-            .expect("应用 AI 清洗");
+            .expect("直接应用 AI 清洗");
+            let applied = training_dataset::read_dataset_with_assets(
+                &database,
+                &state.app_data_dir,
+                &dataset.id,
+            )
+            .expect("读取直接清洗结果");
             let applied_asset = applied
                 .assets
                 .iter()
@@ -985,6 +1050,8 @@ mod tests {
                 .tags
                 .iter()
                 .any(|tag| tag.value == "indoors" && tag.source == "ai_cleaned"));
+            let item_state: (String, String) = database.query_row("SELECT status,apply_status FROM local_ai_clean_job_items WHERE job_id=?1 AND asset_id=?2", params![job_id,asset_id], |row| Ok((row.get(0)?,row.get(1)?))).expect("读取直接清洗状态");
+            assert_eq!(item_state, ("succeeded".into(), "applied".into()));
             assert_eq!(
                 fs::read_to_string(Path::new(&asset.path).with_extension("txt"))
                     .expect("读取同步 Caption"),
@@ -1058,19 +1125,57 @@ mod tests {
     fn queued_ai_clean_job_supports_pause_resume_and_cancel() {
         let temporary = tempfile::tempdir().expect("创建 AI 清洗控制目录");
         let state = DesktopState::initialize(temporary.path()).expect("初始化桌面状态");
-        let dataset = state.create_training_dataset(DesktopTrainingDatasetCreateInput { title: "AI 清洗控制".into(), r#type: "character".into(), trigger_words: vec!["clean_control".into()] }).expect("创建训练集");
+        let dataset = state
+            .create_training_dataset(DesktopTrainingDatasetCreateInput {
+                title: "AI 清洗控制".into(),
+                r#type: "character".into(),
+                trigger_words: vec!["clean_control".into()],
+            })
+            .expect("创建训练集");
         let source = temporary.path().join("ai-clean-control.png");
-        RgbImage::from_pixel(32, 32, Rgb([32, 64, 96])).save(&source).expect("写入 AI 清洗控制图片");
+        RgbImage::from_pixel(32, 32, Rgb([32, 64, 96]))
+            .save(&source)
+            .expect("写入 AI 清洗控制图片");
         let imported = {
             let mut database = state.database.lock().expect("锁定训练数据库");
-            training_dataset::add_images(&mut database, &state.app_data_dir, DesktopTrainingImagesAddInput { dataset_id: dataset.id.clone(), source_paths: vec![source.to_string_lossy().into_owned()] }).expect("导入 AI 清洗控制图片")
+            training_dataset::add_images(
+                &mut database,
+                &state.app_data_dir,
+                DesktopTrainingImagesAddInput {
+                    dataset_id: dataset.id.clone(),
+                    source_paths: vec![source.to_string_lossy().into_owned()],
+                },
+            )
+            .expect("导入 AI 清洗控制图片")
         };
-        state.update_training_caption(DesktopTrainingCaptionUpdateInput { dataset_id: dataset.id.clone(), asset_id: imported.assets[0].id.clone(), caption: Some("solo, standing".into()) }).expect("保存 AI 清洗原标签");
+        state
+            .update_training_caption(DesktopTrainingCaptionUpdateInput {
+                dataset_id: dataset.id.clone(),
+                asset_id: imported.assets[0].id.clone(),
+                caption: Some("solo, standing".into()),
+            })
+            .expect("保存 AI 清洗原标签");
         let mut database = state.database.lock().expect("锁定 AI 清洗任务数据库");
-        let job = create_job(&mut database, DesktopAiCleanJobCreateInput { dataset_id: dataset.id, asset_ids: vec![imported.assets[0].id.clone()], training_goal: "保留动作变量".into() }).expect("创建 AI 清洗控制任务");
-        assert_eq!(pause_job(&database, &job.id).expect("暂停 AI 清洗").status, "paused");
-        assert!(claim_next_item(&database, &state.app_data_dir).expect("检查暂停队列").is_none());
-        assert_eq!(resume_job(&database, &job.id).expect("恢复 AI 清洗").status, "queued");
+        let job = create_job(
+            &mut database,
+            DesktopAiCleanJobCreateInput {
+                dataset_id: dataset.id,
+                asset_ids: vec![imported.assets[0].id.clone()],
+                training_goal: "保留动作变量".into(),
+            },
+        )
+        .expect("创建 AI 清洗控制任务");
+        assert_eq!(
+            pause_job(&database, &job.id).expect("暂停 AI 清洗").status,
+            "paused"
+        );
+        assert!(claim_next_item(&database, &state.app_data_dir)
+            .expect("检查暂停队列")
+            .is_none());
+        assert_eq!(
+            resume_job(&database, &job.id).expect("恢复 AI 清洗").status,
+            "queued"
+        );
         let cancelled = cancel_job(&database, &job.id).expect("取消 AI 清洗");
         assert_eq!(cancelled.status, "cancelled");
         assert_eq!(cancelled.items[0].status, "cancelled");

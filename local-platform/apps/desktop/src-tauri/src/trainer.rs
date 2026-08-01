@@ -261,6 +261,10 @@ fn execute_runner(
             .collect(),
     };
     write_request(&request_path, &request).map_err(failed)?;
+    // 排队期间显卡或驱动可能变化，执行前再次锁定与生成链路相同的 NVIDIA 设备。
+    let selected_backend = crate::environment::preferred_execution_backend_view();
+    let cuda_device = training_cuda_device(&selected_backend.id, selected_backend.device_index)
+        .map_err(failed)?;
     let mut command = Command::new(&component.python);
     command
         .args([
@@ -273,6 +277,7 @@ fn execute_runner(
         .env("PYTHONUTF8", "1")
         .env("PYTHONIOENCODING", "utf-8:replace")
         .env("PYTHONNOUSERSITE", "1")
+        .env("CUDA_VISIBLE_DEVICES", cuda_device)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -368,6 +373,16 @@ fn execute_runner(
     // 本机训练产物必须绑定训练时的精确底模，避免切换同系列微调模型后角色失真。
     registration.base_model_sha256 = Some(job.model_sha256.clone());
     Ok(registration)
+}
+
+/** Trainer 当前只接受 CUDA；设备索引来自统一硬件选择，不能回落默认 0 号卡。 */
+fn training_cuda_device(backend: &str, device_index: Option<u32>) -> Result<String, String> {
+    if backend != crate::environment::BACKEND_NVIDIA_CUDA {
+        return Err("当前 GPU 后端不支持 Windows LoRA 训练".into());
+    }
+    device_index
+        .map(|index| index.to_string())
+        .ok_or_else(|| "NVIDIA 训练链路缺少已选择设备索引".into())
 }
 
 fn validate_execution_files(
@@ -653,7 +668,7 @@ fn kill_process_tree(child: &mut Child) {
 }
 
 fn load_settings(database: &Connection) -> Result<DesktopSettings, String> {
-    database.query_row("SELECT theme_mode,font_scale,default_privacy,auto_upload,model_root,output_root,runtime_root,upload_concurrency,wifi_only,bandwidth_limit_kib FROM desktop_settings WHERE id=1", [], |row| Ok(DesktopSettings { theme_mode: row.get(0)?, font_scale: row.get(1)?, default_privacy: row.get(2)?, auto_upload: row.get::<_,i64>(3)? != 0, model_root: row.get(4)?, output_root: row.get(5)?, runtime_root: row.get(6)?, upload_concurrency: row.get(7)?, wifi_only: row.get::<_,i64>(8)? != 0, bandwidth_limit_kib: row.get(9)? })).map_err(|error| format!("读取 Trainer 设置失败：{error}"))
+    database.query_row("SELECT theme_mode,font_scale,default_privacy,auto_upload,model_root,output_root,runtime_root,upload_concurrency,wifi_only,bandwidth_limit_kib FROM desktop_settings WHERE id=1", [], |row| Ok(DesktopSettings { theme_mode: row.get(0)?, font_scale: row.get(1)?, content_font_scale: 1.2, default_privacy: row.get(2)?, auto_upload: row.get::<_,i64>(3)? != 0, model_root: row.get(4)?, output_root: row.get(5)?, runtime_root: row.get(6)?, upload_concurrency: row.get(7)?, wifi_only: row.get::<_,i64>(8)? != 0, bandwidth_limit_kib: row.get(9)? })).map_err(|error| format!("读取 Trainer 设置失败：{error}"))
 }
 fn sha256_file(path: &Path) -> Result<String, String> {
     let mut reader =
@@ -750,5 +765,16 @@ mod tests {
             2
         );
         assert_eq!(protected_keep_tokens(5, &["my_character".into()]), 5);
+    }
+
+    #[test]
+    fn trainer_uses_selected_cuda_device_and_rejects_directml() {
+        assert_eq!(
+            training_cuda_device(crate::environment::BACKEND_NVIDIA_CUDA, Some(2))
+                .expect("选择 CUDA 训练设备"),
+            "2"
+        );
+        assert!(training_cuda_device(crate::environment::BACKEND_NVIDIA_CUDA, None).is_err());
+        assert!(training_cuda_device(crate::environment::BACKEND_AMD_DIRECTML, None).is_err());
     }
 }

@@ -756,7 +756,8 @@ fn read_asset_snapshots(
     app_data_dir: &Path,
     dataset_id: &str,
 ) -> Result<Vec<AssetSnapshot>, String> {
-    let mut statement = transaction.prepare("SELECT asset.id,asset.file_name,COALESCE(derivative.relative_path,asset.relative_path),COALESCE(derivative.sha256,asset.sha256),COALESCE(derivative.byte_size,asset.byte_size),asset.caption,CASE WHEN derivative.id IS NULL THEN 'original' ELSE 'background_removed' END,derivative.source FROM local_training_assets asset LEFT JOIN local_training_asset_derivatives derivative ON derivative.id=asset.selected_derivative_id AND derivative.asset_id=asset.id WHERE asset.dataset_id=?1 ORDER BY asset.created_at ASC,asset.id ASC").map_err(|error| format!("读取训练图片失败：{error}"))?;
+    // 新训练快照始终使用训练集原图；历史快照继续保留已经固化的图片版本。
+    let mut statement = transaction.prepare("SELECT asset.id,asset.file_name,asset.relative_path,asset.sha256,asset.byte_size,asset.caption,'original',NULL FROM local_training_assets asset WHERE asset.dataset_id=?1 ORDER BY asset.created_at ASC,asset.id ASC").map_err(|error| format!("读取训练图片失败：{error}"))?;
     let rows = statement
         .query_map([dataset_id], |row| {
             Ok(AssetSnapshot {
@@ -994,19 +995,15 @@ fn modified_millis(metadata: &fs::Metadata) -> Result<u64, String> {
 mod tests {
     use super::*;
     use crate::{
-        background_removal,
         models::{
-            DesktopTrainingAssetDeleteInput, DesktopTrainingAssetVariantSelectInput,
-            DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput,
-            DesktopTrainingImagesAddInput, DesktopTrainingManualMaskInput,
+            DesktopTrainingAssetDeleteInput, DesktopTrainingCaptionUpdateInput,
+            DesktopTrainingDatasetCreateInput, DesktopTrainingImagesAddInput,
         },
         storage::DesktopState,
         training_dataset,
     };
-    use base64::{engine::general_purpose::STANDARD, Engine};
-    use image::{GrayImage, ImageFormat, Luma, Rgb, RgbImage};
+    use image::{Rgb, RgbImage};
     use sha2::{Digest, Sha256};
-    use std::io::Cursor;
 
     #[test]
     fn training_parameters_reject_alpha_larger_than_rank() {
@@ -1077,36 +1074,6 @@ mod tests {
                 })
                 .expect("保存训练 Caption");
         }
-        // 第一张图片明确选择手动透明派生版本，训练任务必须把该选择固化到独立快照。
-        let (selected_derivative_id, selected_derivative_path) = {
-            let mask = GrayImage::from_fn(32, 32, |x, _| Luma([if x < 16 { 0 } else { 255 }]));
-            let mut encoded = Cursor::new(Vec::new());
-            mask.write_to(&mut encoded, ImageFormat::Png)
-                .expect("编码训练快照蒙版");
-            let mut database = state.database.lock().expect("锁定派生版本数据库");
-            let updated = background_removal::save_manual_mask(
-                &mut database,
-                &state.app_data_dir,
-                DesktopTrainingManualMaskInput {
-                    dataset_id: dataset.id.clone(),
-                    asset_id: imported.assets[0].id.clone(),
-                    mask_png_base64: STANDARD.encode(encoded.into_inner()),
-                },
-            )
-            .expect("保存训练快照派生版本");
-            let derivative_id = updated.assets[0]
-                .selected_derivative_id
-                .clone()
-                .expect("读取已选派生版本");
-            let derivative_path = updated.assets[0]
-                .derivatives
-                .iter()
-                .find(|derivative| derivative.id == derivative_id)
-                .expect("读取已选派生文件")
-                .path
-                .clone();
-            (derivative_id, derivative_path)
-        };
         {
             let database = state.database.lock().expect("锁定确认数据库");
             training_dataset::confirm_dataset(&database, &state.app_data_dir, &dataset.id)
@@ -1165,24 +1132,6 @@ mod tests {
             database.execute("UPDATE local_training_jobs SET preprocessing_status='succeeded',preprocessing_progress=100 WHERE id=?1", [&job.id]).expect("完成快照 AI 标签阶段");
             job.id
         };
-        {
-            let database = state.database.lock().expect("锁定恢复原图数据库");
-            let restored = background_removal::select_variant(
-                &database,
-                &state.app_data_dir,
-                DesktopTrainingAssetVariantSelectInput {
-                    dataset_id: dataset.id.clone(),
-                    asset_id: imported.assets[0].id.clone(),
-                    derivative_id: None,
-                },
-            )
-            .expect("任务提交后恢复原图");
-            assert!(restored.assets[0].selected_derivative_id.is_none());
-            assert!(restored.assets[0]
-                .derivatives
-                .iter()
-                .any(|derivative| derivative.id == selected_derivative_id));
-        }
         state
             .update_training_caption(DesktopTrainingCaptionUpdateInput {
                 dataset_id: dataset.id.clone(),
@@ -1202,7 +1151,6 @@ mod tests {
             )
             .expect("任务提交后删除原训练图片");
             assert_eq!(updated.assets.len(), 4);
-            assert!(!Path::new(&selected_derivative_path).exists());
         }
         let execution = {
             let mut database = state.database.lock().expect("锁定领取数据库");
@@ -1231,11 +1179,8 @@ mod tests {
                 get_snapshot(&database, &state.app_data_dir, &job_id).expect("读取完整训练快照");
             assert_eq!(snapshot.dataset_title, "训练快照");
             assert_eq!(snapshot.assets.len(), 5);
-            assert_eq!(snapshot.assets[0].image_variant, "background_removed");
-            assert_eq!(
-                snapshot.assets[0].derivative_source.as_deref(),
-                Some("manual")
-            );
+            assert_eq!(snapshot.assets[0].image_variant, "original");
+            assert!(snapshot.assets[0].derivative_source.is_none());
             assert!(Path::new(&snapshot.assets[0].path).is_file());
             assert!(snapshot
                 .assets
@@ -1253,11 +1198,16 @@ mod tests {
                 },
             )
             .expect("训练运行期间删除原训练集");
-            assert!(training_dataset::list_datasets(&database, &state.app_data_dir)
-                .expect("读取删除后的训练集")
+            assert!(
+                training_dataset::list_datasets(&database, &state.app_data_dir)
+                    .expect("读取删除后的训练集")
+                    .iter()
+                    .all(|item| item.id != dataset.id)
+            );
+            assert!(snapshot
+                .assets
                 .iter()
-                .all(|item| item.id != dataset.id));
-            assert!(snapshot.assets.iter().all(|asset| Path::new(&asset.path).is_file()));
+                .all(|asset| Path::new(&asset.path).is_file()));
             copy_snapshot_to_dataset(
                 &mut database,
                 &state.app_data_dir,

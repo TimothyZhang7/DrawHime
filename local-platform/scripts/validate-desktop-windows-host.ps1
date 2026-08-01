@@ -50,16 +50,35 @@ function Get-DrawHimeWebViewVersion {
   return @($versions | Sort-Object -Unique | Select-Object -Last 1)[0]
 }
 
-# 通过 nvidia-smi 获取脱敏硬件摘要；无 NVIDIA GPU 时返回空数组。
+# 通过 nvidia-smi 与 CIM 获取脱敏硬件摘要；同时识别 CUDA 和 DirectML 可用厂商。
 function Get-DrawHimeGpuSummary {
+  $result = @()
   $command = Get-Command "nvidia-smi.exe" -ErrorAction SilentlyContinue
-  if (-not $command) { return @() }
-  $rows = & $command.Source "--query-gpu=name,memory.total,driver_version" "--format=csv,noheader,nounits" 2>$null
-  if ($LASTEXITCODE -ne 0) { return @() }
-  return @($rows | ForEach-Object {
-    $columns = @($_ -split "," | ForEach-Object { $_.Trim() })
-    if ($columns.Count -ge 3) { [ordered]@{ name = $columns[0]; memoryMiB = [int]$columns[1]; driverVersion = $columns[2] } }
-  })
+  if ($command) {
+    $rows = & $command.Source "--query-gpu=index,name,memory.total,driver_version" "--format=csv,noheader,nounits" 2>$null
+    if ($LASTEXITCODE -eq 0) {
+      $result += @($rows | ForEach-Object {
+        $columns = @($_ -split "," | ForEach-Object { $_.Trim() })
+        if ($columns.Count -ge 4) { [ordered]@{ deviceIndex = [int]$columns[0]; name = $columns[1]; vendor = "NVIDIA"; backend = "nvidia_cuda"; memoryMiB = [int]$columns[2]; memoryReliable = $true; driverVersion = $columns[3] } }
+      })
+    }
+  }
+  $adapters = @(Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue)
+  foreach ($adapter in $adapters) {
+    $identity = "$($adapter.Name) $($adapter.AdapterCompatibility)"
+    $vendor = if ($identity -match "AMD|Advanced Micro Devices|Radeon") { "AMD" } elseif ($identity -match "NVIDIA") { "NVIDIA" } else { $null }
+    if (-not $vendor -or $result.name -contains [string]$adapter.Name) { continue }
+    $result += [ordered]@{
+      name = [string]$adapter.Name
+      deviceIndex = $null
+      vendor = $vendor
+      backend = if ($vendor -eq "AMD") { "amd_directml" } else { "nvidia_cuda" }
+      memoryMiB = 0
+      memoryReliable = $false
+      driverVersion = [string]$adapter.DriverVersion
+    }
+  }
+  return @($result)
 }
 
 # 注册最小 Win32 DPI 探针，直接验证运行窗口使用 Per-Monitor V2。
@@ -142,7 +161,7 @@ finally {
 }
 
 $gpuSummary = @(Get-DrawHimeGpuSummary)
-if ($ExpectNoGpu.IsPresent -and $gpuSummary.Count -ne 0) { throw "当前验收机检测到 NVIDIA GPU，不能作为无 GPU 门禁证据" }
+if ($ExpectNoGpu.IsPresent -and $gpuSummary.Count -ne 0) { throw "当前验收机检测到 NVIDIA 或 AMD GPU，不能作为无 GPU 门禁证据" }
 
 $uninstallValidation = $null
 if ($ValidateUninstall.IsPresent) {
@@ -196,7 +215,7 @@ $result = [ordered]@{
   dpi = [ordered]@{ value = $windowDpi; scalePercent = [math]::Round($windowDpi / 96 * 100); perMonitorV2 = $perMonitorV2 }
   webView2Version = $webViewVersion
   gpus = $gpuSummary
-  gpuGate = [ordered]@{ expectedNoNvidiaGpu = [bool]$ExpectNoGpu.IsPresent; detectedCount = $gpuSummary.Count; passed = (-not $ExpectNoGpu.IsPresent) -or $gpuSummary.Count -eq 0 }
+  gpuGate = [ordered]@{ expectedNoSupportedGpu = [bool]$ExpectNoGpu.IsPresent; detectedCount = $gpuSummary.Count; passed = (-not $ExpectNoGpu.IsPresent) -or $gpuSummary.Count -eq 0 }
   installer = $installerEvidence
   installation = [ordered]@{ version = [string]$installation.DisplayVersion; fileCount = $programFiles.Count; totalBytes = ($programFiles | Measure-Object Length -Sum).Sum; containsModelOrTrainer = $false; dataRoot = "data" }
   uninstall = $uninstallValidation

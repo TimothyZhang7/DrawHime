@@ -11,11 +11,25 @@ type InstallMap = Record<string, DesktopResourceInstallView>;
 
 const ACTIVE_DOWNLOAD_STATES = new Set(["queued", "downloading", "verifying"]);
 const ACTIVE_INSTALL_STATES = new Set(["verifying", "installing", "switching"]);
-const HIDDEN_RUNTIME_ISSUES = new Set(["runtime_missing", "runtime_unverified", "generation_model_missing", "captioner_missing", "trainer_missing"]);
+const HIDDEN_RUNTIME_ISSUES = new Set(["runtime_missing", "runtime_unverified", "generation_model_missing", "captioner_missing", "trainer_missing", "amd_directml_compatibility_mode"]);
 
 /** 资源安装页只纳入服务端签名清单明确标记为必需的依赖，客户端不写死任何底模。 */
 export function coreResources(catalog: DesktopResourceCatalogView | null): ResourceItem[] {
   return catalog?.resources.filter((resource) => resource.required) || [];
+}
+
+/** 验证当前后端的必需依赖集合，防止只有公共模型却缺少专属 Runtime 时误进初始化。 */
+export function coreDependencyProblem(catalog: DesktopResourceCatalogView | null): string | null {
+  if (!catalog || !catalog.configured) return null;
+  if (catalog.selectedBackend === "unavailable") return "当前未检测到可安装的 NVIDIA CUDA 或 AMD DirectML 后端";
+  const required = coreResources(catalog);
+  const runtimes = required.filter((resource) => resource.kind === "runtime" && resource.runtimeProfile?.backend === catalog.selectedBackend);
+  if (runtimes.length !== 1) return `签名清单缺少唯一的 ${catalog.selectedBackend === "amd_directml" ? "AMD DirectML" : "NVIDIA CUDA"} Runtime`;
+  const modelRoles = new Set(required.filter((resource) => resource.kind === "model").map((resource) => resource.modelRegistration?.role));
+  if (!["primary", "text_encoder", "vae"].every((role) => modelRoles.has(role as "primary" | "text_encoder" | "vae"))) return "签名清单缺少完整的 Anima Base 主模型、文本编码器或 VAE";
+  if (!required.some((resource) => resource.kind === "captioner")) return "签名清单缺少自动打标组件";
+  if (catalog.selectedBackend === "nvidia_cuda" && !required.some((resource) => resource.kind === "trainer")) return "NVIDIA CUDA 依赖清单缺少 LoRA Trainer";
+  return null;
 }
 
 /** Runtime 缺失和等待自检由左下角统一承载，环境页只保留其他真实问题。 */
@@ -40,13 +54,15 @@ export function desktopCoreState(state: DesktopBootstrapView, catalog: DesktopRe
   if (critical) return { kind: "error", label: "本地核心不可用", detail: critical.title };
   if (!catalog) return { kind: "starting", label: "正在检查本地核心", detail: "正在读取签名依赖清单" };
   if (!catalog.configured) return { kind: "missing", label: "依赖通道未配置", detail: "必需资源清单当前不可用" };
+  const dependencyProblem = coreDependencyProblem(catalog);
+  if (dependencyProblem) return { kind: "missing", label: "依赖清单不完整", detail: dependencyProblem };
   const required = coreResources(catalog);
   if (required.length === 0) return { kind: "missing", label: "依赖清单不完整", detail: "未找到 Anima Base 或必需组件" };
   const missing = required.filter((resource) => !resource.installed);
   if (missing.length > 0) return { kind: "missing", label: "本地核心未就绪", detail: `缺少 ${missing.length} 项必需依赖` };
   if (["starting", "stopping"].includes(state.runtime.status)) return { kind: "starting", label: state.runtime.status === "starting" ? "本地核心启动中" : "本地核心停止中", detail: "后台进程正在切换状态" };
   if (state.environment.runtime.status === "installed_unverified") return { kind: "missing", label: "本地核心等待自检", detail: "依赖已齐全，请执行一次完整自检" };
-  if (state.runtime.status === "ready") return { kind: "ready", label: "本地核心可用", detail: "Runtime 正在本机 GPU 上运行" };
+  if (state.runtime.status === "ready") return { kind: "ready", label: "本地核心可用", detail: `${state.environment.executionBackend.label}${state.environment.executionBackend.deviceIndex === null ? "" : ` · GPU ${state.environment.executionBackend.deviceIndex}`} 正在运行` };
   return { kind: "ready", label: "本地核心可用", detail: "必需依赖和自检均已完成" };
 }
 
@@ -70,7 +86,10 @@ interface DependencyListPageProps extends ResourceActions {
 export function DependencyListPage({ catalog, progress, installProgress, loading, bulkBusy, onReload, onInstallRequired, onDownload, onPause, onInstall }: DependencyListPageProps) {
   const resources = coreResources(catalog);
   const summary = dependencySummary(resources, progress, installProgress);
-  return <div className="desktop-page"><section className="section-card resource-card"><header><div><span>CORE DEPENDENCIES</span><h2>必需依赖清单</h2></div><div className="resource-header-actions"><button className="resource-reload" disabled={loading || bulkBusy} onClick={onReload}>{loading ? <LoaderCircle className="spin" /> : <RefreshCw />}刷新清单</button><button className="resource-install-all" disabled={!catalog?.configured || summary.waiting === 0 || bulkBusy} onClick={onInstallRequired}>{bulkBusy ? <LoaderCircle className="spin" /> : <Download />}{bulkBusy ? "正在安装" : summary.waiting ? `安装缺失依赖（${summary.waiting}）` : "必需依赖已齐全"}</button></div></header>{!catalog ? <div className="empty-block">正在读取资源发布状态</div> : !catalog.configured ? <UnconfiguredCatalog message={catalog.message} /> : <><div className="dependency-summary"><SummaryItem tone="loaded" label="已加载" value={summary.loaded} /><SummaryItem tone="downloading" label="下载中" value={summary.downloading} /><SummaryItem tone="waiting" label="等待下载" value={summary.waiting} /></div><div className="resource-channel-status"><ShieldCheck /><span><strong>{catalog.message}</strong><small>仅列出 Runtime、自动打标、训练组件与 Anima Base；其他资源请前往对应仓库安装。</small></span></div>{resources.length ? <div className="resource-list dependency-list">{resources.map((resource) => <DependencyRow key={resource.id} resource={resource} current={progress[resource.id]} installing={installProgress[resource.id]} bulkBusy={bulkBusy} onDownload={onDownload} onPause={onPause} onInstall={onInstall} />)}</div> : <div className="empty-block">签名目录缺少适用于当前设备的必需依赖</div>}</>}</section></div>;
+  const dependencyProblem = coreDependencyProblem(catalog);
+  const reloadDisabledReason = loading ? "正在刷新签名依赖清单" : bulkBusy ? "批量依赖操作尚未完成" : null;
+  const installDisabledReason = bulkBusy ? "正在处理必需依赖" : !catalog?.configured ? "签名依赖清单当前不可用" : dependencyProblem || (summary.waiting === 0 ? "必需依赖已经全部安装" : null);
+  return <div className="desktop-page"><section className="section-card resource-card"><header><div><span>CORE DEPENDENCIES</span><h2>必需依赖清单</h2></div><div className="resource-header-actions"><button className="resource-reload" disabled={Boolean(reloadDisabledReason)} title={reloadDisabledReason || "重新读取签名清单和本机安装状态"} onClick={onReload}>{loading ? <LoaderCircle className="spin" /> : <RefreshCw />}刷新清单</button><button className="resource-install-all" disabled={Boolean(installDisabledReason)} title={installDisabledReason || `串行安装 ${summary.waiting} 项缺失依赖`} onClick={onInstallRequired}>{bulkBusy ? <LoaderCircle className="spin" /> : <Download />}{bulkBusy ? "正在安装" : summary.waiting ? `安装缺失依赖（${summary.waiting}）` : "必需依赖已齐全"}</button></div></header>{!catalog ? <div className="empty-block">正在读取资源发布状态</div> : !catalog.configured ? <UnconfiguredCatalog message={catalog.message} /> : <><div className="dependency-summary"><SummaryItem tone="loaded" label="已加载" value={summary.loaded} /><SummaryItem tone="downloading" label="下载中" value={summary.downloading} /><SummaryItem tone="waiting" label="等待下载" value={summary.waiting} /></div><div className="resource-channel-status"><ShieldCheck /><span><strong>{dependencyProblem || catalog.message}</strong><small>{dependencyProblem ? "请刷新清单或等待对应后端 Runtime 发布，客户端不会安装其他显卡的依赖。" : "仅列出 Runtime、自动打标、训练组件与 Anima Base；其他资源请前往对应仓库安装。"}</small></span></div>{resources.length ? <div className="resource-list dependency-list">{resources.map((resource) => <DependencyRow key={resource.id} resource={resource} current={progress[resource.id]} installing={installProgress[resource.id]} bulkBusy={bulkBusy} onDownload={onDownload} onPause={onPause} onInstall={onInstall} />)}</div> : <div className="empty-block">签名目录缺少适用于当前设备的必需依赖</div>}</>}</section></div>;
 }
 
 interface DownloadQueueDialogProps extends ResourceActions {
@@ -120,13 +139,13 @@ export function ResourceAction({ resource, current, installing, bulkBusy, onDown
   const downloadBusy = Boolean(current && ACTIVE_DOWNLOAD_STATES.has(current.status));
   const installBusy = Boolean(installing && ACTIVE_INSTALL_STATES.has(installing.status));
   const sourceAvailable = resource.sourceKinds.length > 0;
-  if (current?.status === "downloading") return <button className="secondary" disabled={bulkBusy} onClick={() => onPause(resource.id)}>暂停</button>;
-  if (resource.installed) return <button disabled><CheckCircle2 />已加载</button>;
-  if (installBusy) return <button disabled><LoaderCircle className="spin" />安装中</button>;
-  if (downloadBusy) return <button disabled><LoaderCircle className="spin" />{current?.status === "verifying" ? "校验中" : "排队中"}</button>;
-  if (current?.status === "failed") return <button disabled={bulkBusy || !sourceAvailable} onClick={() => onDownload(resource.id)}><Download />重试</button>;
-  if (resource.downloaded || current?.status === "downloaded") return <button disabled={bulkBusy} onClick={() => onInstall(resource.id)}><PackageCheck />安装</button>;
-  return <button disabled={bulkBusy || !sourceAvailable} onClick={() => onDownload(resource.id)}><Download />{current?.status === "paused" ? "继续" : sourceAvailable ? "下载" : "无来源"}</button>;
+  if (current?.status === "downloading") return <button className="secondary" disabled={bulkBusy} title={bulkBusy ? "批量依赖操作正在进行" : "暂停下载并保留断点数据"} onClick={() => onPause(resource.id)}>暂停</button>;
+  if (resource.installed) return <button disabled title="该依赖已经完成校验并加载"><CheckCircle2 />已加载</button>;
+  if (installBusy) return <button disabled title="正在校验并写入安装目录，请勿重复操作"><LoaderCircle className="spin" />安装中</button>;
+  if (downloadBusy) return <button disabled title={current?.status === "verifying" ? "正在校验完整文件哈希" : "已经进入下载队列"}><LoaderCircle className="spin" />{current?.status === "verifying" ? "校验中" : "排队中"}</button>;
+  if (current?.status === "failed") return <button disabled={bulkBusy || !sourceAvailable} title={bulkBusy ? "批量依赖操作正在进行" : !sourceAvailable ? "签名清单未提供当前设备可用的下载来源" : current.error || "重新从已保存的断点继续下载"} onClick={() => onDownload(resource.id)}><Download />重试</button>;
+  if (resource.downloaded || current?.status === "downloaded") return <button disabled={bulkBusy} title={bulkBusy ? "批量依赖操作正在进行" : "文件与哈希校验已完成，可以安装"} onClick={() => onInstall(resource.id)}><PackageCheck />安装</button>;
+  return <button disabled={bulkBusy || !sourceAvailable} title={bulkBusy ? "批量依赖操作正在进行" : !sourceAvailable ? "签名清单未提供当前设备可用的下载来源" : current?.status === "paused" ? "从已保存的断点继续下载" : "从主站镜像下载并校验"} onClick={() => onDownload(resource.id)}><Download />{current?.status === "paused" ? "继续" : sourceAvailable ? "下载" : "无来源"}</button>;
 }
 
 /** 进度辅助信息按阶段隐藏失效速度和 ETA。 */
@@ -148,7 +167,7 @@ function isResourceBusy(resourceId: string, progress: DownloadMap, installProgre
 }
 
 function resourceDisplayName(resource: ResourceItem): string {
-  if (resource.kind === "runtime") return "本地 Runtime";
+  if (resource.kind === "runtime") return resource.runtimeProfile?.backend === "amd_directml" ? "AMD DirectML Runtime" : "NVIDIA CUDA Runtime";
   if (resource.kind === "captioner") return "自动打标组件";
   if (resource.kind === "trainer") return "LoRA 训练组件";
   const role = resource.modelRegistration?.role;

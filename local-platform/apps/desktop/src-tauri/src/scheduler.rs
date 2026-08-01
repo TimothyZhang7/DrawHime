@@ -210,6 +210,11 @@ pub fn create_job(
         model.10.as_deref(),
         &model.1,
     )?;
+    validate_backend_generation_limits(
+        &crate::environment::preferred_execution_backend(),
+        &model.1,
+        &input,
+    )?;
     let loras = selected_lora_snapshots(&transaction, settings, &model.4, &input.loras)?;
     // 非自定义预设必须由核心按实际底模重新解析，避免旧页面或篡改请求降低质量档语义。
     let generation_profile: Option<DesktopWebsiteModelParameters> = model
@@ -587,6 +592,28 @@ fn validate_job_input(input: &DesktopLocalJobCreateInput) -> Result<(), String> 
     Ok(())
 }
 
+/** 对当前执行后端应用真实验收边界，核心与前端共同收敛但不依赖前端门禁。 */
+fn validate_backend_generation_limits(
+    backend: &str,
+    workflow_kind: &str,
+    input: &DesktopLocalJobCreateInput,
+) -> Result<(), String> {
+    if backend != crate::environment::BACKEND_AMD_DIRECTML {
+        return Ok(());
+    }
+    // AMD DirectML 首版只开放报告中真实生成通过的 Anima、512px、Batch 1 和单 LoRA 范围。
+    if workflow_kind != "anima" {
+        return Err("AMD DirectML 兼容模式当前只支持 Anima 底模".into());
+    }
+    if input.width.max(input.height) > 512 || input.sampling_max_edge > 512 {
+        return Err("AMD DirectML 兼容模式当前最高支持 512px 输出与采样边长".into());
+    }
+    if input.loras.len() > 1 {
+        return Err("AMD DirectML 兼容模式当前最多使用 1 个 LoRA".into());
+    }
+    Ok(())
+}
+
 /** 质量档只读取在线目录已经持久化到本机的参数；自定义模式完整保留用户输入。 */
 fn resolve_generation_parameters(
     input: &DesktopLocalJobCreateInput,
@@ -917,7 +944,7 @@ fn controlled_join(root: &Path, relative: &str) -> Result<PathBuf, String> {
 }
 
 fn load_settings(database: &Connection) -> Result<DesktopSettings, GenerationFailure> {
-    database.query_row("SELECT theme_mode,font_scale,default_privacy,auto_upload,model_root,output_root,runtime_root,upload_concurrency,wifi_only,bandwidth_limit_kib FROM desktop_settings WHERE id=1", [], |row| Ok(DesktopSettings { theme_mode: row.get(0)?, font_scale: row.get(1)?, default_privacy: row.get(2)?, auto_upload: row.get::<_, i64>(3)? != 0, model_root: row.get(4)?, output_root: row.get(5)?, runtime_root: row.get(6)?, upload_concurrency: row.get(7)?, wifi_only: row.get::<_, i64>(8)? != 0, bandwidth_limit_kib: row.get(9)? })).map_err(|error| GenerationFailure::Failed(format!("读取本地调度设置失败：{error}")))
+    database.query_row("SELECT theme_mode,font_scale,default_privacy,auto_upload,model_root,output_root,runtime_root,upload_concurrency,wifi_only,bandwidth_limit_kib FROM desktop_settings WHERE id=1", [], |row| Ok(DesktopSettings { theme_mode: row.get(0)?, font_scale: row.get(1)?, content_font_scale: 1.2, default_privacy: row.get(2)?, auto_upload: row.get::<_, i64>(3)? != 0, model_root: row.get(4)?, output_root: row.get(5)?, runtime_root: row.get(6)?, upload_concurrency: row.get(7)?, wifi_only: row.get::<_, i64>(8)? != 0, bandwidth_limit_kib: row.get(9)? })).map_err(|error| GenerationFailure::Failed(format!("读取本地调度设置失败：{error}")))
 }
 
 fn read_job(database: &Connection, id: &str) -> Result<Option<DesktopLocalJobView>, String> {
@@ -1174,6 +1201,73 @@ mod tests {
         let mut invalid = input;
         invalid.width = 1025;
         assert!(validate_job_input(&invalid).is_err());
+    }
+
+    #[test]
+    fn amd_generation_limits_are_enforced_before_queueing() {
+        let mut input = DesktopLocalJobCreateInput {
+            model_id: Uuid::new_v4().to_string(),
+            prompt: "subject".into(),
+            negative_prompt: None,
+            width: 512,
+            height: 512,
+            quality_preset: "custom".into(),
+            steps: 20,
+            cfg: 5.0,
+            sampler_name: "euler".into(),
+            scheduler_name: "normal".into(),
+            sampling_max_edge: 512,
+            sampling_pixel_budget: 262_144,
+            aspect_step_threshold: 1.5,
+            aspect_adjusted_steps: 18,
+            upscale_method: "lanczos".into(),
+            quality_prompt_enabled: true,
+            default_negative_enabled: true,
+            seed: Some(1),
+            loras: vec![DesktopLocalLoraSelectionInput {
+                id: "lora-1".into(),
+                strength: 1.0,
+                clip_strength: 1.0,
+            }],
+            privacy: "private".into(),
+        };
+        assert!(validate_backend_generation_limits(
+            crate::environment::BACKEND_AMD_DIRECTML,
+            "anima",
+            &input
+        )
+        .is_ok());
+        assert!(validate_backend_generation_limits(
+            crate::environment::BACKEND_AMD_DIRECTML,
+            "checkpoint",
+            &input
+        )
+        .is_err());
+        input.width = 1024;
+        assert!(validate_backend_generation_limits(
+            crate::environment::BACKEND_AMD_DIRECTML,
+            "anima",
+            &input
+        )
+        .is_err());
+        input.width = 512;
+        input.loras.push(DesktopLocalLoraSelectionInput {
+            id: "lora-2".into(),
+            strength: 1.0,
+            clip_strength: 1.0,
+        });
+        assert!(validate_backend_generation_limits(
+            crate::environment::BACKEND_AMD_DIRECTML,
+            "anima",
+            &input
+        )
+        .is_err());
+        assert!(validate_backend_generation_limits(
+            crate::environment::BACKEND_NVIDIA_CUDA,
+            "checkpoint",
+            &input
+        )
+        .is_ok());
     }
 
     #[test]

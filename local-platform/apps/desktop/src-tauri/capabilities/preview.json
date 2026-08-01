@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "preview",
+  "description": "生成与图库预览窗口只允许主题和本地任务事件能力。",
+  "windows": ["generation-preview", "gallery-preview"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-set-theme",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
+  ]
+}

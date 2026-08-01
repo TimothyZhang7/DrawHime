@@ -52,6 +52,14 @@ try {
     sha256: archiveSha256,
     archive: "7z",
     rootDirectory: "ComfyUI_windows_portable",
+    compatibleBackends: ["nvidia_cuda"],
+    runtimeProfile: {
+      backend: "nvidia_cuda",
+      launchProfile: "nvidia-cuda126",
+      pythonExecutable: "python_embeded/python.exe",
+      entrypoint: "ComfyUI/main.py",
+      capabilities: { inference: true, training: true, cpuVaeRequired: false, fp32UnetRequired: false, maxValidatedEdge: 1536, maxValidatedBatch: 1, maxValidatedLoras: 64 },
+    },
     required: true,
     upstream: RELEASE,
   };

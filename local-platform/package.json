@@ -30,6 +30,7 @@
     "desktop:validate-update-e2e": "node scripts/validate-desktop-update-e2e.mjs",
     "desktop:set-version": "node scripts/set-desktop-version.mjs",
     "desktop:build-runtime": "node scripts/build-desktop-runtime.mjs",
+    "desktop:build-runtime-amd": "node scripts/build-desktop-runtime-directml.mjs",
     "desktop:build-captioner": "node scripts/build-desktop-captioner.mjs",
     "desktop:build-segmenter": "node scripts/build-desktop-segmenter.mjs",
     "desktop:build-trainer": "node scripts/build-desktop-trainer.mjs",
