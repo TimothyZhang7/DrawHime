@@ -35,7 +35,12 @@ export function registerDesktopResourceRoutes(router: ServiceRouter): void {
       sendError(response, 503, failure.code, failure.message);
       return;
     }
-    const resource = published.payload.resources.find((item) => item.id === params.id);
+    let resource = published.payload.resources.find((item) => item.id === params.id);
+    if (!resource) {
+      // 基础与扩展清单是两份独立签名状态；发布切换期间允许回退基础清单，避免已验真的应用包短暂返回 404。
+      const fallback = await loadPublishedManifest(false).catch(() => null);
+      resource = fallback?.payload.resources.find((item) => item.id === params.id);
+    }
     if (!resource) return sendError(response, 404, "desktop_resource_not_found", "桌面资源不存在");
     const storageRoot = process.env.DESKTOP_RESOURCE_STORAGE_ROOT?.trim();
     if (!storageRoot || storageRoot.startsWith("<")) return sendError(response, 503, "desktop_resource_storage_unconfigured", "桌面资源镜像存储尚未配置");

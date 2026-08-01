@@ -57,13 +57,28 @@ function publicationPaths(values) {
   const version = requiredVersion(values, "version");
   const versionSlug = version.replaceAll(".", "-");
   const fileName = `drawhime-desktop-${version}-x64-setup.exe`;
+  const variants = [
+    {
+      name: "base",
+      payloadPath: resolve(values.get("payload") || resolve(privateRoot, "manifest-payload.json")),
+      envelopePath: resolve(values.get("envelope") || resolve(privateRoot, "manifest-envelope.json")),
+      remoteSuffix: "",
+      capabilitiesQuery: "",
+    },
+    {
+      name: "extended",
+      payloadPath: resolve(values.get("extended-payload") || resolve(privateRoot, "manifest-payload.extended.json")),
+      envelopePath: resolve(values.get("extended-envelope") || resolve(privateRoot, "manifest-envelope.extended.json")),
+      remoteSuffix: ".segmenter-v1",
+      capabilitiesQuery: "?capabilities=gpu-backends-v1",
+    },
+  ];
   return {
     version,
     resourceId: `application.drawhime-desktop.${versionSlug}`,
     fileName,
     assetPath: resolve(values.get("asset-output") || resolve(privateRoot, "assets", fileName)),
-    payloadPath: resolve(values.get("payload") || resolve(privateRoot, "manifest-payload.json")),
-    envelopePath: resolve(values.get("envelope") || resolve(privateRoot, "manifest-envelope.json")),
+    variants,
     privateKeyPath: resolve(values.get("private-key") || resolve(privateRoot, "signing.pem")),
     publicKeyPath: resolve(values.get("public-key") || resolve(privateRoot, "public-key.txt")),
   };
@@ -89,13 +104,7 @@ async function preparePublicationMetadata(paths, values, isDryRun, installer) {
   const releaseNotes = requiredValue(values, "release-notes").trim();
   if (!releaseNotes || releaseNotes.length > 20_000) throw new Error("版本说明长度必须为 1–20000 字符");
   const mandatory = parseBoolean(values.get("mandatory") || "false", "mandatory");
-  const currentPayload = JSON.parse(await readFile(paths.payloadPath, "utf8"));
-  const currentEnvelope = JSON.parse(await readFile(paths.envelopePath, "utf8"));
-  await verifyEnvelope(currentPayload, currentEnvelope, paths);
   const generatedAt = new Date().toISOString();
-  const currentExpiry = new Date(currentPayload.expiresAt);
-  const minimumExpiry = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
-  const expiresAt = currentExpiry > minimumExpiry ? currentExpiry.toISOString() : minimumExpiry.toISOString();
   const mirrorUrl = `https://www.xanime.ink/local-model-api/v1/desktop/resources/${paths.resourceId}/content`;
   // 应用更新与运行资源统一经主站镜像分发，避免第三方下载源导致版本和网络行为不一致。
   const sources = [{ kind: "mirror", url: mirrorUrl }];
@@ -117,13 +126,25 @@ async function preparePublicationMetadata(paths, values, isDryRun, installer) {
     required: false,
     sources,
   };
-  const existingItem = currentPayload.resources.find((resource) => resource.id === item.id);
-  if (existingItem && JSON.stringify(existingItem) !== JSON.stringify(item)) await assertVersionNotPublished(item.id, paths.version);
-  const resources = currentPayload.resources.filter((resource) => resource.id !== item.id);
-  const parsedPayload = desktopResourceManifestPayloadSchema.safeParse({ ...currentPayload, channel: "stable", generatedAt, expiresAt, resources: [...resources, item] });
-  if (!parsedPayload.success) throw new Error(`应用更新资源未通过共享契约：${parsedPayload.error.issues[0]?.message || "未知错误"}`);
-  const signed = await signPayload(parsedPayload.data, paths, currentEnvelope.keyId);
-  const publication = { ...paths, installerPath: installer.installerPath, item, payload: parsedPayload.data, envelope: signed };
+  const variants = [];
+  let publishedConflict = false;
+  for (const variant of paths.variants) {
+    const currentPayload = JSON.parse(await readFile(variant.payloadPath, "utf8"));
+    const currentEnvelope = JSON.parse(await readFile(variant.envelopePath, "utf8"));
+    await verifyEnvelope(currentPayload, currentEnvelope, paths);
+    const existingItem = currentPayload.resources.find((resource) => resource.id === item.id);
+    publishedConflict ||= Boolean(existingItem && JSON.stringify(existingItem) !== JSON.stringify(item));
+    const currentExpiry = new Date(currentPayload.expiresAt);
+    const minimumExpiry = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
+    const expiresAt = currentExpiry > minimumExpiry ? currentExpiry.toISOString() : minimumExpiry.toISOString();
+    const resources = currentPayload.resources.filter((resource) => resource.id !== item.id);
+    const parsedPayload = desktopResourceManifestPayloadSchema.safeParse({ ...currentPayload, channel: "stable", generatedAt, expiresAt, resources: [...resources, item] });
+    if (!parsedPayload.success) throw new Error(`${variant.name} 应用更新资源未通过共享契约：${parsedPayload.error.issues[0]?.message || "未知错误"}`);
+    const envelope = await signPayload(parsedPayload.data, paths, currentEnvelope.keyId);
+    variants.push({ ...variant, payload: parsedPayload.data, envelope });
+  }
+  if (publishedConflict) await assertVersionNotPublished(item.id, paths.version);
+  const publication = { ...paths, installerPath: installer.installerPath, item, variants };
   if (isDryRun) { printSummary(publication, "dry-run"); return publication; }
   if (installer.installerPath) {
     await mkdir(dirname(paths.assetPath), { recursive: true });
@@ -132,19 +153,23 @@ async function preparePublicationMetadata(paths, values, isDryRun, installer) {
     if (await sha256File(temporaryAsset) !== installer.sha256) throw new Error("复制后的安装包 SHA-256 发生变化");
     await rename(temporaryAsset, paths.assetPath);
   }
-  await writeJsonAtomically(paths.payloadPath, parsedPayload.data);
-  await writeJsonAtomically(paths.envelopePath, signed);
+  for (const variant of variants) {
+    await writeJsonAtomically(variant.payloadPath, variant.payload);
+    await writeJsonAtomically(variant.envelopePath, variant.envelope);
+  }
   printSummary(publication, "prepared");
   return publication;
 }
 
 /** 仅允许修复尚未发布的本地准备状态；生产已经登记的版本始终不可覆盖。 */
 async function assertVersionNotPublished(resourceId, version) {
-  const response = await fetch("https://www.xanime.ink/local-model-api/v1/desktop/resources/manifest", { signal: AbortSignal.timeout(20_000) });
-  if (!response.ok) throw new Error(`无法确认版本 ${version} 的生产发布状态：HTTP ${response.status}`);
-  const wrapper = await response.json();
-  const livePayload = desktopResourceManifestPayloadSchema.parse(JSON.parse(wrapper.data?.payload || "null"));
-  if (livePayload.resources.some((resource) => resource.id === resourceId)) throw new Error(`版本 ${version} 已在生产登记为其他不可变内容；请提升版本号，禁止覆盖`);
+  for (const query of ["", "?capabilities=gpu-backends-v1"]) {
+    const response = await fetch(`https://www.xanime.ink/local-model-api/v1/desktop/resources/manifest${query}`, { signal: AbortSignal.timeout(20_000) });
+    if (!response.ok) throw new Error(`无法确认版本 ${version} 的生产发布状态：HTTP ${response.status}`);
+    const wrapper = await response.json();
+    const livePayload = desktopResourceManifestPayloadSchema.parse(JSON.parse(wrapper.data?.payload || "null"));
+    if (livePayload.resources.some((resource) => resource.id === resourceId)) throw new Error(`版本 ${version} 已在生产登记为其他不可变内容；请提升版本号，禁止覆盖`);
+  }
 }
 
 /** 让主站直接拉取本项目 GitHub Release，并在签名前核对完整大小和 SHA-256。 */
@@ -183,15 +208,23 @@ echo '主站 GitHub Release 安装包暂存验证完成'
 
 /** 读取已经准备的私有发布文件，并再次校验契约、签名、大小和哈希。 */
 async function loadPublication(paths, values) {
-  const payload = desktopResourceManifestPayloadSchema.parse(JSON.parse(await readFile(paths.payloadPath, "utf8")));
-  const envelope = JSON.parse(await readFile(paths.envelopePath, "utf8"));
-  const item = payload.resources.find((resource) => resource.id === paths.resourceId && resource.kind === "application");
+  const variants = [];
+  let item = null;
+  for (const variant of paths.variants) {
+    const payload = desktopResourceManifestPayloadSchema.parse(JSON.parse(await readFile(variant.payloadPath, "utf8")));
+    const envelope = JSON.parse(await readFile(variant.envelopePath, "utf8"));
+    const candidate = payload.resources.find((resource) => resource.id === paths.resourceId && resource.kind === "application");
+    if (!candidate) throw new Error(`${variant.name} 准备目录中不存在指定 application 资源`);
+    if (item && JSON.stringify(item) !== JSON.stringify(candidate)) throw new Error("基础与扩展清单中的应用更新元数据不一致");
+    item = candidate;
+    await verifyEnvelope(payload, envelope, paths);
+    variants.push({ ...variant, payload, envelope });
+  }
   if (!item) throw new Error("准备目录中不存在指定 application 资源");
   if (values.has("minimum-version") && item.applicationUpdate?.minimumVersion !== requiredVersion(values, "minimum-version")) throw new Error("准备资源的最低升级版本与命令参数不一致");
-  await verifyEnvelope(payload, envelope, paths);
   const metadata = await stat(paths.assetPath).catch(() => null);
   if (!metadata?.isFile() || metadata.size !== item.byteSize || await sha256File(paths.assetPath) !== item.sha256) throw new Error("准备目录中的安装包大小或 SHA-256 不匹配");
-  return { ...paths, installerPath: paths.assetPath, item, payload, envelope };
+  return { ...paths, installerPath: paths.assetPath, item, variants };
 }
 
 /** 使用私钥签名并确认私钥、公钥文件和桌面内置公钥属于同一密钥。 */
@@ -223,22 +256,26 @@ async function deployPublication(publication) {
   const { sshArguments } = productionSsh();
   const nonce = `${Date.now()}-${process.pid}`;
   const remoteAsset = `/tmp/drawhime-application-${nonce}.exe`;
-  const remoteEnvelope = `/tmp/drawhime-application-${nonce}.json`;
+  const remoteEnvelopes = publication.variants.map((variant) => `/tmp/drawhime-application-${nonce}-${variant.name}.json`);
   run("ssh", [...sshArguments, `cat > '${remoteAsset}'`], readFileSync(publication.assetPath));
-  await deployPreparedPublication(publication, sshArguments, remoteAsset, remoteEnvelope);
+  await deployPreparedPublication(publication, sshArguments, remoteAsset, remoteEnvelopes);
 }
 
 /** 发布已由主站直接拉取并验真的安装包，本机只传输签名信封。 */
 async function deployRemotePublication(publication, stagedAsset) {
   const { sshArguments } = productionSsh();
-  const remoteEnvelope = `/tmp/drawhime-application-envelope-${Date.now()}-${process.pid}.json`;
-  await deployPreparedPublication(publication, sshArguments, stagedAsset.path, remoteEnvelope);
+  const nonce = `${Date.now()}-${process.pid}`;
+  const remoteEnvelopes = publication.variants.map((variant) => `/tmp/drawhime-application-envelope-${nonce}-${variant.name}.json`);
+  await deployPreparedPublication(publication, sshArguments, stagedAsset.path, remoteEnvelopes);
 }
 
 /** 上传小型信封并原子切换已验真的安装包与资源清单。 */
-async function deployPreparedPublication(publication, sshArguments, remoteAsset, remoteEnvelope) {
-  run("ssh", [...sshArguments, `cat > '${remoteEnvelope}'`], readFileSync(publication.envelopePath));
-  run("ssh", [...sshArguments, "bash", "-s", "--", publication.resourceId, publication.fileName, publication.item.sha256, String(publication.item.byteSize), remoteAsset, remoteEnvelope], remotePublishScript(), 1);
+async function deployPreparedPublication(publication, sshArguments, remoteAsset, remoteEnvelopes) {
+  if (publication.variants.length !== 2 || remoteEnvelopes.length !== 2) throw new Error("应用发布必须同时包含基础与扩展签名清单");
+  for (let index = 0; index < publication.variants.length; index += 1) {
+    run("ssh", [...sshArguments, `cat > '${remoteEnvelopes[index]}'`], readFileSync(publication.variants[index].envelopePath));
+  }
+  run("ssh", [...sshArguments, "bash", "-s", "--", publication.resourceId, publication.fileName, publication.item.sha256, String(publication.item.byteSize), remoteAsset, ...remoteEnvelopes], remotePublishScript(), 1);
   await verifyPublicPublication(publication);
   printSummary(publication, "published");
 }
@@ -263,10 +300,13 @@ async function verifyPublicPublication(publication) {
   let publicVerified = false;
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
-      const response = await fetch("https://www.xanime.ink/local-model-api/v1/desktop/resources/manifest", { signal: AbortSignal.timeout(20_000) });
-      const wrapper = await response.json();
-      const livePayload = desktopResourceManifestPayloadSchema.parse(JSON.parse(wrapper.data?.payload || "null"));
-      publicVerified = response.ok && livePayload.resources.some((resource) => resource.id === publication.resourceId && resource.sha256 === publication.item.sha256);
+      const checks = await Promise.all(publication.variants.map(async (variant) => {
+        const response = await fetch(`https://www.xanime.ink/local-model-api/v1/desktop/resources/manifest${variant.capabilitiesQuery}`, { signal: AbortSignal.timeout(20_000) });
+        const wrapper = await response.json();
+        const livePayload = desktopResourceManifestPayloadSchema.parse(JSON.parse(wrapper.data?.payload || "null"));
+        return response.ok && livePayload.resources.some((resource) => resource.id === publication.resourceId && resource.sha256 === publication.item.sha256);
+      }));
+      publicVerified = checks.every(Boolean);
       if (publicVerified) break;
     } catch {
       // 公网边缘的短暂失败只进行有界重试；远端已经通过回环 API 验证。
@@ -284,7 +324,8 @@ FILE_NAME="$2"
 EXPECTED_SHA256="$3"
 EXPECTED_SIZE="$4"
 UPLOADED_ASSET="$5"
-UPLOADED_ENVELOPE="$6"
+UPLOADED_BASE_ENVELOPE="$6"
+UPLOADED_EXTENDED_ENVELOPE="$7"
 cd /local-platform
 set -a
 . ./.env
@@ -295,21 +336,26 @@ case "$DESKTOP_RESOURCE_STORAGE_ROOT" in /data/*) ;; *) echo '资源存储目录
 case "$DESKTOP_RESOURCE_MANIFEST_ENVELOPE_FILE" in /*) ;; *) echo '资源清单路径必须是绝对路径' >&2; exit 1;; esac
 test "$(stat -c %s "$UPLOADED_ASSET")" = "$EXPECTED_SIZE"
 test "$(sha256sum "$UPLOADED_ASSET" | awk '{print $1}')" = "$EXPECTED_SHA256"
-node - "$UPLOADED_ENVELOPE" "$RESOURCE_ID" "$FILE_NAME" "$EXPECTED_SHA256" "$EXPECTED_SIZE" <<'NODE'
+node - "$UPLOADED_BASE_ENVELOPE" "$UPLOADED_EXTENDED_ENVELOPE" "$RESOURCE_ID" "$FILE_NAME" "$EXPECTED_SHA256" "$EXPECTED_SIZE" <<'NODE'
 const fs = require('node:fs');
-const [envelopePath, resourceId, fileName, sha256, byteSize] = process.argv.slice(2);
-const envelope = JSON.parse(fs.readFileSync(envelopePath, 'utf8'));
-const payload = JSON.parse(envelope.payload);
-const item = payload.resources.find((resource) => resource.id === resourceId);
-if (!item || item.kind !== 'application' || item.fileName !== fileName || item.sha256 !== sha256 || item.byteSize !== Number(byteSize)) process.exit(1);
+const [baseEnvelopePath, extendedEnvelopePath, resourceId, fileName, sha256, byteSize] = process.argv.slice(2);
+for (const envelopePath of [baseEnvelopePath, extendedEnvelopePath]) {
+  const envelope = JSON.parse(fs.readFileSync(envelopePath, 'utf8'));
+  const payload = JSON.parse(envelope.payload);
+  const item = payload.resources.find((resource) => resource.id === resourceId);
+  if (!item || item.kind !== 'application' || item.fileName !== fileName || item.sha256 !== sha256 || item.byteSize !== Number(byteSize)) process.exit(1);
+}
 NODE
 STAMP=$(date +%Y%m%d%H%M%S)
 BACKUP="/local-platform/backups/desktop-application-$STAMP"
 mkdir -p "$BACKUP" "$DESKTOP_RESOURCE_STORAGE_ROOT" "$(dirname "$DESKTOP_RESOURCE_MANIFEST_ENVELOPE_FILE")"
 if [ -f "$DESKTOP_RESOURCE_MANIFEST_ENVELOPE_FILE" ]; then cp -a "$DESKTOP_RESOURCE_MANIFEST_ENVELOPE_FILE" "$BACKUP/manifest-envelope.json"; fi
+EXTENDED_ENVELOPE_FILE="$DESKTOP_RESOURCE_MANIFEST_ENVELOPE_FILE.segmenter-v1"
+if [ -f "$EXTENDED_ENVELOPE_FILE" ]; then cp -a "$EXTENDED_ENVELOPE_FILE" "$BACKUP/manifest-envelope.segmenter-v1.json"; fi
 ASSET_TARGET="$DESKTOP_RESOURCE_STORAGE_ROOT/$FILE_NAME"
 ASSET_TMP="$DESKTOP_RESOURCE_STORAGE_ROOT/.$FILE_NAME.incoming-$STAMP"
-ENVELOPE_TMP="$(dirname "$DESKTOP_RESOURCE_MANIFEST_ENVELOPE_FILE")/.manifest-envelope.incoming-$STAMP"
+BASE_ENVELOPE_TMP="$(dirname "$DESKTOP_RESOURCE_MANIFEST_ENVELOPE_FILE")/.manifest-envelope.incoming-$STAMP"
+EXTENDED_ENVELOPE_TMP="$(dirname "$DESKTOP_RESOURCE_MANIFEST_ENVELOPE_FILE")/.manifest-envelope.segmenter-v1.incoming-$STAMP"
 if [ -f "$ASSET_TARGET" ]; then
   test "$(stat -c %s "$ASSET_TARGET")" = "$EXPECTED_SIZE"
   test "$(sha256sum "$ASSET_TARGET" | awk '{print $1}')" = "$EXPECTED_SHA256"
@@ -318,20 +364,25 @@ else
   chmod 0644 "$ASSET_TMP"
   mv "$ASSET_TMP" "$ASSET_TARGET"
 fi
-cp "$UPLOADED_ENVELOPE" "$ENVELOPE_TMP"
-chmod 0644 "$ENVELOPE_TMP"
-mv -f "$ENVELOPE_TMP" "$DESKTOP_RESOURCE_MANIFEST_ENVELOPE_FILE"
+cp "$UPLOADED_BASE_ENVELOPE" "$BASE_ENVELOPE_TMP"
+cp "$UPLOADED_EXTENDED_ENVELOPE" "$EXTENDED_ENVELOPE_TMP"
+chmod 0644 "$BASE_ENVELOPE_TMP" "$EXTENDED_ENVELOPE_TMP"
+mv -f "$BASE_ENVELOPE_TMP" "$DESKTOP_RESOURCE_MANIFEST_ENVELOPE_FILE"
+mv -f "$EXTENDED_ENVELOPE_TMP" "$EXTENDED_ENVELOPE_FILE"
 verified=0
 for attempt in $(seq 1 20); do
-  if curl -fsS http://127.0.0.1:7102/v1/desktop/resources/manifest 2>/dev/null | grep -q "$RESOURCE_ID"; then verified=1; break; fi
+  if curl -fsS http://127.0.0.1:7102/v1/desktop/resources/manifest 2>/dev/null | grep -q "$RESOURCE_ID" \
+    && curl -fsS 'http://127.0.0.1:7102/v1/desktop/resources/manifest?capabilities=gpu-backends-v1' 2>/dev/null | grep -q "$RESOURCE_ID" \
+    && curl -fsS -H 'Range: bytes=0-0' -o /dev/null "http://127.0.0.1:7102/v1/desktop/resources/$RESOURCE_ID/content"; then verified=1; break; fi
   sleep 1
 done
 if [ "$verified" != 1 ]; then
   if [ -f "$BACKUP/manifest-envelope.json" ]; then cp -a "$BACKUP/manifest-envelope.json" "$DESKTOP_RESOURCE_MANIFEST_ENVELOPE_FILE"; fi
-  echo '应用更新清单发布验证失败，已恢复上一信封' >&2
+  if [ -f "$BACKUP/manifest-envelope.segmenter-v1.json" ]; then cp -a "$BACKUP/manifest-envelope.segmenter-v1.json" "$EXTENDED_ENVELOPE_FILE"; fi
+  echo '应用更新双清单发布验证失败，已恢复上一信封' >&2
   exit 1
 fi
-rm -f "$UPLOADED_ASSET" "$UPLOADED_ENVELOPE"
+rm -f "$UPLOADED_ASSET" "$UPLOADED_BASE_ENVELOPE" "$UPLOADED_EXTENDED_ENVELOPE"
 echo '桌面应用更新资源原子发布完成'
 `;
 }
