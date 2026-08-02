@@ -239,6 +239,22 @@ pub fn create_job(
     transaction
         .commit()
         .map_err(|error| format!("提交本地任务事务失败：{error}"))?;
+    let details = format!(
+        "model_id={}; size={}x{}; lora_count={}",
+        input.model_id,
+        input.width,
+        input.height,
+        loras.len()
+    );
+    let _ = crate::desktop_logs::append_log(
+        database,
+        Some(&id),
+        "info",
+        "generation",
+        "task_queued",
+        "本地生成任务已进入队列",
+        Some(&details),
+    );
     read_job(database, &id)?.ok_or_else(|| "本地任务创建后不存在".into())
 }
 
@@ -358,6 +374,16 @@ fn claim_next_job(database: &mut Connection) -> Result<Option<LocalJobExecution>
     transaction
         .commit()
         .map_err(|error| format!("提交任务领取失败：{error}"))?;
+    let details = format!("attempt={attempt_number}");
+    let _ = crate::desktop_logs::append_log(
+        database,
+        Some(&id),
+        "info",
+        "generation",
+        "attempt_started",
+        "Runtime 开始执行生成任务",
+        Some(&details),
+    );
     Ok(Some(job))
 }
 
@@ -441,6 +467,16 @@ fn execute_job(
                 transaction
                     .commit()
                     .map_err(|error| format!("提交 Runtime ID 事务失败：{error}"))?;
+                let details = format!("runtime_prompt_id={prompt_id}");
+                let _ = crate::desktop_logs::append_log(
+                    database,
+                    Some(&job.id),
+                    "debug",
+                    "generation",
+                    "runtime_submitted",
+                    "生成工作流已提交到 Runtime",
+                    Some(&details),
+                );
                 emit_job(database, app, &job.id);
                 Ok(())
             },
@@ -491,6 +527,19 @@ fn finish_success(
         finish_failed(database, app, &job.id, "保存本地产物终态失败");
         return;
     }
+    let details = format!(
+        "width={}; height={}; bytes={}",
+        result.width, result.height, result.byte_size
+    );
+    let _ = crate::desktop_logs::append_log(
+        database,
+        Some(&job.id),
+        "info",
+        "generation",
+        "task_succeeded",
+        "本地生成任务完成",
+        Some(&details),
+    );
     emit_job(database, app, &job.id);
 }
 
@@ -499,6 +548,15 @@ fn finish_failed(database: &Connection, app: &AppHandle, id: &str, error: &str) 
     let now = Utc::now().to_rfc3339();
     let _ = database.execute("UPDATE local_job_attempts SET status='failed',error=?2,completed_at=?3 WHERE job_id=?1 AND status='running'", params![id, message, now]);
     let _ = database.execute("UPDATE local_jobs SET status='failed',progress=0,error=?2,completed_at=?3,updated_at=?3 WHERE id=?1 AND status='running'", params![id, message, now]);
+    let _ = crate::desktop_logs::append_log(
+        database,
+        Some(id),
+        "error",
+        "generation",
+        "task_failed",
+        "本地生成任务失败",
+        Some(&message),
+    );
     emit_job(database, app, id);
 }
 
@@ -506,6 +564,15 @@ fn finish_cancelled(database: &Connection, app: &AppHandle, id: &str) {
     let now = Utc::now().to_rfc3339();
     let _ = database.execute("UPDATE local_job_attempts SET status='cancelled',completed_at=?2 WHERE job_id=?1 AND status='running'", params![id, now]);
     let _ = database.execute("UPDATE local_jobs SET status='cancelled',progress=0,error=NULL,completed_at=?2,updated_at=?2 WHERE id=?1 AND status='running'", params![id, now]);
+    let _ = crate::desktop_logs::append_log(
+        database,
+        Some(id),
+        "warn",
+        "generation",
+        "task_cancelled",
+        "本地生成任务已取消",
+        None,
+    );
     emit_job(database, app, id);
 }
 
@@ -513,6 +580,15 @@ fn requeue_interrupted(database: &Connection, app: &AppHandle, id: &str) {
     let now = Utc::now().to_rfc3339();
     let _ = database.execute("UPDATE local_job_attempts SET status='interrupted',completed_at=?2 WHERE job_id=?1 AND status='running'", params![id, now]);
     let _ = database.execute("UPDATE local_jobs SET status='queued',progress=0,runtime_prompt_id=NULL,started_at=NULL,error=NULL,cancel_requested=0,updated_at=?2 WHERE id=?1 AND status='running'", params![id, now]);
+    let _ = crate::desktop_logs::append_log(
+        database,
+        Some(id),
+        "warn",
+        "generation",
+        "task_requeued",
+        "桌面进程中断，任务已恢复排队",
+        None,
+    );
     emit_job(database, app, id);
 }
 

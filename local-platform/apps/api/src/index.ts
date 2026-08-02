@@ -34,12 +34,14 @@ import { registerLoraLibraryRoutes } from "./lora-library.js";
 import { registerModelLibraryRoutes } from "./model-library.js";
 import { registerModelUploadRoutes } from "./model-upload.js";
 import { findLoraSelectionConflict } from "./lora-selection.js";
+import { isLoraCompatibleWithModel } from "./lora-compatibility.js";
 import { registerAdminRuntimeRoutes } from "./admin-runtime.js";
 import { registerBotRoutes } from "./bot-routes.js";
 import { registerTrainingRoutes } from "./training-routes.js";
 import { registerDesktopAuthRoutes } from "./desktop-auth.js";
 import { registerDesktopResourceRoutes } from "./desktop-resources.js";
 import { registerDesktopGalleryRoutes } from "./desktop-gallery.js";
+import { readDesktopGalleryLoraSelections, resolveDesktopGalleryLoraMetadata } from "./desktop-gallery-loras.js";
 import { toInferenceJobView } from "./inference-views.js";
 import { getInferenceQueueEstimates } from "./queue-estimates.js";
 import { inferenceSubmissionCooldownRemainingSeconds, normalizeInferenceSubmissionCooldownSeconds } from "./submission-cooldown.js";
@@ -275,20 +277,34 @@ startService({
 
     router.get("/internal/gallery-publications/:externalTaskId/loras/:versionId/cover", async ({ request, response, params }) => {
       if (!authenticateMainPlatform(request)) return sendError(response, 403, "main_platform_token_invalid", "主站服务凭证不正确");
-      const job = await database.inferenceJob.findUnique({
-        where: { id: params.externalTaskId },
-        include: { galleryPublication: true },
-      });
-      const selectedVersionIds = job ? readTaskLoraVersionIds(job.parameters) : [];
-      // 只有仍存在且已经正式发布到主站图库的任务才允许服务间读取 LoRA 封面。
-      if (!job || job.deletedAt || job.status !== "SUCCEEDED" || job.galleryPublication?.status !== "PUBLISHED" || !selectedVersionIds.includes(params.versionId)) {
+      const desktopTaskId = desktopLocalTaskId(params.externalTaskId);
+      let selectedVersionIds: string[] = [];
+      let publishable = false;
+      if (desktopTaskId) {
+        const upload = await database.desktopGalleryUpload.findFirst({ where: { localTaskId: desktopTaskId, status: "PUBLISHED" } });
+        selectedVersionIds = upload
+          ? (await resolveDesktopGalleryLoraMetadata(upload.parameters, upload.externalIdentityId)).flatMap((item) => item.repositoryVersionId ? [item.repositoryVersionId] : [])
+          : [];
+        publishable = Boolean(upload);
+      } else {
+        const job = await database.inferenceJob.findUnique({
+          where: { id: params.externalTaskId },
+          include: { galleryPublication: true },
+        });
+        selectedVersionIds = job ? readTaskLoraVersionIds(job.parameters) : [];
+        publishable = Boolean(job && !job.deletedAt && job.status === "SUCCEEDED" && job.galleryPublication?.status === "PUBLISHED");
+      }
+      // 桌面和共享 GPU 任务都只能读取自身快照中固化关联的仓库版本。
+      if (!publishable || !selectedVersionIds.includes(params.versionId)) {
         return sendError(response, 404, "gallery_lora_cover_not_found", "图库 LoRA 封面不存在");
       }
       const version = await database.loraVersion.findUnique({
         where: { id: params.versionId },
         include: { loraEntry: { include: { examples: { include: { artifact: true }, orderBy: { sortOrder: "asc" }, take: 1 } } } },
       });
-      const example = version?.loraEntry.examples[0];
+      const example = version?.status === "ACTIVE" && version.loraEntry.status === "ACTIVE" && !version.loraEntry.deletedAt
+        ? version.loraEntry.examples[0]
+        : undefined;
       if (!example) return sendError(response, 404, "gallery_lora_cover_not_found", "图库 LoRA 封面不存在");
       const object = await getObjectBuffer(example.artifact.objectKey);
       response.writeHead(200, {
@@ -305,8 +321,8 @@ startService({
       if (desktopTaskId) {
         const upload = await database.desktopGalleryUpload.findFirst({ where: { localTaskId: desktopTaskId, status: "PUBLISHED" } });
         if (!upload) return sendError(response, 404, "gallery_lora_metadata_not_found", "图库 LoRA 元数据不存在");
-        // 本机私有 LoRA 没有网站仓库版本 ID，首版只返回独立保存的负面提示词。
-        return sendSuccess(response, { loras: [], negativePrompt: upload.negativePrompt?.trim() || null });
+        const loras = await resolveDesktopGalleryLoraMetadata(upload.parameters, upload.externalIdentityId);
+        return sendSuccess(response, { loras, negativePrompt: upload.negativePrompt?.trim() || null });
       }
       const job = await database.inferenceJob.findUnique({
         where: { id: params.externalTaskId },
@@ -327,9 +343,11 @@ startService({
         if (!version) return [];
         return [{
           loraVersionId,
+          repositoryVersionId: loraVersionId,
           loraEntryId: version.loraEntry.id,
           title: version.loraEntry.title,
           type: version.loraEntry.type.toLowerCase() as GalleryLoraMetadataView["type"],
+          repositoryAvailable: true,
         }];
       });
       sendSuccess(response, { loras, negativePrompt: job.negativePrompt?.trim() || null });
@@ -525,11 +543,15 @@ async function createInferenceJob(identity: { id: string; subject: string }, inp
   const selectedLoras = input.loraVersionIds.length > 0 ? await database.loraVersion.findMany({
     // 私有 LoRA 只允许作者提交；公开 LoRA 才能被其他用户用于生成，并固化类型和触发词快照供 Worker 实际注入。
     where: { id: { in: input.loraVersionIds }, status: "ACTIVE", loraEntry: { status: "ACTIVE", modelFamilyId: workflow.modelVersion.familyId, OR: [{ isPrivate: false }, { ownerIdentityId: identity.id }] } },
-    include: { loraEntry: { select: { title: true, type: true, triggerWords: true } }, trainingOutputs: { where: { status: "SUCCEEDED" }, orderBy: { completedAt: "desc" }, take: 1, select: { baseModelVersionId: true } } },
+    include: { loraEntry: { select: { title: true, type: true, triggerWords: true, modelFamilyId: true, compatibilityMode: true, compatibleModels: { select: { modelVersionId: true } } } } },
   }) : [];
   if (selectedLoras.length !== input.loraVersionIds.length) throw new ApiOperationError(400, "lora_version_invalid", "所选 LoRA 不存在、已停用或与主模型系列不匹配");
-  const incompatibleTrainedLora = selectedLoras.find((lora) => lora.trainingOutputs[0] && lora.trainingOutputs[0].baseModelVersionId !== workflow.modelVersionId);
-  if (incompatibleTrainedLora) throw new ApiOperationError(400, "trained_lora_base_model_mismatch", "训练生成的 LoRA 只能与训练时的精确底模组合使用");
+  const incompatibleLora = selectedLoras.find((lora) => !isLoraCompatibleWithModel({
+    modelFamilyId: lora.loraEntry.modelFamilyId,
+    compatibilityMode: lora.loraEntry.compatibilityMode,
+    compatibleModelVersionIds: lora.loraEntry.compatibleModels.map((item) => item.modelVersionId),
+  }, workflow.modelVersion.familyId, workflow.modelVersionId));
+  if (incompatibleLora) throw new ApiOperationError(400, "lora_model_version_restricted", "所选 LoRA 未允许用于当前底模");
   const defaults = readObject(workflow.modelVersion.defaultParameters);
   // 内容哈希是实际 GPU 文件身份；不同版本 ID 指向同一内容，或与底模内置 LoRA 相同，都只能加载一次。
   const loraConflict = findLoraSelectionConflict(selectedLoras.map((lora) => lora.sha256), defaults.systemLoraSha256);
@@ -630,7 +652,7 @@ function readTriggerWords(value: unknown): string[] {
 async function listInferenceLoras(viewerIdentityId: string, family?: string): Promise<InferenceLoraView[]> {
   const rows = await database.loraEntry.findMany({
     where: { deletedAt: null, status: "ACTIVE", OR: [{ isPrivate: false }, { ownerIdentityId: viewerIdentityId }], modelFamily: family ? { slug: family, status: "ACTIVE" } : { status: "ACTIVE" }, versions: { some: { status: "ACTIVE" } } },
-    include: { modelFamily: true, versions: { where: { status: "ACTIVE" }, orderBy: { createdAt: "desc" }, take: 1, include: { trainingOutputs: { where: { status: "SUCCEEDED" }, orderBy: { completedAt: "desc" }, take: 1, select: { baseModelVersionId: true } } } } },
+    include: { modelFamily: true, compatibleModels: { select: { modelVersionId: true } }, versions: { where: { status: "ACTIVE" }, orderBy: { createdAt: "desc" }, take: 1 } },
     orderBy: { createdAt: "desc" },
   });
   return rows.flatMap((entry) => entry.versions[0] ? [{
@@ -639,7 +661,9 @@ async function listInferenceLoras(viewerIdentityId: string, family?: string): Pr
     description: entry.description,
     type: entry.type.toLowerCase() as InferenceLoraView["type"],
     modelFamily: entry.modelFamily.slug,
-    baseModelVersionId: entry.versions[0].trainingOutputs[0]?.baseModelVersionId ?? null,
+    baseModelVersionId: null,
+    compatibilityMode: entry.compatibilityMode === "RESTRICTED" ? "restricted" : "all",
+    compatibleModelVersionIds: entry.compatibleModels.map((item) => item.modelVersionId),
     fileName: entry.versions[0].fileName,
     sha256: entry.versions[0].sha256,
     triggerWords: Array.isArray(entry.triggerWords) ? entry.triggerWords.filter((value): value is string => typeof value === "string") : [],

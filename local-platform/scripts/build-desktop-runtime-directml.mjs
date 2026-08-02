@@ -23,8 +23,21 @@ const RELEASE = Object.freeze({
   torchvisionVersion: "0.19.1",
   torchDirectMlVersion: "0.2.5.dev240914",
 });
+const WINDOWS_PYTHON_DEPENDENCIES = Object.freeze([
+  "filelock==3.15.4",
+  "typing-extensions==4.12.2",
+  "sympy==1.13.1",
+  "networkx==3.3",
+  "jinja2==3.1.4",
+  "fsspec==2024.6.1",
+  "numpy==1.26.4",
+  "pillow==10.4.0",
+  "MarkupSafe==2.1.5",
+  "mpmath==1.3.0",
+]);
 const scriptRoot = dirname(fileURLToPath(import.meta.url));
 const options = parseArguments(process.argv.slice(2));
+const windowsBuildHost = process.platform === "win32";
 const outputRoot = resolve(options.get("output") || join(tmpdir(), "drawhime-runtime-directml-build"));
 const cacheRoot = resolve(options.get("cache") || join(outputRoot, "cache"));
 const sourceArchive = join(cacheRoot, SOURCE.fileName);
@@ -42,7 +55,8 @@ try {
   await installDirectMlDependencies(runtimeRoot);
   await assertNoCudaPythonPackages(runtimeRoot);
   await cp(join(scriptRoot, "runtime", "directml_runner.py"), join(runtimeRoot, "directml_runner.py"));
-  run("git.exe", ["apply", "--unsafe-paths", join(scriptRoot, "runtime", "predict2-directml.patch")], runtimeRoot);
+  // 官方便携包中的 Python 源码使用 CRLF，Linux 构建机需忽略行尾空白差异再应用同一补丁。
+  run(windowsBuildHost ? "git.exe" : "git", ["apply", "--ignore-space-change", "--unsafe-paths", join(scriptRoot, "runtime", "predict2-directml.patch")], runtimeRoot);
   await verifyRuntime(runtimeRoot);
   await writeFile(join(runtimeRoot, "directml-build-profile.json"), `${JSON.stringify({ schemaVersion: 1, ...RELEASE, source: SOURCE, launchProfile: ["--directml", "0", "--cpu-vae", "--fp32-unet", "--use-split-cross-attention"] }, null, 2)}\n`, "utf8");
   const temporaryArchive = `${outputArchive}.part`;
@@ -97,7 +111,7 @@ function parseArguments(values) {
 /** 固定官方归档必须同时匹配大小和 SHA-256。 */
 async function downloadAndVerifySource(path) {
   if (await fileMatches(path, SOURCE.byteSize, SOURCE.sha256)) return;
-  run("C:\\Windows\\System32\\curl.exe", ["--location", "--fail", "--retry", "5", "--retry-delay", "3", "--continue-at", "-", "--output", path, SOURCE.url]);
+  run(windowsBuildHost ? "C:\\Windows\\System32\\curl.exe" : "curl", ["--location", "--fail", "--retry", "5", "--retry-delay", "3", "--continue-at", "-", "--output", path, SOURCE.url]);
   if (!await fileMatches(path, SOURCE.byteSize, SOURCE.sha256)) throw new Error("ComfyUI 官方资产大小或 SHA-256 校验失败");
 }
 
@@ -136,10 +150,16 @@ function isCudaPythonPackage(name) {
 
 /** 使用便携 Python 安装与实测一致的 DirectML 依赖版本。 */
 async function installDirectMlDependencies(runtimeRoot) {
-  const python = join(runtimeRoot, "python_embeded", "python.exe");
   const target = join(runtimeRoot, "directml-site");
   await mkdir(target, { recursive: true });
-  run(python, ["-s", "-m", "pip", "install", "--disable-pip-version-check", "--no-warn-script-location", "--target", target, `torch==${RELEASE.torchVersion}`, `torchvision==${RELEASE.torchvisionVersion}`, `torch-directml==${RELEASE.torchDirectMlVersion}`], runtimeRoot);
+  const packages = [`torch==${RELEASE.torchVersion}`, `torchvision==${RELEASE.torchvisionVersion}`, `torch-directml==${RELEASE.torchDirectMlVersion}`];
+  if (windowsBuildHost) {
+    const python = join(runtimeRoot, "python_embeded", "python.exe");
+    run(python, ["-s", "-m", "pip", "install", "--disable-pip-version-check", "--no-warn-script-location", "--timeout", "120", "--retries", "10", "--target", target, ...packages], runtimeRoot);
+    return;
+  }
+  // Linux 构建机只解析并展开 Windows CPython 3.12 二进制轮子，不执行目标平台代码。
+  run(options.get("host-python") || "python3", ["-m", "pip", "install", "--disable-pip-version-check", "--no-input", "--no-compile", "--timeout", "120", "--retries", "10", "--no-deps", "--only-binary=:all:", "--platform", "win_amd64", "--implementation", "cp", "--python-version", "3.12", "--abi", "cp312", "--target", target, ...packages, ...WINDOWS_PYTHON_DEPENDENCIES], runtimeRoot);
 }
 
 /** 构建后确认入口、隔离 torch 和两处 Anima 补丁真实存在。 */
@@ -153,7 +173,9 @@ async function verifyRuntime(runtimeRoot) {
 
 /** 优先使用显式 7-Zip，其次使用标准安装目录。 */
 function locateSevenZip(configured) {
-  const candidates = [configured, "C:\\Program Files\\7-Zip\\7z.exe", "C:\\Program Files (x86)\\7-Zip\\7z.exe"].filter(Boolean);
+  const candidates = windowsBuildHost
+    ? [configured, "C:\\Program Files\\7-Zip\\7z.exe", "C:\\Program Files (x86)\\7-Zip\\7z.exe"]
+    : [configured, "7zz", "7z"];
   const selected = candidates.find((candidate) => spawnSync(candidate, ["i"], { stdio: "ignore", windowsHide: true }).status === 0);
   if (!selected) throw new Error("构建机缺少 7-Zip；请安装后通过 --seven-zip 指定 7z.exe");
   return selected;

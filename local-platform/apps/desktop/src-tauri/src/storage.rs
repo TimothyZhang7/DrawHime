@@ -7,10 +7,10 @@ use crate::models::{
     DesktopAiCleanApplyInput, DesktopAiCleanJobCreateInput, DesktopAiCleanJobView,
     DesktopAiCleanUndoInput, DesktopAiSettings, DesktopCaptionJobCreateInput,
     DesktopCaptionJobView, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraView,
-    DesktopLocalModelView, DesktopSettings, DesktopTrainingBatchTagsInput,
-    DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput,
-    DesktopTrainingDatasetView, DesktopTrainingJobCreateInput, DesktopTrainingJobView,
-    DesktopTrainingSnapshotCopyInput, DesktopTrainingSnapshotView,
+    DesktopLocalModelView, DesktopLogPageView, DesktopLogQueryInput, DesktopSettings,
+    DesktopTrainingBatchTagsInput, DesktopTrainingCaptionUpdateInput,
+    DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetView, DesktopTrainingJobCreateInput,
+    DesktopTrainingJobView, DesktopTrainingSnapshotCopyInput, DesktopTrainingSnapshotView,
     DesktopTrainingTriggerWordsUpdateInput, DesktopWebsiteModelView, GalleryPublicationInput,
     GallerySyncItem,
 };
@@ -76,6 +76,7 @@ impl DesktopState {
             CREATE TABLE IF NOT EXISTS local_job_attempts (id TEXT PRIMARY KEY, job_id TEXT NOT NULL, attempt_number INTEGER NOT NULL, status TEXT NOT NULL, runtime_prompt_id TEXT, error TEXT, started_at TEXT NOT NULL, completed_at TEXT, UNIQUE(job_id,attempt_number), FOREIGN KEY(job_id) REFERENCES local_jobs(id));
             CREATE TABLE IF NOT EXISTS local_job_loras (job_id TEXT NOT NULL, sequence INTEGER NOT NULL, lora_id TEXT NOT NULL, title TEXT NOT NULL, type TEXT NOT NULL, file_name TEXT NOT NULL, relative_path TEXT NOT NULL, sha256 TEXT NOT NULL, byte_size INTEGER NOT NULL, modified_ms INTEGER NOT NULL, strength REAL NOT NULL, clip_strength REAL NOT NULL, trigger_words_json TEXT NOT NULL, PRIMARY KEY(job_id,sequence), UNIQUE(job_id,lora_id), FOREIGN KEY(job_id) REFERENCES local_jobs(id), FOREIGN KEY(lora_id) REFERENCES local_loras(id));
             CREATE TABLE IF NOT EXISTS local_artifacts (id TEXT PRIMARY KEY, job_id TEXT NOT NULL UNIQUE, path TEXT NOT NULL, sha256 TEXT NOT NULL, byte_size INTEGER NOT NULL, mime_type TEXT NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY(job_id) REFERENCES local_jobs(id));
+            CREATE TABLE IF NOT EXISTS desktop_logs (id TEXT PRIMARY KEY, task_id TEXT, level TEXT NOT NULL, scope TEXT NOT NULL, event TEXT NOT NULL, message TEXT NOT NULL, details TEXT, created_at TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS gallery_sync_status_idx ON gallery_sync_queue(status, created_at);
             CREATE INDEX IF NOT EXISTS local_jobs_status_idx ON local_jobs(status, created_at);
             CREATE INDEX IF NOT EXISTS local_training_jobs_status_idx ON local_training_jobs(status, created_at);
@@ -84,6 +85,8 @@ impl DesktopState {
             CREATE INDEX IF NOT EXISTS local_training_asset_tags_source_idx ON local_training_asset_tags(asset_id, source, position);
             CREATE INDEX IF NOT EXISTS local_training_asset_derivatives_asset_idx ON local_training_asset_derivatives(asset_id, created_at DESC);
             CREATE INDEX IF NOT EXISTS local_training_tag_changes_asset_idx ON local_training_tag_changes(asset_id, created_at DESC);").map_err(|error| format!("初始化桌面数据库失败：{error}"))?;
+        connection.execute_batch("CREATE INDEX IF NOT EXISTS desktop_logs_created_idx ON desktop_logs(created_at DESC); CREATE INDEX IF NOT EXISTS desktop_logs_task_idx ON desktop_logs(task_id,created_at DESC); CREATE INDEX IF NOT EXISTS desktop_logs_level_idx ON desktop_logs(level,created_at DESC);").map_err(|error| format!("初始化桌面日志索引失败：{error}"))?;
+        crate::desktop_logs::initialize_retention(&connection)?;
         connection.execute_batch("CREATE INDEX IF NOT EXISTS local_ai_clean_jobs_status_idx ON local_ai_clean_jobs(status,created_at); CREATE INDEX IF NOT EXISTS local_ai_clean_items_asset_idx ON local_ai_clean_job_items(asset_id,updated_at DESC);").map_err(|error| format!("初始化 AI 清洗索引失败：{error}"))?;
         // 训练集删除只隐藏并清理原始受管目录，历史训练任务和快照继续引用审计行。
         ensure_column(&connection, "local_training_datasets", "deleted_at", "TEXT")?;
@@ -1002,6 +1005,32 @@ impl DesktopState {
             .lock()
             .map_err(|_| "桌面数据库锁已损坏".to_string())?;
         crate::scheduler::list_jobs(&database)
+    }
+
+    /** 按时间、任务和级别分页读取桌面结构化日志。 */
+    pub fn list_logs(&self, input: DesktopLogQueryInput) -> Result<DesktopLogPageView, String> {
+        let database = self
+            .database
+            .lock()
+            .map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        crate::desktop_logs::list_logs(&database, input)
+    }
+
+    /** 写入不含用户提示词、密钥和私有路径的桌面日志。 */
+    pub fn append_log(
+        &self,
+        task_id: Option<&str>,
+        level: &str,
+        scope: &str,
+        event: &str,
+        message: &str,
+        details: Option<&str>,
+    ) -> Result<(), String> {
+        let database = self
+            .database
+            .lock()
+            .map_err(|_| "桌面数据库锁已损坏".to_string())?;
+        crate::desktop_logs::append_log(&database, task_id, level, scope, event, message, details)
     }
 
     /** 为独立预览读取最新一条任务，避免加载完整记录页数据。 */

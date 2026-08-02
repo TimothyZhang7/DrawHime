@@ -69,7 +69,8 @@ export function useDesktopEnvironmentMonitor({ enabled, environment, onChanged, 
       if (!sameEnvironment(environmentRef.current, next)) onChangedRef.current(next);
       if (!quiet) onMessageRef.current("环境检测已更新");
     } catch (error) {
-      onMessageRef.current(errorMessage(error));
+      // 后台复检失败保留最近可信状态并静默退避，只有用户主动检测才显示错误。
+      if (!quiet) onMessageRef.current(errorMessage(error));
     } finally {
       running.current = false;
       if (!quiet) setChecking(false);

@@ -1,7 +1,12 @@
 diff --git a/ComfyUI/comfy/ldm/cosmos/predict2.py b/ComfyUI/comfy/ldm/cosmos/predict2.py
 --- a/ComfyUI/comfy/ldm/cosmos/predict2.py
 +++ b/ComfyUI/comfy/ldm/cosmos/predict2.py
-@@ -21,2 +21,9 @@ import comfy.ldm.common_dit
+@@ -17,6 +17,13 @@ import comfy.ldm.common_dit
+ import comfy.quant_ops
+-
+-
++
++
 +def directml_apply_rope_split_half1(x: torch.Tensor, freqs_cis: torch.Tensor) -> torch.Tensor:
 +    """不经过自定义算子存储包装执行 split-half RoPE。"""
 +    pairs = x.reshape(*x.shape[:-1], 2, -1).movedim(-2, -1).unsqueeze(-2).to(freqs_cis.dtype)
@@ -11,7 +16,9 @@ diff --git a/ComfyUI/comfy/ldm/cosmos/predict2.py b/ComfyUI/comfy/ldm/cosmos/pre
 +
  # ---------------------- Feed Forward Network -----------------------
  class GPT2FeedForward(nn.Module):
-@@ -165,5 +172,9 @@ class Attention(nn.Module):
+     def __init__(self, d_model: int, d_ff: int, device=None, dtype=None, operations=None) -> None:
+@@ -165,6 +172,10 @@ class Attention(nn.Module):
+             q = self.q_norm(q)
              k = self.k_norm(k)
              v = self.v_norm(v)
              if self.is_selfattn and rope_emb is not None:  # only apply to self-attention!
@@ -22,9 +29,7 @@ diff --git a/ComfyUI/comfy/ldm/cosmos/predict2.py b/ComfyUI/comfy/ldm/cosmos/pre
 +                else:
 +                    q, k = comfy.quant_ops.ck.apply_rope_split_half(q, k, rope_emb)
              return q, k, v
-@@ -780,7 +791,7 @@ class MiniTrainDIT(nn.Module):
-                 padding_mask = transforms.functional.resize(
-                     padding_mask, list(x_B_C_T_H_W.shape[-2:]), interpolation=transforms.InterpolationMode.NEAREST
+@@ -779,5 +790,5 @@ class MiniTrainDIT(nn.Module):
                  )
 -            x_B_C_T_H_W = torch.cat(
 -                [x_B_C_T_H_W, padding_mask.unsqueeze(1).repeat(1, 1, x_B_C_T_H_W.shape[2], 1, 1)], dim=1

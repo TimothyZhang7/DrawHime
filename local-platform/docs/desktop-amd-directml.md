@@ -15,6 +15,7 @@ AMD 首版能力来自 2026-08-01 的 RX 6750 GRE 12GB 实测：
 - 输出和采样最长边 512，Batch 固定 1，最多 1 个 LoRA。
 - Windows LoRA Trainer 尚未通过真实前向、反向、优化器和产物重载验收，因此明确关闭。
 - WMI `AdapterRAM` 与 ComfyUI DirectML 显存值可能截断或误报，只用于展示，不参与 AMD 显存硬门禁；最终可用性由 Runtime 设备自检确认。
+- 客户端同时调用 Win32 `EnumDisplayDevicesW`；CIM 超时、服务异常或首次启动返回空数组时，仍通过设备名称与 PCI `VEN_1002` / `VEN_10DE` 识别 AMD/NVIDIA，并合并最近一次可信结果，避免刷新时瞬时变成“未检测到显卡”。
 - 混合显卡电脑由受控 Runner 读取 `torch_directml.device_name()` 并选择 AMD/Radeon 索引，再向 ComfyUI 传入实际数字索引，避免固定 0 号设备误用 Intel 核显。
 
 ## 资源清单
@@ -51,7 +52,7 @@ pnpm run desktop:build-runtime-amd -- --output <受控构建目录> --cache <受
 node scripts/manage-desktop-resource-manifest.mjs add-runtime --payload <清单> --metadata <构建摘要.json> --output <新清单>
 ```
 
-构建脚本固定官方 ComfyUI 归档大小和 SHA-256，移除 CUDA torch、NVIDIA、Triton 与 xFormers 包，在隔离目录安装与实测一致的 PyTorch 2.4.1、torchvision 0.19.1 和 torch-directml，并应用两处 Anima DirectML 补丁。构建后再次扫描 CUDA 专用残留；最终归档大小和 SHA-256 由真实构建计算，再进入签名与主站镜像发布流程。
+构建脚本固定官方 ComfyUI 归档大小和 SHA-256，移除 CUDA torch、NVIDIA、Triton 与 xFormers 包，在隔离目录安装与实测一致的 PyTorch 2.4.1、torchvision 0.19.1 和 torch-directml，并应用两处 Anima DirectML 补丁。Windows 构建机使用便携 Python 安装依赖；Linux 构建机只解析并展开 `win_amd64`、CPython 3.12 二进制轮子，不执行目标平台代码。构建后再次扫描 CUDA 专用残留；最终归档大小和 SHA-256 由真实构建计算，再进入签名与主站镜像发布流程。
 
 ## 发布门禁
 

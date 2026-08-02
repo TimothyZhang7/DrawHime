@@ -133,6 +133,21 @@ pub fn create_job(
     transaction
         .commit()
         .map_err(|error| format!("提交训练任务失败：{error}"))?;
+    let details = format!(
+        "model_id={}; assets={}; epochs={}",
+        input.model_id,
+        assets.len(),
+        input.parameters.epochs
+    );
+    let _ = crate::desktop_logs::append_log(
+        database,
+        Some(&id),
+        "info",
+        "training",
+        "task_queued",
+        "LoRA 训练任务已进入队列",
+        Some(&details),
+    );
     read_job(database, &id)?.ok_or_else(|| "训练任务创建后不存在".into())
 }
 
@@ -330,6 +345,16 @@ pub(crate) fn claim_next_job(
     transaction
         .commit()
         .map_err(|error| format!("提交训练任务领取失败：{error}"))?;
+    let details = format!("attempt={attempt_number}");
+    let _ = crate::desktop_logs::append_log(
+        database,
+        Some(&id),
+        "info",
+        "training",
+        "attempt_started",
+        "Trainer 开始执行训练任务",
+        Some(&details),
+    );
     Ok(Some(execution))
 }
 
@@ -371,6 +396,16 @@ pub(crate) fn finish_success(
     transaction
         .commit()
         .map_err(|error| format!("提交训练成功终态失败：{error}"))?;
+    let details = format!("output_lora_id={lora_id}; bytes={}", lora.byte_size);
+    let _ = crate::desktop_logs::append_log(
+        database,
+        Some(&job.id),
+        "info",
+        "training",
+        "task_succeeded",
+        "LoRA 训练任务完成",
+        Some(&details),
+    );
     read_job(database, &job.id)?.ok_or_else(|| "训练成功后任务不存在".into())
 }
 
@@ -395,6 +430,15 @@ pub(crate) fn finish_failed(
     transaction
         .commit()
         .map_err(|failure| format!("提交训练失败终态失败：{failure}"))?;
+    let _ = crate::desktop_logs::append_log(
+        database,
+        Some(&job.id),
+        "error",
+        "training",
+        "task_failed",
+        "LoRA 训练任务失败",
+        Some(&message),
+    );
     read_job(database, &job.id)?.ok_or_else(|| "训练失败后任务不存在".into())
 }
 
@@ -411,6 +455,15 @@ pub(crate) fn requeue_interrupted(
     transaction
         .commit()
         .map_err(|error| format!("提交训练恢复失败：{error}"))?;
+    let _ = crate::desktop_logs::append_log(
+        database,
+        Some(&job.id),
+        "warn",
+        "training",
+        "task_requeued",
+        "训练进程中断，任务已恢复排队",
+        None,
+    );
     read_job(database, &job.id)?.ok_or_else(|| "恢复后的训练任务不存在".into())
 }
 
@@ -427,6 +480,15 @@ pub(crate) fn finish_cancelled(
     transaction
         .commit()
         .map_err(|error| format!("提交训练取消终态失败：{error}"))?;
+    let _ = crate::desktop_logs::append_log(
+        database,
+        Some(&job.id),
+        "warn",
+        "training",
+        "task_cancelled",
+        "LoRA 训练任务已取消",
+        None,
+    );
     read_job(database, &job.id)?.ok_or_else(|| "取消后的训练任务不存在".into())
 }
 

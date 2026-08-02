@@ -1,0 +1,41 @@
+/** 本文件定义全局日志页与图库任务日志的紧凑、自适应样式。 */
+.logs-page { display: grid; align-content: start; gap: 10px; min-width: 0; }
+.logs-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); }
+.logs-toolbar-title, .logs-toolbar-title > span { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.logs-toolbar-title > svg { width: 19px; color: var(--accent); }
+.logs-toolbar-title > span { align-items: flex-start; flex-direction: column; gap: 1px; }
+.logs-toolbar-title small { color: var(--muted); }
+.logs-filters { display: flex; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; flex-wrap: wrap; }
+.logs-filters select, .logs-filters input, .logs-filters button { min-height: 34px; border-radius: 5px; }
+.logs-filters form { display: grid; grid-template-columns: minmax(130px, 220px) auto; gap: 5px; }
+.logs-filters > button { width: 36px; padding: 0; }
+.logs-filters button svg { width: 16px; }
+.desktop-log-list { display: grid; gap: 5px; min-width: 0; }
+.desktop-log-list article { display: grid; grid-template-columns: 20px 150px minmax(0, 1fr); align-items: start; gap: 9px; min-width: 0; padding: 9px 11px; border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 5px; background: var(--panel); }
+.desktop-log-list article.is-error { border-left-color: #d24c4c; }
+.desktop-log-list article.is-warn { border-left-color: #d48b25; }
+.desktop-log-list article.is-debug { border-left-color: #7b8794; }
+.desktop-log-list article > i { color: var(--accent); }
+.desktop-log-list article.is-error > i { color: #d24c4c; }
+.desktop-log-list article.is-warn > i { color: #d48b25; }
+.desktop-log-list article > i svg { width: 17px; }
+.desktop-log-list time { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.desktop-log-list article > div { display: grid; gap: 2px; min-width: 0; }
+.desktop-log-list strong, .desktop-log-list span { overflow-wrap: anywhere; }
+.desktop-log-list span { color: var(--muted); }
+.desktop-log-list pre { max-height: 140px; overflow: auto; margin: 4px 0 0; padding: 7px 9px; border-radius: 4px; background: var(--panel-muted); color: var(--text); font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
+.logs-load-more { justify-self: center; min-width: 210px; }
+.task-log-section .desktop-log-list { max-height: 420px; overflow: auto; }
+.logs-inline-error { display: flex; gap: 8px; align-items: center; color: #d24c4c; }
+.logs-inline-error svg { width: 18px; }
+@media (max-width: 980px) {
+  .logs-toolbar { align-items: stretch; flex-direction: column; }
+  .logs-filters { justify-content: flex-start; }
+  .desktop-log-list article { grid-template-columns: 20px minmax(0, 1fr); }
+  .desktop-log-list time { grid-column: 2; grid-row: 1; }
+  .desktop-log-list article > div { grid-column: 2; }
+}
+@media (max-width: 620px) {
+  .logs-filters select, .logs-filters form { width: 100%; }
+  .desktop-log-list time { white-space: normal; }
+}

@@ -412,9 +412,11 @@ export const inferenceLoraViewSchema = z.object({
 /** 正式图库按任务版本 ID 读取的实时 LoRA 元数据。 */
 export const galleryLoraMetadataViewSchema = z.object({
   loraVersionId: z.string(),
-  loraEntryId: z.string(),
+  repositoryVersionId: z.string().nullable(),
+  loraEntryId: z.string().nullable(),
   title: z.string(),
   type: z.enum(["style", "character", "concept", "clothing", "pose", "other"]),
+  repositoryAvailable: z.boolean(),
 });
 
 /** LoRA 仓库条目创建请求。 */
@@ -1635,6 +1637,36 @@ export const desktopLocalJobViewSchema = z.object({
   updatedAt: z.string().datetime(),
 });
 
+/** 桌面结构化日志查询，默认由调用方限制为最近 30 分钟。 */
+export const desktopLogQueryInputSchema = z.object({
+  sinceMinutes: z.number().int().min(1).max(43200).nullable(),
+  taskId: z.string().uuid().nullable(),
+  level: z.enum(["debug", "info", "warn", "error"]).nullable(),
+  scope: z.string().trim().min(1).max(64).nullable(),
+  search: z.string().trim().max(200).nullable(),
+  offset: z.number().int().nonnegative(),
+  limit: z.number().int().min(1).max(500),
+});
+
+/** 可直接展示和复制的单条桌面结构化日志。 */
+export const desktopLogEntryViewSchema = z.object({
+  id: z.string().uuid(),
+  taskId: z.string().uuid().nullable(),
+  level: z.enum(["debug", "info", "warn", "error"]),
+  scope: z.string().min(1),
+  event: z.string().min(1),
+  message: z.string().min(1),
+  details: z.string().nullable(),
+  createdAt: z.string().datetime(),
+});
+
+/** 桌面结构化日志分页结果，避免设置页一次加载全部历史。 */
+export const desktopLogPageViewSchema = z.object({
+  items: z.array(desktopLogEntryViewSchema),
+  total: z.number().int().nonnegative(),
+  hasMore: z.boolean(),
+});
+
 /** 桌面端本地图库同步队列条目。 */
 export const desktopGallerySyncItemSchema = z.object({
   id: z.string().uuid(),
@@ -1651,6 +1683,18 @@ export const desktopGallerySyncItemSchema = z.object({
   updatedAt: z.string().datetime(),
 });
 
+/** 桌面作品同步时携带的任务 LoRA 不可变快照；仓库关联由服务端按文件哈希确定。 */
+export const desktopGalleryLoraSnapshotSchema = z.object({
+  localLoraId: z.string().uuid(),
+  titleSnapshot: z.string().trim().min(1).max(191),
+  typeSnapshot: desktopLocalLoraViewSchema.shape.type,
+  fileName: z.string().trim().min(1).max(255),
+  fileSha256: z.string().regex(/^[a-f0-9]{64}$/),
+  modelStrength: z.number().min(-2).max(2),
+  clipStrength: z.number().min(-2).max(2),
+  triggerWords: z.array(z.string().trim().min(1).max(100)).max(50),
+});
+
 /** 桌面端创建图库分片上传会话时固化的真实产物与任务快照。 */
 export const desktopGalleryUploadCreateRequestSchema = z.object({
   localTaskId: z.string().uuid(),
@@ -1664,6 +1708,7 @@ export const desktopGalleryUploadCreateRequestSchema = z.object({
   effectivePrompt: z.string().min(1).max(100000),
   negativePrompt: z.string().max(100000).nullable().optional(),
   modelDisplayName: z.string().min(1).max(191),
+  loras: z.array(desktopGalleryLoraSnapshotSchema).optional().default([]),
   parameters: z.record(z.unknown()),
 });
 
@@ -1809,6 +1854,7 @@ export type DesktopAuthorizationPollView = z.infer<typeof desktopAuthorizationPo
 export type DesktopAuthorizationApprovalView = z.infer<typeof desktopAuthorizationApprovalViewSchema>;
 export type DesktopAccountView = z.infer<typeof desktopAccountViewSchema>;
 export type DesktopGalleryUploadCreateRequest = z.infer<typeof desktopGalleryUploadCreateRequestSchema>;
+export type DesktopGalleryLoraSnapshot = z.infer<typeof desktopGalleryLoraSnapshotSchema>;
 export type DesktopGalleryUploadView = z.infer<typeof desktopGalleryUploadViewSchema>;
 export type DesktopWebsiteLoraView = z.infer<typeof desktopWebsiteLoraViewSchema>;
 export type DesktopWebsiteLoraInstallProgress = z.infer<typeof desktopWebsiteLoraInstallProgressSchema>;
@@ -1927,6 +1973,9 @@ export type DesktopTrainingSnapshotView = z.infer<typeof desktopTrainingSnapshot
 export type DesktopTrainingSnapshotCopyInput = z.infer<typeof desktopTrainingSnapshotCopyInputSchema>;
 export type DesktopLocalJobCreateInput = z.infer<typeof desktopLocalJobCreateInputSchema>;
 export type DesktopLocalJobView = z.infer<typeof desktopLocalJobViewSchema>;
+export type DesktopLogQueryInput = z.infer<typeof desktopLogQueryInputSchema>;
+export type DesktopLogEntryView = z.infer<typeof desktopLogEntryViewSchema>;
+export type DesktopLogPageView = z.infer<typeof desktopLogPageViewSchema>;
 export type DesktopGallerySyncItem = z.infer<typeof desktopGallerySyncItemSchema>;
 export type DesktopBootstrapView = z.infer<typeof desktopBootstrapViewSchema>;
 export type AdminModelUpdateRequest = z.infer<typeof adminModelUpdateRequestSchema>;

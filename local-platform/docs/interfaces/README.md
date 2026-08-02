@@ -26,7 +26,7 @@
 | `GET /ready` | 运维/调度 | 所有服务 | `ServiceReadinessView` |
 | `GET /v1/system/overview` | web/admin | api | `PlatformOverviewView` |
 | `desktop_bootstrap` | desktop webview | desktop core | 返回 SQLite 持久设置、真实本机环境报告和待同步图库数量；对应 `DesktopBootstrapView` |
-| `desktop_inspect_environment` | desktop webview | desktop core | 通过注册表、CIM 与后端探针检测 Windows、CPU、内存、磁盘、全部显卡及驱动；自动优先选择可用的 `nvidia_cuda`，否则选择 `amd_directml`，并返回统一 `executionBackend`、推理/训练能力和已验证任务边界；多 NVIDIA 设备按显存容量和空闲显存选择稳定 `deviceIndex`，DirectML 设备索引由受控 Runner 按 AMD/Radeon 名称选择；Windows 版本缺失返回 `windows_version_unknown` 并有限重试，不得伪装成 `windows_version_unsupported`；检测后持久化脱敏快照 |
+| `desktop_inspect_environment` | desktop webview | desktop core | 通过注册表、有限时 CIM、Win32 `EnumDisplayDevicesW` 与后端探针检测 Windows、CPU、内存、磁盘、全部显卡及驱动；CIM 超时或瞬时返回空数组时必须立即使用原生显卡枚举和最近可信快照，不得误报无显卡；NVIDIA 核心字段与可选架构/监控字段分开查询并覆盖标准 NVSMI 路径，旧版 `nvidia-smi` 缺少可选字段时仍保留真实设备；自动优先选择可用的 `nvidia_cuda`，否则选择 `amd_directml`，并返回统一 `executionBackend`、推理/训练能力和已验证任务边界；多 NVIDIA 设备按显存容量和空闲显存选择稳定 `deviceIndex`，多 AMD 设备优先明确的独显，DirectML 设备索引由受控 Runner 按 AMD/Radeon 名称选择；Windows 版本缺失返回 `windows_version_unknown` 并有限重试，不得伪装成 `windows_version_unsupported`；检测后持久化脱敏快照 |
 | `desktop_save_settings` | desktop webview | desktop core | 校验并保存主题模式、100%–130% 页面缩放、100%–160% 内容字体缩放、依赖来源、模型/输出/Runtime 目录、默认图库隐私、`autoUpload` 和上传策略；页面默认 110%、内容字体默认 120%，自动上传默认开启且默认公开 |
 | `POST /v1/desktop-auth/requests` | desktop core | api | 创建 10 分钟有效的设备授权请求；服务端只保存随机设备密钥 SHA-256，返回用户码、浏览器确认地址和轮询间隔 |
 | `POST /v1/desktop-auth/requests/approve` | local web | api | 由已登录主站并完成本地平台身份交换的用户确认设备码；设备码过期、已确认或账号状态失效时保持拒绝 |
@@ -86,6 +86,7 @@
 | `desktop-training-job-updated` | desktop core/training scheduler | desktop webview | 本地训练任务状态变化事件；载荷为 `DesktopTrainingJobView` |
 | `desktop_create_local_job` | desktop webview | desktop core/local scheduler | 校验底模、组件与全部所选 LoRA 的受控路径、文件名和不可变快照后立即创建 `DesktopLocalJobView`；输出最长边限制 1536，尺寸与比例独立选择；支持快速、质量、极致和自定义参数，后台串行调度不会阻塞页面 |
 | `desktop_list_local_jobs` | desktop webview | desktop core | 分页前的首版接口返回当前设备最近 100 个本地任务及产物摘要，任务、尝试和错误在应用重启后保留 |
+| `desktop_list_logs` | desktop webview | desktop core | 分页读取本机结构化运行日志；支持最近分钟数、任务、级别、作用域和文本筛选，默认页面只请求最近 30 分钟，单次最多 500 条；不得返回提示词、密钥、参考图或私有环境变量 |
 | `desktop_latest_local_job` | desktop preview webview | desktop core | 只返回当前设备最新 1 个本地任务及其 LoRA、尝试和产物摘要；独立预览启动不读取完整任务列表 |
 | `desktop_load_preview_settings` | desktop preview webview | desktop core | 只读取主题、字体和本地设置，不触发硬件、Runtime、资源或网络检测 |
 | `desktop_cancel_local_job` | desktop webview | desktop core/local scheduler | 幂等取消排队任务；运行中任务向当前 ComfyUI prompt 发出删除和中断请求，终态任务保持不变 |
@@ -112,10 +113,10 @@
 | `desktop_apply_software_update` | desktop webview | desktop core | 持久化 `staged/applying` 后启动当前用户静默 NSIS 更新辅助进程并退出应用；模型、LoRA、任务、账号和图库 SQLite 保持原目录不变 |
 | `desktop_rollback_software_update` | desktop webview | desktop core | 仅对仍保留且通过原签名清单校验的上一版本安装包执行相同静默安装；没有可信缓存时保持入口关闭 |
 | `desktop-gallery-sync-updated` | desktop core/gallery sync worker | desktop webview | 图库分片上传、等待登录、网络重试或发布终态变化事件；载荷为最新 `DesktopGallerySyncItem` |
-| `POST /v1/desktop/gallery/uploads` | desktop core | api | 使用设备会话按账号、桌面任务 ID 与产物 SHA-256 幂等创建上传会话；固化隐私、尺寸、提示词、模型和参数快照，返回服务端真实偏移与 4 MiB 分片大小 |
+| `POST /v1/desktop/gallery/uploads` | desktop core | api | 使用设备会话按账号、桌面任务 ID 与产物 SHA-256 幂等创建上传会话；固化隐私、尺寸、提示词、模型、完整 LoRA 快照和参数，LoRA 数量不由客户端同步契约额外截断，返回服务端真实偏移与 4 MiB 分片大小 |
 | `GET/PUT /v1/desktop/gallery/uploads/:id` | desktop core | api | 查询真实断点或按 `x-upload-offset` 追加单个分片；上传会话严格绑定创建账号，偏移冲突返回服务端真实偏移 |
-| `POST /v1/desktop/gallery/uploads/:id/complete` | desktop core | api/main backend | 校验完整字节数、SHA-256、图片格式与尺寸后原子写入对象存储，再通过桌面专用主站集成端点幂等发布正式图库；重试复用同一产物和发布键 |
-| `POST /internal/integrations/local-model/desktop-generations/:externalTaskId/publish` | api | main backend | 使用主站服务凭证发布已由设备会话绑定用户并完整校验的本机作品；不创建共享 GPU 计费，仍事务创建正式图库任务、媒体参数快照和发布镜像 |
+| `POST /v1/desktop/gallery/uploads/:id/complete` | desktop core | api/main backend | 校验完整字节数、SHA-256、图片格式与尺寸后原子写入对象存储，再通过桌面专用主站集成端点幂等发布正式图库；上传会话同时固化 LoRA 本地 ID、标题、类型、文件哈希、模型/CLIP 权重和触发词，重试复用同一产物和发布键 |
+| `POST /internal/integrations/local-model/desktop-generations/:externalTaskId/publish` | api | main backend | 使用主站服务凭证发布已由设备会话绑定用户并完整校验的本机作品；不创建共享 GPU 计费。API 仅按 LoRA 文件 SHA-256 关联当前账号可见的仓库版本，并把关联结果和本地快照一起写入主站参数快照 |
 | `POST /v1/auth/session/exchange` | web/admin | api | 主站 Bearer JWT 换取 `LocalPlatformSessionView` |
 | `GET /v1/auth/me` | web/admin | api | `LocalPlatformSessionView` |
 | `DELETE /v1/auth/session` | web/admin | api | 撤销当前独立平台会话 |
@@ -131,8 +132,8 @@
 | `GET /v1/inference/jobs` | web/admin | api | 当前身份任务列表；管理员可读取全局列表；等待执行的任务批量返回全局推理队列位置、前方任务数、队列任务总数及预计等待/执行/完成秒数 |
 | `GET /v1/inference/jobs/:id` | web/admin | api | `InferenceJobView`，包含阶段、尝试、固化参数、任务所用 LoRA 的标题、类型、权重与封面地址、产物哈希与字节数、计费镜像、主站图库发布状态和等待执行时的队列估算；普通用户只读取自己的任务 |
 | `GET /v1/inference/jobs/:id/loras/:versionId/cover` | web/admin | api | 经任务归属鉴权读取该任务实际选用 LoRA 的首张示例封面；即使 LoRA 后续下架，历史任务仍可审计展示 |
-| `GET /internal/gallery-publications/:externalTaskId/loras/:versionId/cover` | 主站 backend | api | 校验 `x-local-platform-token`、正式图库发布终态和任务 LoRA 快照后读取首张示例封面；用于主站图库封面代理，不开放对象存储地址 |
-| `GET /internal/gallery-publications/:externalTaskId/loras` | 主站 backend | api | 校验服务凭证和正式图库发布终态，按任务固化版本 ID 返回对应 LoRA 当前条目 ID、实时标题与类型，并返回任务独立保存的用户负面提示词；标题编辑后主站图库详情无需改写历史任务即可刷新 |
+| `GET /internal/gallery-publications/:externalTaskId/loras/:versionId/cover` | 主站 backend | api | 校验 `x-local-platform-token`、正式图库发布终态和任务 LoRA 快照后读取仓库首张示例封面；桌面任务仅允许读取按文件哈希固化关联的仓库版本，不开放对象存储地址 |
+| `GET /internal/gallery-publications/:externalTaskId/loras` | 主站 backend | api | 校验服务凭证和正式图库发布终态，返回任务 LoRA 的实时仓库版本 ID 与可用状态；新桌面任务只按文件 SHA-256 关联，缺少哈希和版本 ID 的旧任务仅允许标题+类型全仓唯一时兼容关联，多条或零条匹配保持未关联；同时返回任务负面提示词 |
 | `POST /v1/inference/jobs/:id/cancel` | web | api | `InferenceJobCancelRequest`，只取消尚未运行任务并释放资金预留；若该任务仍是所属身份最后一次提交，则在同一事务中清除该身份的本地模型提交冷却 |
 | `DELETE /v1/inference/jobs/:id` | web | api | 删除已结束推理记录；已发布作品先同步删除主站正式图库，余额、计费和产物审计不删除 |
 | `GET /v1/artifacts/:id/content` | web/admin | api | 经会话鉴权读取所属任务的对象存储产物 |

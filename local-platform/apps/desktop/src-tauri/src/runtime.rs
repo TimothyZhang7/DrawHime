@@ -180,6 +180,9 @@ impl RuntimeController {
             // 显卡或驱动变化后不得继续复用另一后端的旧进程。
             stop_child(&mut process);
         }
+        if process.status == "starting" {
+            return Err("Runtime 正在启动，请稍候".into());
+        }
 
         let runtime_root = Path::new(&settings.runtime_root).join("current");
         let profile = read_runtime_profile(&runtime_root)?;
@@ -266,8 +269,17 @@ impl RuntimeController {
             }
         }
 
+        // 启动等待期间释放状态锁，状态轮询可持续读取 starting，而不会在界面上表现为检测卡死。
+        drop(process);
         let started = Instant::now();
         while started.elapsed() < STARTUP_DEADLINE {
+            let mut process = self
+                .process
+                .lock()
+                .map_err(|_| "Runtime 状态锁已损坏".to_string())?;
+            if process.status != "starting" {
+                return Err("Runtime 启动已被停止或被其他操作中断".into());
+            }
             if let Some(exit) = process
                 .child
                 .as_mut()
@@ -286,8 +298,13 @@ impl RuntimeController {
                 process.status = "ready".into();
                 return Ok(process.view());
             }
+            drop(process);
             thread::sleep(Duration::from_millis(500));
         }
+        let mut process = self
+            .process
+            .lock()
+            .map_err(|_| "Runtime 状态锁已损坏".to_string())?;
         stop_child(&mut process);
         process.status = "failed".into();
         process.error = Some("Runtime 启动超过 120 秒，详细输出已保留到本地日志".into());

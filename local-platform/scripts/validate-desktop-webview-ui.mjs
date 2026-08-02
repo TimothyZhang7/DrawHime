@@ -16,6 +16,7 @@ const loraDialogOnly = argumentsMap.has("lora-dialog-only");
 const galleryOnly = argumentsMap.has("gallery-only");
 const repositoryOnly = argumentsMap.has("repository-only");
 const captioningOnly = argumentsMap.has("captioning-only");
+const logsOnly = argumentsMap.has("logs-only");
 const port = await reservePort();
 const userDataDirectory = path.join(process.env.TEMP || process.cwd(), `drawhime-webview-probe-${process.pid}-${port}`);
 const additionalArguments = [`--remote-debugging-port=${port}`, "--remote-allow-origins=*"].join(" ");
@@ -31,15 +32,16 @@ try {
   try {
     const result = await evaluateAfterInitialReload(client, buildProbeExpression());
     validateProbe(result, expectNoGpu);
-    const workflowEvidence = screenshotDirectory && !galleryOnly && !repositoryOnly
+    const workflowEvidence = screenshotDirectory && !galleryOnly && !repositoryOnly && !logsOnly
       ? captioningOnly
         ? { generation: null, captioning: await captureCaptioningWorkspace(client, screenshotDirectory, { requireAssets: true }), training: null }
         : await captureGenerationAndTrainingPages(client, screenshotDirectory)
       : null;
-    const fontSettingsEvidence = screenshotDirectory && !captioningOnly && !loraDialogOnly && !galleryOnly && !repositoryOnly ? await captureFontSettings(client, screenshotDirectory) : null;
-    const repositoryEvidence = screenshotDirectory && !captioningOnly && !loraDialogOnly && !galleryOnly ? await captureRepositoryPages(client, screenshotDirectory) : null;
-    const galleryEvidence = screenshotDirectory && !captioningOnly && !loraDialogOnly && !repositoryOnly ? await captureGalleryPage(client, screenshotDirectory) : null;
-    const resourceEvidence = screenshotDirectory && !captioningOnly && !loraDialogOnly && !galleryOnly && !repositoryOnly ? await captureResourceCenter(client, screenshotDirectory) : null;
+    const fontSettingsEvidence = screenshotDirectory && !captioningOnly && !loraDialogOnly && !galleryOnly && !repositoryOnly && !logsOnly ? await captureFontSettings(client, screenshotDirectory) : null;
+    const repositoryEvidence = screenshotDirectory && !captioningOnly && !loraDialogOnly && !galleryOnly && !logsOnly ? await captureRepositoryPages(client, screenshotDirectory) : null;
+    const galleryEvidence = screenshotDirectory && !captioningOnly && !loraDialogOnly && !repositoryOnly && !logsOnly ? await captureGalleryPage(client, screenshotDirectory) : null;
+    const resourceEvidence = screenshotDirectory && !captioningOnly && !loraDialogOnly && !galleryOnly && !repositoryOnly && !logsOnly ? await captureResourceCenter(client, screenshotDirectory) : null;
+    const logsEvidence = screenshotDirectory && !captioningOnly && !loraDialogOnly && !galleryOnly && !repositoryOnly ? await captureDesktopLogs(client, screenshotDirectory) : null;
     const evidence = {
       checkedAt: new Date().toISOString(),
       targetTitle: result.documentTitle,
@@ -58,6 +60,7 @@ try {
       repositoryEvidence,
       galleryEvidence,
       resourceEvidence,
+      logsEvidence,
     };
     if (evidencePath) {
       await mkdir(path.dirname(path.resolve(evidencePath)), { recursive: true });
@@ -448,14 +451,40 @@ async function captureGalleryPage(client, directory) {
       const hostStyle = host ? getComputedStyle(host) : null;
       const detailStyle = detail ? getComputedStyle(detail) : null;
       const outerScrollOwner = Boolean(hostStyle && ['auto', 'scroll'].includes(hostStyle.overflowY) && detailStyle && !['auto', 'scroll'].includes(detailStyle.overflowY));
-      return { visible: Boolean(detail), promptSection: Boolean(document.querySelector('.job-prompt-grid')), loraSection: Boolean(document.querySelector('.job-lora-gallery, .gallery-detail-section .empty-block')), parameterSection: Boolean(document.querySelector('.job-parameter-panel')), attempts: Boolean(document.querySelector('.job-attempt-list')), previewAction: actions.some((label) => label.includes('预览图片')), revealAction: actions.some((label) => label.includes('文件位置')), completeImage, centeredImage, backdropCovered, imageGeometry, outerScrollOwner, horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth };
+      return { visible: Boolean(detail), hasArtifact: Boolean(imageRegion), promptSection: Boolean(document.querySelector('.job-prompt-grid')), taskLogs: Boolean(document.querySelector('.task-log-section .desktop-log-list, .task-log-section .empty-block, .task-log-section .logs-inline-error')), loraSection: Boolean(document.querySelector('.job-lora-gallery, .gallery-detail-section .empty-block')), parameterSection: Boolean(document.querySelector('.job-parameter-panel')), attempts: Boolean(document.querySelector('.job-attempt-list')), previewAction: actions.some((label) => label.includes('预览图片')), revealAction: actions.some((label) => label.includes('文件位置')), completeImage, centeredImage, backdropCovered, imageGeometry, outerScrollOwner, horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth };
     })()`);
-    if (!galleryDetail.visible || !galleryDetail.promptSection || !galleryDetail.loraSection || !galleryDetail.parameterSection || !galleryDetail.attempts || !galleryDetail.previewAction || !galleryDetail.revealAction || !galleryDetail.completeImage || !galleryDetail.centeredImage || !galleryDetail.backdropCovered || !galleryDetail.outerScrollOwner || galleryDetail.horizontalOverflow) throw new Error(`图库任务详情子页面验收失败：${JSON.stringify(galleryDetail)}`);
+    const artifactInvalid = galleryDetail.hasArtifact && (!galleryDetail.previewAction || !galleryDetail.revealAction || !galleryDetail.completeImage || !galleryDetail.centeredImage || !galleryDetail.backdropCovered);
+    if (!galleryDetail.visible || !galleryDetail.promptSection || !galleryDetail.taskLogs || !galleryDetail.loraSection || !galleryDetail.parameterSection || !galleryDetail.attempts || artifactInvalid || !galleryDetail.outerScrollOwner || galleryDetail.horizontalOverflow) throw new Error(`图库任务详情子页面验收失败：${JSON.stringify(galleryDetail)}`);
     galleryDetailFile = 'gallery-detail.png';
     await writeFile(path.join(targetDirectory, galleryDetailFile), Buffer.from(await client.captureScreenshot(), 'base64'));
     await client.evaluate("document.querySelector('.gallery-detail-back')?.click()");
   }
   return { ...result, galleryDetail, screenshots: [galleryFile, galleryDetailFile].filter(Boolean) };
+}
+
+/** 验证设置页全局日志默认范围、真实查询结果和紧凑布局。 */
+async function captureDesktopLogs(client, directory) {
+  const targetDirectory = path.resolve(directory);
+  await mkdir(targetDirectory, { recursive: true });
+  const result = await client.evaluate(String.raw`(async () => {
+    const navigation = [...document.querySelectorAll('.desktop-sidebar nav button')].find((button) => button.textContent.trim() === '设置');
+    if (!navigation) throw new Error('未找到设置导航');
+    navigation.click();
+    await new Promise((resolve) => setTimeout(resolve, 160));
+    const tab = [...document.querySelectorAll('.workspace-tabs button')].find((button) => button.textContent.trim() === '日志');
+    if (!tab) throw new Error('未找到日志设置入口');
+    tab.click();
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    const page = document.querySelector('.logs-page');
+    const range = page?.querySelector('select[aria-label="日志时间范围"]');
+    const title = page?.querySelector('.logs-toolbar-title small')?.textContent || '';
+    const rows = page?.querySelectorAll('.desktop-log-list article').length || 0;
+    return { visible: Boolean(page?.getClientRects().length), defaultRange: range?.value || null, defaultTitle: title, rowCount: rows, filters: page?.querySelectorAll('.logs-filters select').length || 0, copyButton: Boolean(page?.querySelector('button[title="复制当前日志"]')), horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth };
+  })()`);
+  if (!result.visible || result.defaultRange !== '30' || !result.defaultTitle.includes('最近 30 分钟') || result.rowCount < 1 || result.filters < 3 || !result.copyButton || result.horizontalOverflow) throw new Error(`全局日志页面验收失败：${JSON.stringify(result)}`);
+  const screenshot = 'desktop-logs.png';
+  await writeFile(path.join(targetDirectory, screenshot), Buffer.from(await client.captureScreenshot(), 'base64'));
+  return { ...result, screenshot };
 }
 
 /** 验证概览仅展示必需依赖，并确认左下角按钮可独立打开下载队列弹窗。 */
@@ -518,7 +547,7 @@ function parseArguments(values) {
     const value = values[index];
     if (!value.startsWith("--")) throw new Error(`无法识别参数：${value}`);
     const key = value.slice(2);
-    if (["expect-no-gpu", "lora-dialog-only", "gallery-only", "repository-only", "captioning-only"].includes(key)) parsed.set(key, "true");
+    if (["expect-no-gpu", "lora-dialog-only", "gallery-only", "repository-only", "captioning-only", "logs-only"].includes(key)) parsed.set(key, "true");
     else {
       const next = values[index + 1];
       if (!next || next.startsWith("--")) throw new Error(`参数 --${key} 缺少值`);

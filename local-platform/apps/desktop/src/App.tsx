@@ -16,13 +16,14 @@ import { coreDependencyProblem, coreResources, desktopCoreState, DownloadQueueDi
 import { StartupPage, type StartupPhase } from "./StartupPage";
 import { applyDesktopDisplayScale } from "./desktop-display-scale";
 import { ActiveLocalJobIndicator, DesktopFeaturePages } from "./DesktopFeaturePages";
+import { DesktopLogsPage } from "./DesktopLogsPage";
 import { useDesktopEnvironmentMonitor, useDesktopRuntimeMonitor } from "./hooks/use-desktop-runtime-monitor";
 import { refreshDesktopLocalLoras, refreshDesktopLocalModels, setDesktopRepositoryAccountStatus, startDesktopRepositoryStore } from "./stores/desktop-repository-store";
 import { startDesktopTaskStore } from "./stores/desktop-task-store";
 
 type DesktopPage = "overview" | "generate" | "captioning" | "training" | "models" | "loras" | "gallery" | "settings";
 type OverviewSection = "start" | "account";
-type SettingsSection = "general" | "ai" | "updates";
+type SettingsSection = "general" | "ai" | "logs" | "updates";
 
 const navigation = [
   { id: "overview" as const, label: "启动 / 账号", Icon: Gauge },
@@ -52,6 +53,7 @@ const StableStartupPage = cacheWhileHidden(StartupPage);
 const StableAccountPage = cacheWhileHidden(AccountPage);
 const StableSettingsPage = memo(SettingsPage, (previous, next) => previous.active === next.active && (!next.active || samePageDataProps(previous, next)));
 const StableAiSettingsCard = cacheWhileHidden(AiSettingsCard);
+const StableDesktopLogsPage = memo(DesktopLogsPage, (previous, next) => previous.active === next.active && (!next.active || samePageDataProps(previous, next)));
 const StableUpdatesPage = cacheWhileHidden(UpdatesPage);
 
 /** 桌面应用根组件始终保留环境异常横幅，并周期复检 GPU 是否仍可用。 */
@@ -346,7 +348,7 @@ export function App() {
       {message && <div className="desktop-notice" role="status" aria-live="polite"><span>{message}</span><button aria-label="关闭提示" onClick={() => setMessage("")}>×</button></div>}
       <DesktopFeaturePages activePage={page} environment={bootstrap.environment} runtimeReady={coreRunning} defaultPrivacy={bootstrap.settings.defaultPrivacy} modelRoot={bootstrap.settings.modelRoot} accountConnected={account.status === "connected"} onOpenModelSettings={openModelSettings} onOpenResources={openResourceQueue} onToggleGenerationPreview={toggleGenerationPreview} onShowGalleryPreview={showGalleryPreview} onRevealGalleryArtifact={revealGalleryArtifact} onMessage={setMessage} />
        <div hidden={page !== "overview"} className="desktop-page-host workspace-page"><WorkspaceTabs label="启动与账号" value={overviewSection} onChange={(value) => setOverviewSection(value as OverviewSection)} items={[{ id: "start", label: "启动", status: bootstrap.runtime.status === "ready" ? "运行中" : startupInitialized ? "可启动" : "待初始化" }, { id: "account", label: "账号", status: account.status === "connected" ? "已连接" : "未连接" }]} /><div hidden={overviewSection !== "start"}><StableStartupPage active={page === "overview" && overviewSection === "start"} state={bootstrap} catalog={resourceCatalog} progress={resourceProgress} installProgress={installProgress} phase={startupPhase} checking={checking} bulkBusy={resourceBulkBusy} onPrimary={() => void runStartup()} onRecheck={() => void recheck()} onOpenQueue={() => setDownloadQueueOpen(true)} onInstallRequired={() => resourceCatalog && void installCoreResources(resourceCatalog)} onDownload={(resourceId) => void downloadResource(resourceId)} onPause={(resourceId) => void pauseDesktopResourceDownload(resourceId)} onInstall={(resourceId) => void installResource(resourceId)} /></div><div hidden={overviewSection !== "account"}><StableAccountPage active={page === "overview" && overviewSection === "account"} account={account} onChanged={setAccount} onError={setMessage} /></div></div>
-      <div hidden={page !== "settings"} className="desktop-page-host workspace-page"><WorkspaceTabs label="应用设置" value={settingsSection} onChange={(value) => setSettingsSection(value as SettingsSection)} items={[{ id: "general", label: "基础设置" }, { id: "ai", label: "AI 辅助" }, { id: "updates", label: "软件更新", status: softwareUpdateStatusLabel(softwareUpdate?.status || "unavailable") }]} /><div hidden={settingsSection !== "general"}><StableSettingsPage active={page === "settings" && settingsSection === "general"} value={bootstrap.settings} onSaved={(settings) => { setBootstrap((current) => current ? { ...current, settings } : current); setMessage("本地设置已保存"); void reloadResourceCatalog(); }} onError={setMessage} /></div><div hidden={settingsSection !== "ai"}><StableAiSettingsCard active={page === "settings" && settingsSection === "ai"} onMessage={setMessage} /></div><div hidden={settingsSection !== "updates"}><StableUpdatesPage active={page === "settings" && settingsSection === "updates"} value={softwareUpdate} onChanged={setSoftwareUpdate} onError={setMessage} /></div></div>
+      <div hidden={page !== "settings"} className="desktop-page-host workspace-page"><WorkspaceTabs label="应用设置" value={settingsSection} onChange={(value) => setSettingsSection(value as SettingsSection)} items={[{ id: "general", label: "基础设置" }, { id: "ai", label: "AI 辅助" }, { id: "logs", label: "日志" }, { id: "updates", label: "软件更新", status: softwareUpdateStatusLabel(softwareUpdate?.status || "unavailable") }]} /><div hidden={settingsSection !== "general"}><StableSettingsPage active={page === "settings" && settingsSection === "general"} value={bootstrap.settings} onSaved={(settings) => { setBootstrap((current) => current ? { ...current, settings } : current); setMessage("本地设置已保存"); void reloadResourceCatalog(); }} onError={setMessage} /></div><div hidden={settingsSection !== "ai"}><StableAiSettingsCard active={page === "settings" && settingsSection === "ai"} onMessage={setMessage} /></div><div hidden={settingsSection !== "logs"}><StableDesktopLogsPage active={page === "settings" && settingsSection === "logs"} onError={setMessage} /></div><div hidden={settingsSection !== "updates"}><StableUpdatesPage active={page === "settings" && settingsSection === "updates"} value={softwareUpdate} onChanged={setSoftwareUpdate} onError={setMessage} /></div></div>
     </main><DownloadQueueDialog open={downloadQueueOpen} catalog={resourceCatalog} progress={resourceProgress} installProgress={installProgress} bulkBusy={resourceBulkBusy} onClose={() => setDownloadQueueOpen(false)} onDownload={(resourceId) => void downloadResource(resourceId)} onPause={(resourceId) => void pauseDesktopResourceDownload(resourceId)} onInstall={(resourceId) => void installResource(resourceId)} />
   </div>;
 }

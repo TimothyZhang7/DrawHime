@@ -198,6 +198,16 @@ fn process_next(database: &Connection, app: &AppHandle) -> Result<(), String> {
                 "synced"
             };
             database.execute("UPDATE gallery_sync_queue SET status=?2,uploaded_bytes=?3,gallery_item_id=?4,last_error=NULL,next_attempt_at=NULL,updated_at=?5 WHERE id=?1", params![publication.id, status, publication.byte_size, upload.main_gallery_item_id, Utc::now().to_rfc3339()]).map_err(|error| format!("写入图库同步终态失败：{error}"))?;
+            let details = format!("status={status}; bytes={}", publication.byte_size);
+            let _ = crate::desktop_logs::append_log(
+                database,
+                Some(&publication.local_task_id),
+                "info",
+                "gallery",
+                "sync_succeeded",
+                "作品已同步到网页图库",
+                Some(&details),
+            );
         }
         Err(SyncFailure::WaitingAuth(message)) => {
             schedule(database, &publication, "waiting_auth", message, false, 20)?
@@ -338,7 +348,7 @@ fn create_upload(
         "upscaleMethod": publication.upscale_method, "qualityPromptEnabled": publication.quality_prompt_enabled,
         "qualityPrefix": publication.quality_prefix, "defaultNegativeEnabled": publication.default_negative_enabled,
         "defaultNegativePrompt": publication.default_negative_prompt,
-        // 本机导入 LoRA 尚未必对应网站仓库版本，使用独立审计键避免生成失效详情链接。
+        // 本机导入 LoRA 尚未必对应网站仓库版本，服务端只按文件 SHA-256 建立唯一关联。
         "desktopLoraSelections": loras,
     });
     let file_name = Path::new(&publication.artifact_path)
@@ -349,7 +359,7 @@ fn create_upload(
         "localTaskId": publication.local_task_id, "artifactSha256": publication.artifact_sha256, "fileName": file_name,
         "mimeType": publication.mime_type, "byteSize": publication.byte_size, "width": publication.width, "height": publication.height,
         "privacy": publication.privacy, "effectivePrompt": publication.prompt, "negativePrompt": publication.negative_prompt,
-        "modelDisplayName": publication.model_display_name, "parameters": parameters,
+        "modelDisplayName": publication.model_display_name, "loras": loras, "parameters": parameters,
     });
     let upload = request_upload(
         client,
@@ -452,10 +462,26 @@ fn read_pending(database: &Connection, id: &str) -> Result<PendingPublication, S
     database.query_row("SELECT q.id,q.local_task_id,q.artifact_path,q.artifact_sha256,q.privacy,q.retry_count,q.owner_issuer,q.owner_subject,q.server_upload_id,j.prompt,j.negative_prompt,j.model_display_name,j.width,j.height,j.quality_preset,j.steps,j.cfg,j.sampler_name,j.scheduler_name,j.sampling_max_edge,j.sampling_pixel_budget,j.aspect_step_threshold,j.aspect_adjusted_steps,j.upscale_method,j.quality_prompt_enabled,j.quality_prefix,j.default_negative_enabled,j.default_negative_prompt,j.seed,a.byte_size,a.mime_type FROM gallery_sync_queue q JOIN local_jobs j ON j.id=q.local_task_id JOIN local_artifacts a ON a.job_id=j.id WHERE q.id=?1", [id], |row| Ok(PendingPublication { id: row.get(0)?, local_task_id: row.get(1)?, artifact_path: row.get(2)?, artifact_sha256: row.get(3)?, privacy: row.get(4)?, retry_count: row.get(5)?, owner_issuer: row.get(6)?, owner_subject: row.get(7)?, server_upload_id: row.get(8)?, prompt: row.get(9)?, negative_prompt: row.get(10)?, model_display_name: row.get(11)?, width: row.get(12)?, height: row.get(13)?, quality_preset: row.get(14)?, steps: row.get(15)?, cfg: row.get(16)?, sampler_name: row.get(17)?, scheduler_name: row.get(18)?, sampling_max_edge: row.get(19)?, sampling_pixel_budget: row.get(20)?, aspect_step_threshold: row.get(21)?, aspect_adjusted_steps: row.get(22)?, upscale_method: row.get(23)?, quality_prompt_enabled: row.get::<_, i64>(24)? != 0, quality_prefix: row.get(25)?, default_negative_enabled: row.get::<_, i64>(26)? != 0, default_negative_prompt: row.get(27)?, seed: row.get(28)?, byte_size: row.get(29)?, mime_type: row.get(30)? })).map_err(|error| format!("读取图库任务快照失败：{error}"))
 }
 
-/** 只把 LoRA 名称、类型和权重写入图库参数，不上传本机模型文件。 */
+/** 把任务固化的 LoRA 详情写入图库参数，不上传本机模型或 LoRA 文件。 */
 fn read_lora_parameters(database: &Connection, task_id: &str) -> Result<Vec<Value>, String> {
-    let mut statement = database.prepare("SELECT lora_id,title,type,strength,clip_strength FROM local_job_loras WHERE job_id=?1 ORDER BY sequence ASC").map_err(|error| format!("读取任务 LoRA 失败：{error}"))?;
-    let rows = statement.query_map([task_id], |row| Ok(json!({ "id": row.get::<_, String>(0)?, "title": row.get::<_, String>(1)?, "type": row.get::<_, String>(2)?, "strength": row.get::<_, f64>(3)?, "clipStrength": row.get::<_, f64>(4)? }))).map_err(|error| format!("查询任务 LoRA 失败：{error}"))?;
+    let mut statement = database.prepare("SELECT lora_id,title,type,file_name,sha256,strength,clip_strength,trigger_words_json FROM local_job_loras WHERE job_id=?1 ORDER BY sequence ASC").map_err(|error| format!("读取任务 LoRA 失败：{error}"))?;
+    let rows = statement
+        .query_map([task_id], |row| {
+            let trigger_words_json = row.get::<_, String>(7)?;
+            let trigger_words =
+                serde_json::from_str::<Vec<String>>(&trigger_words_json).unwrap_or_default();
+            Ok(json!({
+                "localLoraId": row.get::<_, String>(0)?,
+                "titleSnapshot": row.get::<_, String>(1)?,
+                "typeSnapshot": row.get::<_, String>(2)?,
+                "fileName": row.get::<_, String>(3)?,
+                "fileSha256": row.get::<_, String>(4)?,
+                "modelStrength": row.get::<_, f64>(5)?,
+                "clipStrength": row.get::<_, f64>(6)?,
+                "triggerWords": trigger_words,
+            }))
+        })
+        .map_err(|error| format!("查询任务 LoRA 失败：{error}"))?;
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(|error| format!("解析任务 LoRA 失败：{error}"))
 }
@@ -556,6 +582,14 @@ fn schedule(
     increment_retry: bool,
     delay_seconds: u64,
 ) -> Result<(), String> {
+    let previous: Option<(String, Option<String>)> = database
+        .query_row(
+            "SELECT status,last_error FROM gallery_sync_queue WHERE id=?1",
+            [&publication.id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(|error| format!("读取图库重试旧状态失败：{error}"))?;
     let retry_count = publication.retry_count + u32::from(increment_retry);
     let next_attempt = if delay_seconds == 0 {
         None
@@ -563,6 +597,27 @@ fn schedule(
         Some((Utc::now() + ChronoDuration::seconds(delay_seconds as i64)).to_rfc3339())
     };
     database.execute("UPDATE gallery_sync_queue SET status=?2,retry_count=?3,last_error=?4,next_attempt_at=?5,updated_at=?6 WHERE id=?1", params![publication.id, status, retry_count, message, next_attempt, Utc::now().to_rfc3339()]).map_err(|error| format!("保存图库重试状态失败：{error}"))?;
+    // 相同错误按退避重试时不重复刷屏，状态或错误变化后才写入可见日志。
+    if previous.as_ref().is_none_or(|(old_status, old_error)| {
+        old_status != status || old_error.as_deref() != Some(message.as_str())
+    }) {
+        let (level, event, summary) = match status {
+            "failed_final" => ("error", "sync_failed", "作品同步到网页图库失败"),
+            "failed_retryable" => ("warn", "sync_retry_scheduled", "作品同步失败，已安排重试"),
+            "waiting_auth" => ("warn", "sync_waiting_auth", "作品同步正在等待账号"),
+            _ => ("warn", "sync_waiting_network", "作品同步正在等待网络"),
+        };
+        let details = format!("status={status}; retry={retry_count}; error={message}");
+        let _ = crate::desktop_logs::append_log(
+            database,
+            Some(&publication.local_task_id),
+            level,
+            "gallery",
+            event,
+            summary,
+            Some(&details),
+        );
+    }
     Ok(())
 }
 

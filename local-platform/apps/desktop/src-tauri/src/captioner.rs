@@ -184,6 +184,16 @@ pub fn create_job(
     transaction
         .commit()
         .map_err(|error| format!("提交打标任务失败：{error}"))?;
+    let details = format!("dataset_id={}; assets={}", input.dataset_id, targets.len());
+    let _ = crate::desktop_logs::append_log(
+        database,
+        Some(&id),
+        "info",
+        "captioning",
+        "task_queued",
+        "自动打标任务已进入队列",
+        Some(&details),
+    );
     read_job(database, &id)?.ok_or_else(|| "打标任务创建后不存在".into())
 }
 
@@ -301,6 +311,15 @@ fn claim_next_job(
     transaction
         .commit()
         .map_err(|error| format!("提交打标任务领取失败：{error}"))?;
+    let _ = crate::desktop_logs::append_log(
+        database,
+        Some(&id),
+        "info",
+        "captioning",
+        "task_started",
+        "自动打标任务开始执行",
+        None,
+    );
     Ok(Some(execution))
 }
 
@@ -530,6 +549,26 @@ fn finish_from_items(database: &Connection, app: &AppHandle, id: &str) {
     let error = (failed > 0).then_some("部分图片自动打标失败，请查看逐图状态");
     let _ = transaction.execute("UPDATE local_caption_jobs SET status=?2,progress=100,error=?3,completed_at=?4,updated_at=?4 WHERE id=?1", params![id,status,error,now]);
     let _ = transaction.commit();
+    let level = if failed > 0 { "error" } else { "info" };
+    let event = if failed > 0 {
+        "task_failed"
+    } else {
+        "task_succeeded"
+    };
+    let details = format!("failed_assets={failed}");
+    let _ = crate::desktop_logs::append_log(
+        database,
+        Some(id),
+        level,
+        "captioning",
+        event,
+        if failed > 0 {
+            "自动打标任务部分失败"
+        } else {
+            "自动打标任务完成"
+        },
+        Some(&details),
+    );
     emit_job(database, app, id);
 }
 
@@ -542,6 +581,15 @@ fn finish_failed(database: &Connection, app: &AppHandle, id: &str, error: &str) 
         let _ = transaction.execute("UPDATE local_caption_jobs SET status='failed',progress=100,error=?2,completed_at=?3,updated_at=?3 WHERE id=?1", params![id,safe_error,now]);
         let _ = transaction.commit();
     }
+    let _ = crate::desktop_logs::append_log(
+        database,
+        Some(id),
+        "error",
+        "captioning",
+        "task_failed",
+        "自动打标任务失败",
+        Some(&safe_error),
+    );
     emit_job(database, app, id);
 }
 
@@ -553,6 +601,15 @@ fn finish_cancelled(database: &Connection, app: &AppHandle, id: &str) {
         let _ = transaction.execute("UPDATE local_caption_jobs SET status='cancelled',progress=100,completed_at=?2,updated_at=?2 WHERE id=?1", params![id,now]);
         let _ = transaction.commit();
     }
+    let _ = crate::desktop_logs::append_log(
+        database,
+        Some(id),
+        "warn",
+        "captioning",
+        "task_cancelled",
+        "自动打标任务已取消",
+        None,
+    );
     emit_job(database, app, id);
 }
 
@@ -564,6 +621,15 @@ fn finish_paused(database: &Connection, app: &AppHandle, id: &str) {
         let _ = transaction.execute("UPDATE local_caption_jobs SET status='paused',updated_at=?2 WHERE id=?1 AND pause_requested=1 AND cancel_requested=0", params![id,now]);
         let _ = transaction.commit();
     }
+    let _ = crate::desktop_logs::append_log(
+        database,
+        Some(id),
+        "info",
+        "captioning",
+        "task_paused",
+        "自动打标任务已暂停",
+        None,
+    );
     emit_job(database, app, id);
 }
 

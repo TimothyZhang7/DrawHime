@@ -753,6 +753,42 @@ pub struct DesktopLocalJobView {
     pub updated_at: String,
 }
 
+/** 桌面结构化日志查询条件；空时间范围表示读取全部保留期日志。 */
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopLogQueryInput {
+    pub since_minutes: Option<u32>,
+    pub task_id: Option<String>,
+    pub level: Option<String>,
+    pub scope: Option<String>,
+    pub search: Option<String>,
+    pub offset: u32,
+    pub limit: u32,
+}
+
+/** 可展示、可复制且不包含敏感业务正文的单条桌面日志。 */
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopLogEntryView {
+    pub id: String,
+    pub task_id: Option<String>,
+    pub level: String,
+    pub scope: String,
+    pub event: String,
+    pub message: String,
+    pub details: Option<String>,
+    pub created_at: String,
+}
+
+/** 桌面日志分页结果。 */
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopLogPageView {
+    pub items: Vec<DesktopLogEntryView>,
+    pub total: u64,
+    pub has_more: bool,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DesktopEnvironmentReport {

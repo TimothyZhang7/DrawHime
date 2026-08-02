@@ -15,7 +15,10 @@ const options = parseArguments(process.argv.slice(2));
 const resourceId = requiredValue("resource-id");
 const fileOption = options.get("file")?.trim();
 const urlOption = options.get("url")?.trim();
-if (Boolean(fileOption) === Boolean(urlOption)) throw new Error("--file 与 --url 必须且只能提供一个");
+const remoteFileOption = options.get("remote-file")?.trim();
+const deferPublicVerify = options.get("defer-public-verify") === "true";
+if ([fileOption, urlOption, remoteFileOption].filter(Boolean).length !== 1) throw new Error("--file、--url 与 --remote-file 必须且只能提供一个");
+if (options.has("defer-public-verify") && !new Set(["true", "false"]).has(options.get("defer-public-verify"))) throw new Error("--defer-public-verify 只能是 true 或 false");
 const envelopePath = resolve(options.get("envelope") || ".private/desktop-resources/manifest-envelope.json");
 const envelope = desktopResourceManifestEnvelopeSchema.parse(JSON.parse(await readFile(envelopePath, "utf8")));
 const payload = desktopResourceManifestPayloadSchema.parse(JSON.parse(envelope.payload));
@@ -33,14 +36,21 @@ if (fileOption) {
   const filePath = resolve(fileOption);
   await verifyLocalFile(filePath, resource.byteSize, resource.sha256);
   await uploadFile(connection, filePath, temporaryPath);
-} else {
+} else if (urlOption) {
   const url = new URL(urlOption);
   if (url.protocol !== "https:") throw new Error("主站拉取地址必须使用 HTTPS");
   runRemote(connection, remoteDownloadScript(), [temporaryPath, url.href], 8 * 60 * 60_000);
+} else {
+  if (!/^\/data\/[a-zA-Z0-9._/-]+$/.test(remoteFileOption)) throw new Error("主服务器资源路径必须是 /data 下的绝对路径");
+  runRemote(connection, remoteCopyScript(), [temporaryPath, remoteFileOption], 30 * 60_000);
 }
 runRemote(connection, remotePublishScript(), [temporaryPath, resource.fileName, String(resource.byteSize), resource.sha256], 30 * 60_000);
-await verifyPublicMirror(resource.id, resource.byteSize, resource.sha256);
-process.stdout.write(`桌面资源主站发布完成：${resource.id} · ${resource.byteSize} bytes\n`);
+if (deferPublicVerify) {
+  process.stdout.write(`桌面资源主站入库完成，等待签名清单登记：${resource.id} · ${resource.byteSize} bytes\n`);
+} else {
+  await verifyPublicMirror(resource.id, resource.byteSize, resource.sha256);
+  process.stdout.write(`桌面资源主站发布完成：${resource.id} · ${resource.byteSize} bytes\n`);
+}
 
 /** 解析成对参数并拒绝重复键。 */
 function parseArguments(values) {
@@ -106,6 +116,19 @@ temporary_path="$1"
 source_url="$2"
 mkdir -p "$(dirname "$temporary_path")"
 curl --fail --location --silent --show-error --retry 8 --retry-all-errors --retry-delay 5 --connect-timeout 20 --continue-at - --output "$temporary_path" "$source_url"
+`;
+}
+
+/** 复用主服务器 data 盘上的已构建产物，不经过运维机或 GPU 服务器传输。 */
+function remoteCopyScript() {
+  return `set -euo pipefail
+temporary_path="$1"
+source_path="$2"
+case "$source_path" in /data/*) ;; *) echo '源文件必须位于 data 盘' >&2; exit 1;; esac
+test -f "$source_path"
+mkdir -p "$(dirname "$temporary_path")"
+rm -f "$temporary_path"
+cp --reflink=auto "$source_path" "$temporary_path"
 `;
 }
 

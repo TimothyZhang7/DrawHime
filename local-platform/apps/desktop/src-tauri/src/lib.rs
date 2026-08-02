@@ -4,6 +4,7 @@ mod ai_assist;
 mod ai_cleaner;
 mod auth;
 mod captioner;
+mod desktop_logs;
 mod environment;
 mod gallery_sync;
 mod generation;
@@ -36,16 +37,17 @@ use models::{
     DesktopAiSettings, DesktopAiSettingsUpdate, DesktopBootstrapView, DesktopCaptionJobCreateInput,
     DesktopCaptionJobView, DesktopEnvironmentReport, DesktopLocalJobCreateInput,
     DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView,
-    DesktopLocalModelImportInput, DesktopLocalModelView, DesktopManagedFileDeleteInput,
-    DesktopManagedFileRemovalView, DesktopOfflineUpdateImportInput, DesktopResourceCatalogView,
-    DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView,
-    DesktopSettings, DesktopSoftwareUpdateView, DesktopStorageCleanupInput,
-    DesktopStorageCleanupView, DesktopTrainingAssetDeleteInput, DesktopTrainingBatchTagsInput,
-    DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput,
-    DesktopTrainingDatasetIdInput, DesktopTrainingDatasetImportInput,
-    DesktopTrainingDatasetImportPreview, DesktopTrainingDatasetImportPreviewInput,
-    DesktopTrainingDatasetView, DesktopTrainingImagesAddInput, DesktopTrainingJobCreateInput,
-    DesktopTrainingJobView, DesktopTrainingSnapshotCopyInput, DesktopTrainingSnapshotView,
+    DesktopLocalModelImportInput, DesktopLocalModelView, DesktopLogPageView, DesktopLogQueryInput,
+    DesktopManagedFileDeleteInput, DesktopManagedFileRemovalView, DesktopOfflineUpdateImportInput,
+    DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView,
+    DesktopRuntimeStatusView, DesktopSettings, DesktopSoftwareUpdateView,
+    DesktopStorageCleanupInput, DesktopStorageCleanupView, DesktopTrainingAssetDeleteInput,
+    DesktopTrainingBatchTagsInput, DesktopTrainingCaptionUpdateInput,
+    DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetIdInput,
+    DesktopTrainingDatasetImportInput, DesktopTrainingDatasetImportPreview,
+    DesktopTrainingDatasetImportPreviewInput, DesktopTrainingDatasetView,
+    DesktopTrainingImagesAddInput, DesktopTrainingJobCreateInput, DesktopTrainingJobView,
+    DesktopTrainingSnapshotCopyInput, DesktopTrainingSnapshotView,
     DesktopTrainingTagTranslationInput, DesktopTrainingTagTranslationView,
     DesktopTrainingTriggerWordsUpdateInput, DesktopWebsiteLoraView, DesktopWebsiteModelView,
     GalleryPublicationInput, GallerySyncItem,
@@ -105,17 +107,32 @@ async fn desktop_sign_out() -> Result<auth::DesktopAccountView, String> {
 }
 
 #[tauri::command]
-fn desktop_bootstrap(state: State<'_, DesktopState>) -> Result<DesktopBootstrapView, String> {
-    let settings = state.load_settings()?;
-    let environment = inspect_and_store(&state, &settings)?;
-    let runtime = state.runtime.status()?;
-    let pending_gallery_sync_count = state.pending_gallery_sync_count()?;
-    Ok(DesktopBootstrapView {
-        environment,
-        settings,
-        runtime,
-        pending_gallery_sync_count,
+async fn desktop_bootstrap(app: tauri::AppHandle) -> Result<DesktopBootstrapView, String> {
+    // 初次系统探测包含 CIM、磁盘和驱动调用，必须离开 IPC 主线程，避免启动页假死。
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<DesktopState>();
+        let settings = state.load_settings()?;
+        let environment = inspect_and_store(&state, &settings)?;
+        let runtime = state.runtime.status()?;
+        let pending_gallery_sync_count = state.pending_gallery_sync_count()?;
+        let view = DesktopBootstrapView {
+            environment,
+            settings,
+            runtime,
+            pending_gallery_sync_count,
+        };
+        let _ = state.append_log(
+            None,
+            "info",
+            "startup",
+            "bootstrap_ready",
+            "桌面核心状态加载完成",
+            None,
+        );
+        Ok(view)
     })
+    .await
+    .map_err(|error| format!("桌面启动检测任务异常：{error}"))?
 }
 
 #[tauri::command]
@@ -126,7 +143,36 @@ async fn desktop_inspect_environment(
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<DesktopState>();
         let settings = state.load_settings()?;
-        inspect_and_store(&state, &settings)
+        let result = inspect_and_store(&state, &settings);
+        match &result {
+            Ok(report) => {
+                let details = format!(
+                    "status={}; gpu_count={}; backend={}",
+                    report.status,
+                    report.gpus.len(),
+                    report.execution_backend.id
+                );
+                let _ = state.append_log(
+                    None,
+                    "debug",
+                    "environment",
+                    "inspection_succeeded",
+                    "环境检测完成",
+                    Some(&details),
+                );
+            }
+            Err(error) => {
+                let _ = state.append_log(
+                    None,
+                    "error",
+                    "environment",
+                    "inspection_failed",
+                    "环境检测失败",
+                    Some(error),
+                );
+            }
+        }
+        result
     })
     .await
     .map_err(|error| format!("环境检测任务异常：{error}"))?
@@ -195,6 +241,15 @@ fn desktop_list_gallery_sync_queue(
     state.list_gallery_sync_queue()
 }
 
+/** 分页读取全局或指定任务的持久化结构化日志。 */
+#[tauri::command]
+fn desktop_list_logs(
+    state: State<'_, DesktopState>,
+    input: DesktopLogQueryInput,
+) -> Result<DesktopLogPageView, String> {
+    state.list_logs(input)
+}
+
 #[tauri::command]
 async fn desktop_load_resource_catalog(
     state: State<'_, DesktopState>,
@@ -214,11 +269,40 @@ async fn desktop_download_resource(
 ) -> Result<DesktopResourceDownloadView, String> {
     let settings = state.load_settings()?;
     let app_data_dir = state.app_data_dir.clone();
-    tauri::async_runtime::spawn_blocking(move || {
+    let log_resource_id = resource_id.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
         resource::download_resource(&settings, &app_data_dir, &resource_id, &app)
     })
     .await
-    .map_err(|error| format!("资源下载任务异常：{error}"))?
+    .map_err(|error| format!("资源下载任务异常：{error}"))?;
+    match &result {
+        Ok(view) => {
+            let details = format!(
+                "resource_id={}; bytes={}",
+                log_resource_id, view.downloaded_bytes
+            );
+            let _ = state.append_log(
+                None,
+                "info",
+                "resource",
+                "download_succeeded",
+                "资源下载完成",
+                Some(&details),
+            );
+        }
+        Err(error) => {
+            let details = format!("resource_id={}; error={error}", log_resource_id);
+            let _ = state.append_log(
+                None,
+                "error",
+                "resource",
+                "download_failed",
+                "资源下载失败",
+                Some(&details),
+            );
+        }
+    }
+    result
 }
 
 /** 暂停资源下载并保留已完成分片，用户再次下载时继续断点。 */
@@ -243,14 +327,39 @@ async fn desktop_install_resource(
     }
     let settings = state.load_settings()?;
     let app_data_dir = state.app_data_dir.clone();
-    let outcome = tauri::async_runtime::spawn_blocking(move || {
+    let log_resource_id = resource_id.clone();
+    let outcome_result = tauri::async_runtime::spawn_blocking(move || {
         resource::install_resource(&settings, &app_data_dir, &resource_id, &app)
     })
     .await
-    .map_err(|error| format!("资源安装任务异常：{error}"))??;
+    .map_err(|error| format!("资源安装任务异常：{error}"))?;
+    let outcome = match outcome_result {
+        Ok(value) => value,
+        Err(error) => {
+            let details = format!("resource_id={log_resource_id}; error={error}");
+            let _ = state.append_log(
+                None,
+                "error",
+                "resource",
+                "install_failed",
+                "资源安装失败",
+                Some(&details),
+            );
+            return Err(error);
+        }
+    };
     for registration in outcome.model_registrations {
         state.register_local_model(registration)?;
     }
+    let details = format!("resource_id={log_resource_id}");
+    let _ = state.append_log(
+        None,
+        "info",
+        "resource",
+        "install_succeeded",
+        "资源安装完成",
+        Some(&details),
+    );
     Ok(outcome.view)
 }
 
@@ -269,14 +378,54 @@ async fn desktop_start_runtime(
     let app_data_dir = state.app_data_dir.clone();
     let runtime = state.runtime.clone();
     let gpu_workload = state.gpu_workload.clone();
-    tauri::async_runtime::spawn_blocking(move || {
+    state.append_log(
+        None,
+        "info",
+        "runtime",
+        "start_requested",
+        "已请求启动本地 Runtime",
+        None,
+    )?;
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let current = runtime.status()?;
+        if current.status == "ready" {
+            return Ok(current);
+        }
         let _guard = gpu_workload
             .try_acquire()
-            .ok_or_else(|| "GPU 正在执行生成或训练任务".to_string())?;
+            .ok_or_else(|| "GPU 当前正在执行任务；任务完成后可直接启动核心".to_string())?;
         runtime.start(&settings, &app_data_dir)
     })
     .await
-    .map_err(|error| format!("Runtime 启动任务异常：{error}"))?
+    .map_err(|error| format!("Runtime 启动任务异常：{error}"))?;
+    match &result {
+        Ok(view) => {
+            let details = format!(
+                "status={}; backend={}",
+                view.status,
+                view.backend.as_deref().unwrap_or("unknown")
+            );
+            let _ = state.append_log(
+                None,
+                "info",
+                "runtime",
+                "start_succeeded",
+                "本地 Runtime 已就绪",
+                Some(&details),
+            );
+        }
+        Err(error) => {
+            let _ = state.append_log(
+                None,
+                "error",
+                "runtime",
+                "start_failed",
+                "本地 Runtime 启动失败",
+                Some(error),
+            );
+        }
+    }
+    result
 }
 
 #[tauri::command]
@@ -306,14 +455,57 @@ async fn desktop_self_test_runtime(
     let app_data_dir = state.app_data_dir.clone();
     let runtime = state.runtime.clone();
     let gpu_workload = state.gpu_workload.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let _guard = gpu_workload
-            .try_acquire()
-            .ok_or_else(|| "GPU 正在执行生成或训练任务".to_string())?;
+    state.append_log(
+        None,
+        "info",
+        "runtime",
+        "self_test_requested",
+        "已请求执行 Runtime 自检",
+        None,
+    )?;
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        // 已就绪 Runtime 的节点与设备探针不提交 GPU 工作，无需与正在运行的生成任务争抢协调锁。
+        let _guard = if runtime.status()?.status == "ready" {
+            None
+        } else {
+            Some(
+                gpu_workload
+                    .try_acquire()
+                    .ok_or_else(|| "GPU 当前正在执行任务；任务完成后再执行首次自检".to_string())?,
+            )
+        };
         runtime.self_test(&settings, &app_data_dir)
     })
     .await
-    .map_err(|error| format!("Runtime 自检任务异常：{error}"))?
+    .map_err(|error| format!("Runtime 自检任务异常：{error}"))?;
+    match &result {
+        Ok(view) => {
+            let details = format!(
+                "status={}; backend={}",
+                view.status,
+                view.backend.as_deref().unwrap_or("unknown")
+            );
+            let _ = state.append_log(
+                None,
+                "info",
+                "runtime",
+                "self_test_succeeded",
+                "Runtime 自检通过",
+                Some(&details),
+            );
+        }
+        Err(error) => {
+            let _ = state.append_log(
+                None,
+                "error",
+                "runtime",
+                "self_test_failed",
+                "Runtime 自检失败",
+                Some(error),
+            );
+        }
+    }
+    result
 }
 
 #[tauri::command]
@@ -452,7 +644,8 @@ async fn desktop_install_website_model(
     let settings = state.load_settings()?;
     let app_data_dir = state.app_data_dir.clone();
     let app_for_install = app.clone();
-    let outcome = tauri::async_runtime::spawn_blocking(move || {
+    let log_model_id = model_id.clone();
+    let outcome_result = tauri::async_runtime::spawn_blocking(move || {
         let downloaded = website_model::download_and_verify(
             &app_data_dir,
             PathBuf::from(&settings.model_root).as_path(),
@@ -487,10 +680,34 @@ async fn desktop_install_website_model(
         }
     })
     .await
-    .map_err(|error| format!("网站底模安装任务异常：{error}"))??;
+    .map_err(|error| format!("网站底模安装任务异常：{error}"))?;
+    let outcome = match outcome_result {
+        Ok(value) => value,
+        Err(error) => {
+            let details = format!("model_id={log_model_id}; error={error}");
+            let _ = state.append_log(
+                None,
+                "error",
+                "resource",
+                "model_install_failed",
+                "网站底模下载或安装失败",
+                Some(&details),
+            );
+            return Err(error);
+        }
+    };
     match state.register_local_model(outcome.2) {
         Ok(view) => {
             website_model::emit_install_state(&app, &outcome.0, outcome.1, "installed", None);
+            let details = format!("model_id={log_model_id}; bytes={}", outcome.1);
+            let _ = state.append_log(
+                None,
+                "info",
+                "resource",
+                "model_install_succeeded",
+                "网站底模已安装",
+                Some(&details),
+            );
             Ok(view)
         }
         Err(error) => {
@@ -500,6 +717,15 @@ async fn desktop_install_website_model(
                 outcome.1,
                 "failed",
                 Some(error.clone()),
+            );
+            let details = format!("model_id={log_model_id}; error={error}");
+            let _ = state.append_log(
+                None,
+                "error",
+                "resource",
+                "model_registration_failed",
+                "网站底模安装后登记失败",
+                Some(&details),
             );
             Err(error)
         }
@@ -521,7 +747,8 @@ async fn desktop_install_website_lora(
         .map(|item| item.sha256)
         .collect();
     let app_for_download = app.clone();
-    let outcome = tauri::async_runtime::spawn_blocking(move || {
+    let log_lora_id = lora_id.clone();
+    let outcome_result = tauri::async_runtime::spawn_blocking(move || {
         let downloaded = website_lora::download_and_verify(
             &app_data_dir,
             &lora_id,
@@ -534,9 +761,47 @@ async fn desktop_install_website_lora(
         Ok::<_, String>((downloaded.view, registration))
     })
     .await
-    .map_err(|error| format!("网站 LoRA 安装任务异常：{error}"))??;
-    let view = state.register_local_lora(outcome.1)?;
+    .map_err(|error| format!("网站 LoRA 安装任务异常：{error}"))?;
+    let outcome = match outcome_result {
+        Ok(value) => value,
+        Err(error) => {
+            let details = format!("lora_id={log_lora_id}; error={error}");
+            let _ = state.append_log(
+                None,
+                "error",
+                "resource",
+                "lora_install_failed",
+                "网站 LoRA 下载或安装失败",
+                Some(&details),
+            );
+            return Err(error);
+        }
+    };
+    let view = match state.register_local_lora(outcome.1) {
+        Ok(view) => view,
+        Err(error) => {
+            let details = format!("lora_id={log_lora_id}; error={error}");
+            let _ = state.append_log(
+                None,
+                "error",
+                "resource",
+                "lora_registration_failed",
+                "网站 LoRA 安装后登记失败",
+                Some(&details),
+            );
+            return Err(error);
+        }
+    };
     website_lora::emit_install_state(&app, &outcome.0, "installed", None);
+    let details = format!("lora_id={log_lora_id}; sha256={}", view.sha256);
+    let _ = state.append_log(
+        None,
+        "info",
+        "resource",
+        "lora_install_succeeded",
+        "网站 LoRA 已安装",
+        Some(&details),
+    );
     Ok(view)
 }
 
@@ -1289,6 +1554,7 @@ pub fn run() {
             desktop_ai_analyze_image,
             desktop_enqueue_gallery_publication,
             desktop_list_gallery_sync_queue,
+            desktop_list_logs,
             desktop_load_resource_catalog,
             desktop_download_resource,
             desktop_pause_resource_download,

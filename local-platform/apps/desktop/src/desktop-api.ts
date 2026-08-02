@@ -1,5 +1,5 @@
 /** 本文件封装 WebView 到 Tauri 本地核心的受类型约束命令。 */
-import type { DesktopAccountView, DesktopAiCleanApplyInput, DesktopAiCleanJobCreateInput, DesktopAiCleanJobView, DesktopAiCleanUndoInput, DesktopAuthorizationRequestView, DesktopAuthorizationStartRequest, DesktopBootstrapView, DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopEnvironmentReport, DesktopGalleryPrivacy, DesktopGallerySyncItem, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopManagedFileDeleteInput, DesktopManagedFileRemovalView, DesktopOfflineUpdateImportInput, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView, DesktopSettings, DesktopSettingsUpdate, DesktopSoftwareUpdateView, DesktopStorageCleanupInput, DesktopStorageCleanupView, DesktopTrainingAssetDeleteInput, DesktopTrainingBatchTagsInput, DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetIdInput, DesktopTrainingDatasetImportInput, DesktopTrainingDatasetImportPreview, DesktopTrainingDatasetImportPreviewInput, DesktopTrainingDatasetView, DesktopTrainingImagesAddInput, DesktopTrainingJobCreateInput, DesktopTrainingJobView, DesktopTrainingSnapshotCopyInput, DesktopTrainingSnapshotView, DesktopTrainingTagTranslationInput, DesktopTrainingTriggerWordsUpdateInput, DesktopWebsiteLoraInstallProgress, DesktopWebsiteLoraView, DesktopWebsiteModelInstallProgress, DesktopWebsiteModelView, TrainingTagTranslationView } from "@drawhime/contracts";
+import type { DesktopAccountView, DesktopAiCleanApplyInput, DesktopAiCleanJobCreateInput, DesktopAiCleanJobView, DesktopAiCleanUndoInput, DesktopAuthorizationRequestView, DesktopAuthorizationStartRequest, DesktopBootstrapView, DesktopCaptionJobCreateInput, DesktopCaptionJobView, DesktopEnvironmentReport, DesktopGalleryPrivacy, DesktopGallerySyncItem, DesktopLocalJobCreateInput, DesktopLocalJobView, DesktopLocalLoraImportInput, DesktopLocalLoraView, DesktopLocalModelImportInput, DesktopLocalModelView, DesktopLogPageView, DesktopLogQueryInput, DesktopManagedFileDeleteInput, DesktopManagedFileRemovalView, DesktopOfflineUpdateImportInput, DesktopResourceCatalogView, DesktopResourceDownloadView, DesktopResourceInstallView, DesktopRuntimeStatusView, DesktopSettings, DesktopSettingsUpdate, DesktopSoftwareUpdateView, DesktopStorageCleanupInput, DesktopStorageCleanupView, DesktopTrainingAssetDeleteInput, DesktopTrainingBatchTagsInput, DesktopTrainingCaptionUpdateInput, DesktopTrainingDatasetCreateInput, DesktopTrainingDatasetIdInput, DesktopTrainingDatasetImportInput, DesktopTrainingDatasetImportPreview, DesktopTrainingDatasetImportPreviewInput, DesktopTrainingDatasetView, DesktopTrainingImagesAddInput, DesktopTrainingJobCreateInput, DesktopTrainingJobView, DesktopTrainingSnapshotCopyInput, DesktopTrainingSnapshotView, DesktopTrainingTagTranslationInput, DesktopTrainingTriggerWordsUpdateInput, DesktopWebsiteLoraInstallProgress, DesktopWebsiteLoraView, DesktopWebsiteModelInstallProgress, DesktopWebsiteModelView, TrainingTagTranslationView } from "@drawhime/contracts";
 import type { DesktopAiAnalyzeInput, DesktopAiAnalyzeView, DesktopAiSettings, DesktopAiSettingsUpdate } from "@drawhime/contracts";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -19,7 +19,9 @@ export function signOutDesktopAccount(): Promise<DesktopAccountView> { return in
 /** 加载本机设置、环境报告和图库待同步数量。 */
 export function loadDesktopBootstrap(): Promise<DesktopBootstrapView> { return invoke("desktop_bootstrap"); }
 /** 主动重新检测本机环境。 */
-export function inspectDesktopEnvironment(): Promise<DesktopEnvironmentReport> { return invoke("desktop_inspect_environment"); }
+export function inspectDesktopEnvironment(): Promise<DesktopEnvironmentReport> { return withDeadline(invoke("desktop_inspect_environment"), 15_000, "环境检测超过 15 秒，已保留上次可信结果；可稍后重试"); }
+/** 分页读取全局或单任务的持久化结构化日志。 */
+export function listDesktopLogs(input: DesktopLogQueryInput): Promise<DesktopLogPageView> { return invoke("desktop_list_logs", { input }); }
 /** 校验并保存桌面端设置。 */
 export function saveDesktopSettings(settings: DesktopSettingsUpdate): Promise<DesktopSettings> { return invoke("desktop_save_settings", { settings }); }
 /** 读取不含密钥正文的 AI 辅助设置。 */
@@ -185,3 +187,11 @@ export function setDesktopGenerationPreviewAlwaysOnTop(alwaysOnTop: boolean): Pr
 export function listenDesktopLocalJobUpdates(handler: (job: DesktopLocalJobView) => void): Promise<UnlistenFn> { return listen<DesktopLocalJobView>("desktop-local-job-updated", (event) => handler(event.payload)); }
 /** 图库窗口复用期间监听用户切换的任务 ID。 */
 export function listenDesktopGalleryPreviewSelection(handler: (id: string) => void): Promise<UnlistenFn> { return listen<string>("desktop-gallery-preview-selected", (event) => handler(event.payload)); }
+
+/** 检测类 IPC 使用前端截止释放交互状态；底层探针仍自行完成回收和可信快照写入。 */
+function withDeadline<T>(request: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(new Error(message)), timeoutMs);
+    void request.then(resolve, reject).finally(() => window.clearTimeout(timer));
+  });
+}

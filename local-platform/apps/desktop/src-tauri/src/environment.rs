@@ -6,14 +6,15 @@ use crate::{
         ExecutionBackendView, GpuView, MemoryView, OsView, RuntimeCapabilitiesView, RuntimeView,
         WindowsSystemProbe,
     },
-    process::hide_window,
+    process::{hide_window, output_with_timeout},
     trainer,
 };
 use chrono::Utc;
 use serde_json::Value;
 use std::{
-    fs,
-    path::Path,
+    collections::{HashMap, HashSet},
+    env, fs,
+    path::{Path, PathBuf},
     process::Command,
     sync::{Mutex, OnceLock},
     thread,
@@ -54,6 +55,9 @@ struct WindowsIdentity {
 }
 
 static LAST_WINDOWS_IDENTITY: OnceLock<Mutex<Option<WindowsIdentity>>> = OnceLock::new();
+// 显卡枚举允许 CIM 瞬时失败；只缓存真实识别过的适配器，不制造占位设备。
+static LAST_DISPLAY_ADAPTERS: OnceLock<Mutex<Vec<crate::models::DisplayAdapterView>>> =
+    OnceLock::new();
 
 /** 检测当前真实环境；任何缺失都转为明确问题，不使用虚构硬件数据。 */
 pub fn inspect_environment(settings: &DesktopSettings) -> DesktopEnvironmentReport {
@@ -265,7 +269,16 @@ fn select_hardware_backend(
     issues: &mut Vec<EnvironmentIssue>,
 ) -> HardwareSelection {
     let nvidia_adapter_present = adapters.iter().any(|adapter| adapter.vendor == "NVIDIA");
-    let amd_adapter = adapters.iter().find(|adapter| adapter.vendor == "AMD");
+    let amd_adapter = adapters
+        .iter()
+        .filter(|adapter| adapter.vendor == "AMD")
+        // 多 AMD 设备优先显存较大的独显；显存未知时使用产品线名称作为稳定次级依据。
+        .max_by_key(|adapter| {
+            (
+                adapter.dedicated_memory_bytes.unwrap_or(0),
+                amd_discrete_name_score(&adapter.name),
+            )
+        });
     let cuda_driver_supported = nvidia_gpus
         .iter()
         .any(|gpu| nvidia_driver_supported(&gpu.driver_version));
@@ -372,6 +385,14 @@ fn select_hardware_backend(
             &format!("当前驱动为 {detected}，CUDA 12.6 Runtime 要求 Windows 驱动至少为 560.76。"),
             "更新 NVIDIA 驱动",
         ));
+    } else if nvidia_gpus.iter().any(|gpu| !gpu.memory_reliable) {
+        issues.push(issue(
+            "nvidia_memory_probe_unavailable",
+            "critical",
+            "NVIDIA 显卡显存暂未确认",
+            "已经识别 NVIDIA 显卡和驱动，但 nvidia-smi 未返回可靠显存；请更新或修复驱动后重新检测。",
+            "修复 NVIDIA 驱动",
+        ));
     } else if !nvidia_gpus.is_empty() {
         issues.push(issue(
             "gpu_memory_insufficient",
@@ -402,6 +423,20 @@ fn select_hardware_backend(
         ),
         gpus: nvidia_gpus,
         low_free_memory: false,
+    }
+}
+
+/** AMD 多显卡设备优先 RX、Radeon Pro 与工作站独显，集显保持可见但不抢占。 */
+fn amd_discrete_name_score(name: &str) -> u8 {
+    let name = name.to_ascii_uppercase();
+    if name.contains("RADEON PRO") || name.contains("FIREPRO") {
+        3
+    } else if name.contains("RADEON RX") {
+        2
+    } else if name.contains("RADEON") {
+        1
+    } else {
+        0
     }
 }
 
@@ -501,12 +536,17 @@ $disks = @(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' -ErrorAction 
 "#;
     let mut last_probe = None;
     for attempt in 0..2 {
-        let output = hide_window(&mut Command::new("powershell.exe"))
-            .args(["-NoProfile", "-NonInteractive", "-Command", script])
-            .output();
+        let mut command = Command::new("powershell.exe");
+        hide_window(&mut command).args(["-NoProfile", "-NonInteractive", "-Command", script]);
+        let output = output_with_timeout(&mut command, Duration::from_secs(3));
+        let Some(output) = output.ok().flatten() else {
+            // CIM 卡死时不重复等待，立即进入 Win32 原生回退。
+            break;
+        };
         if let Some(mut probe) = output
-            .ok()
-            .filter(|result| result.status.success())
+            .status
+            .success()
+            .then_some(output)
             .and_then(|result| serde_json::from_slice::<WindowsSystemProbe>(&result.stdout).ok())
         {
             complete_windows_probe(&mut probe);
@@ -545,8 +585,224 @@ fn complete_windows_probe(probe: &mut WindowsSystemProbe) {
                 probe.virtual_total_bytes = probe.virtual_total_bytes.or(Some(memory.2));
             }
         }
+        // CIM 在部分精简系统、首次启动和驱动切换期间会返回空数组；原生枚举负责补齐真实显卡。
+        merge_display_adapters(
+            &mut probe.display_adapters,
+            windows_native_display_adapters(),
+        );
+        stabilize_display_adapters(&mut probe.display_adapters);
     }
     stabilize_windows_identity(probe);
+}
+
+/** 合并 CIM 与 Win32 原生显卡结果；优先保留 CIM 提供的驱动和显存信息。 */
+#[cfg(target_os = "windows")]
+fn merge_display_adapters(
+    adapters: &mut Vec<crate::models::DisplayAdapterView>,
+    native_adapters: Vec<crate::models::DisplayAdapterView>,
+) {
+    for adapter in adapters.iter_mut() {
+        normalize_display_adapter(adapter);
+    }
+    adapters.retain(|adapter| !adapter.name.trim().is_empty());
+    for mut candidate in native_adapters {
+        normalize_display_adapter(&mut candidate);
+        if candidate.name.trim().is_empty() {
+            continue;
+        }
+        let existing = adapters
+            .iter_mut()
+            .find(|adapter| same_display_adapter(adapter, &candidate));
+        if let Some(existing) = existing {
+            if existing.driver_version.trim().is_empty() {
+                existing.driver_version = candidate.driver_version;
+            }
+            if existing.dedicated_memory_bytes.is_none() {
+                existing.dedicated_memory_bytes = candidate.dedicated_memory_bytes;
+            }
+            if existing.pnp_device_id.trim().is_empty() {
+                existing.pnp_device_id = candidate.pnp_device_id;
+            }
+            if existing.supported_backends.is_empty() {
+                existing.supported_backends = candidate.supported_backends;
+            }
+        } else {
+            adapters.push(candidate);
+        }
+    }
+    let mut identities = HashSet::new();
+    adapters.retain(|adapter| identities.insert(display_adapter_identity(adapter)));
+}
+
+/** 规范显卡厂商和后端，避免本地化驱动名称或 PNP ID 导致 AMD/NVIDIA 判断漂移。 */
+fn normalize_display_adapter(adapter: &mut crate::models::DisplayAdapterView) {
+    adapter.vendor = display_adapter_vendor(&adapter.name, &adapter.vendor, &adapter.pnp_device_id);
+    adapter.supported_backends = match adapter.vendor.as_str() {
+        "NVIDIA" => vec![BACKEND_NVIDIA_CUDA.into()],
+        "AMD" => vec![BACKEND_AMD_DIRECTML.into()],
+        _ => Vec::new(),
+    };
+}
+
+/** 同一显卡优先使用 PNP ID 去重，驱动未返回 ID 时退回厂商和名称。 */
+fn same_display_adapter(
+    left: &crate::models::DisplayAdapterView,
+    right: &crate::models::DisplayAdapterView,
+) -> bool {
+    let left_pnp = normalize_pnp_device_id(&left.pnp_device_id);
+    let right_pnp = normalize_pnp_device_id(&right.pnp_device_id);
+    if !left_pnp.is_empty() && !right_pnp.is_empty() {
+        return left_pnp == right_pnp;
+    }
+    left.vendor.eq_ignore_ascii_case(&right.vendor)
+        && left.name.trim().eq_ignore_ascii_case(right.name.trim())
+}
+
+/** 构造稳定去重键，未知设备仍按名称保留用于诊断展示。 */
+fn display_adapter_identity(adapter: &crate::models::DisplayAdapterView) -> String {
+    let pnp = normalize_pnp_device_id(&adapter.pnp_device_id);
+    if !pnp.is_empty() {
+        return format!("pnp:{pnp}");
+    }
+    format!(
+        "name:{}:{}",
+        adapter.vendor.to_ascii_lowercase(),
+        adapter.name.trim().to_ascii_lowercase()
+    )
+}
+
+/** 统一 CIM 与 EnumDisplayDevices 返回的反斜线、井号和设备接口 GUID 表达。 */
+fn normalize_pnp_device_id(value: &str) -> String {
+    let normalized = value
+        .trim()
+        .trim_start_matches(r"\\?\")
+        .replace('#', "\\")
+        .to_ascii_uppercase();
+    normalized
+        .split(r"\{")
+        .next()
+        .unwrap_or_default()
+        .trim_end_matches('\\')
+        .to_owned()
+}
+
+/** 同时识别驱动名称与 PCI 厂商 ID，覆盖本地化名称、ATI 旧名和专业卡产品线。 */
+fn display_adapter_vendor(name: &str, vendor: &str, pnp_device_id: &str) -> String {
+    let identity = format!("{name} {vendor} {pnp_device_id}").to_ascii_uppercase();
+    if identity.contains("VEN_10DE")
+        || identity.contains("NVIDIA")
+        || identity.contains("GEFORCE")
+        || identity.contains("QUADRO")
+        || identity.contains("NVS ")
+    {
+        "NVIDIA".into()
+    } else if identity.contains("VEN_1002")
+        || identity.contains("ADVANCED MICRO DEVICES")
+        || identity.contains("RADEON")
+        || identity.contains("AMD")
+        || identity.contains("ATI ")
+    {
+        "AMD".into()
+    } else if identity.contains("VEN_8086")
+        || identity.contains("INTEL")
+        || identity.contains("IRIS")
+    {
+        "Intel".into()
+    } else {
+        "未知".into()
+    }
+}
+
+/** 显卡探测成功后缓存真实结果；本轮瞬时为空时沿用缓存，避免页面反复判成无显卡。 */
+#[cfg(target_os = "windows")]
+fn stabilize_display_adapters(adapters: &mut Vec<crate::models::DisplayAdapterView>) {
+    let cache = LAST_DISPLAY_ADAPTERS.get_or_init(|| Mutex::new(Vec::new()));
+    let Ok(mut cached) = cache.lock() else {
+        return;
+    };
+    if adapters
+        .iter()
+        .any(|adapter| !adapter.supported_backends.is_empty())
+    {
+        *cached = adapters.clone();
+    } else if !cached.is_empty() {
+        *adapters = cached.clone();
+    }
+}
+
+/** 使用 Win32 EnumDisplayDevicesW 枚举真实适配器，避免依赖 WMI/CIM 服务状态。 */
+#[cfg(target_os = "windows")]
+fn windows_native_display_adapters() -> Vec<crate::models::DisplayAdapterView> {
+    #[repr(C)]
+    struct DisplayDeviceW {
+        cb: u32,
+        device_name: [u16; 32],
+        device_string: [u16; 128],
+        state_flags: u32,
+        device_id: [u16; 128],
+        device_key: [u16; 128],
+    }
+
+    #[link(name = "user32")]
+    unsafe extern "system" {
+        #[link_name = "EnumDisplayDevicesW"]
+        fn enum_display_devices_w(
+            device: *const u16,
+            device_number: u32,
+            display_device: *mut DisplayDeviceW,
+            flags: u32,
+        ) -> i32;
+    }
+
+    const DISPLAY_DEVICE_MIRRORING_DRIVER: u32 = 0x0000_0008;
+    let mut adapters = Vec::new();
+    for index in 0..64_u32 {
+        let mut device = DisplayDeviceW {
+            cb: std::mem::size_of::<DisplayDeviceW>() as u32,
+            device_name: [0; 32],
+            device_string: [0; 128],
+            state_flags: 0,
+            device_id: [0; 128],
+            device_key: [0; 128],
+        };
+        // Win32 只写入固定 DISPLAY_DEVICEW 缓冲区；返回零表示枚举结束。
+        if unsafe { enum_display_devices_w(std::ptr::null(), index, &mut device, 0) } == 0 {
+            break;
+        }
+        if device.state_flags & DISPLAY_DEVICE_MIRRORING_DRIVER != 0 {
+            continue;
+        }
+        let name = wide_text(&device.device_string);
+        if name.is_empty() {
+            continue;
+        }
+        let pnp_device_id = wide_text(&device.device_id);
+        let vendor = display_adapter_vendor(&name, "", &pnp_device_id);
+        let supported_backends = match vendor.as_str() {
+            "NVIDIA" => vec![BACKEND_NVIDIA_CUDA.into()],
+            "AMD" => vec![BACKEND_AMD_DIRECTML.into()],
+            _ => Vec::new(),
+        };
+        adapters.push(crate::models::DisplayAdapterView {
+            name,
+            vendor,
+            driver_version: String::new(),
+            pnp_device_id,
+            dedicated_memory_bytes: None,
+            supported_backends,
+        });
+    }
+    adapters
+}
+
+/** 读取 Win32 定长 UTF-16 缓冲区中的首个 NUL 终止字符串。 */
+#[cfg(target_os = "windows")]
+fn wide_text(value: &[u16]) -> String {
+    let length = value
+        .iter()
+        .position(|character| *character == 0)
+        .unwrap_or(value.len());
+    String::from_utf16_lossy(&value[..length]).trim().to_owned()
 }
 
 /** 直接读取 64 位系统注册表中的 Windows 版本，避免 PowerShell 或 CIM 瞬时故障阻塞启动。 */
@@ -671,33 +927,130 @@ fn empty_windows_system_probe() -> WindowsSystemProbe {
 }
 
 fn nvidia_gpus() -> Vec<GpuView> {
-    let output = hide_window(&mut Command::new("nvidia-smi")).args(["--query-gpu=index,uuid,name,memory.total,memory.free,driver_version,compute_cap,temperature.gpu,utilization.gpu", "--format=csv,noheader,nounits"]).output();
-    let Some(output) = output.ok().filter(|result| result.status.success()) else {
+    // 核心字段使用所有常见 nvidia-smi 版本都支持的查询；架构或监控字段失败不能抹掉整张显卡。
+    let Some((executable, output)) = nvidia_smi_output(&[
+        "--query-gpu=index,uuid,name,memory.total,memory.free,driver_version",
+        "--format=csv,noheader,nounits",
+    ]) else {
         return Vec::new();
     };
-    String::from_utf8_lossy(&output.stdout)
+    let architectures = nvidia_optional_query(&executable, "index,compute_cap", 2)
+        .into_iter()
+        .filter_map(|columns| Some((columns[0].parse::<u32>().ok()?, non_empty(&columns[1])?)))
+        .collect::<HashMap<_, _>>();
+    let metrics = nvidia_optional_query(&executable, "index,temperature.gpu,utilization.gpu", 3)
+        .into_iter()
+        .filter_map(|columns| {
+            Some((
+                columns[0].parse::<u32>().ok()?,
+                (parse_number(&columns[1]), parse_number(&columns[2])),
+            ))
+        })
+        .collect::<HashMap<_, _>>();
+    parse_nvidia_gpu_output(&output.stdout, &architectures, &metrics)
+}
+
+/** 解析 NVIDIA 核心字段；可选字段缺失时仍保留可生成的真实设备。 */
+fn parse_nvidia_gpu_output(
+    output: &[u8],
+    architectures: &HashMap<u32, String>,
+    metrics: &HashMap<u32, (Option<f64>, Option<f64>)>,
+) -> Vec<GpuView> {
+    String::from_utf8_lossy(output)
         .lines()
         .filter_map(|line| {
             let columns: Vec<_> = line.split(',').map(str::trim).collect();
-            if columns.len() < 9 {
+            if columns.len() < 6 {
                 return None;
             }
+            let index = columns[0].parse().ok()?;
+            let (temperature_celsius, utilization_percent) =
+                metrics.get(&index).copied().unwrap_or((None, None));
+            let memory_total_mib = parse_number(columns[3]);
+            let memory_free_mib = parse_number(columns[4]);
             Some(GpuView {
-                index: columns[0].parse().ok()?,
+                index,
                 uuid: columns[1].into(),
                 name: columns[2].into(),
                 vendor: "NVIDIA".into(),
                 backend: BACKEND_NVIDIA_CUDA.into(),
-                memory_total_bytes: parse_number(columns[3])? as u64 * MIB,
-                memory_free_bytes: parse_number(columns[4])? as u64 * MIB,
-                memory_reliable: true,
+                memory_total_bytes: memory_total_mib.unwrap_or(0.0) as u64 * MIB,
+                memory_free_bytes: memory_free_mib.unwrap_or(0.0) as u64 * MIB,
+                memory_reliable: memory_total_mib.is_some() && memory_free_mib.is_some(),
                 driver_version: columns[5].into(),
-                architecture_hint: non_empty(columns[6]),
-                temperature_celsius: parse_number(columns[7]),
-                utilization_percent: parse_number(columns[8]),
+                architecture_hint: architectures.get(&index).cloned(),
+                temperature_celsius,
+                utilization_percent,
             })
         })
         .collect()
+}
+
+/** 从命令搜索路径和 NVIDIA 标准安装目录寻找可工作的 nvidia-smi。 */
+fn nvidia_smi_output(arguments: &[&str]) -> Option<(PathBuf, std::process::Output)> {
+    for executable in nvidia_smi_candidates() {
+        let mut command = Command::new(&executable);
+        hide_window(&mut command).args(arguments);
+        let Ok(Some(output)) = output_with_timeout(&mut command, Duration::from_secs(3)) else {
+            continue;
+        };
+        if output.status.success() {
+            return Some((executable, output));
+        }
+    }
+    None
+}
+
+/** 可选 nvidia-smi 字段按独立命令读取；旧驱动不支持字段时返回空映射。 */
+fn nvidia_optional_query(
+    executable: &Path,
+    fields: &str,
+    expected_columns: usize,
+) -> Vec<Vec<String>> {
+    let query = format!("--query-gpu={fields}");
+    let mut command = Command::new(executable);
+    hide_window(&mut command).args([query.as_str(), "--format=csv,noheader,nounits"]);
+    let Ok(Some(output)) = output_with_timeout(&mut command, Duration::from_secs(3)) else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(|line| {
+            line.split(',')
+                .map(|value| value.trim().to_owned())
+                .collect::<Vec<_>>()
+        })
+        .filter(|columns| columns.len() >= expected_columns)
+        .collect()
+}
+
+/** 去重返回命令名、System32 和 NVIDIA NVSMI 标准路径，兼容 PATH 未注入的驱动安装。 */
+fn nvidia_smi_candidates() -> Vec<PathBuf> {
+    let mut candidates = vec![PathBuf::from("nvidia-smi.exe"), PathBuf::from("nvidia-smi")];
+    if let Some(system_root) = env::var_os("SystemRoot") {
+        candidates.push(
+            PathBuf::from(system_root)
+                .join("System32")
+                .join("nvidia-smi.exe"),
+        );
+    }
+    for variable in ["ProgramW6432", "ProgramFiles"] {
+        if let Some(program_files) = env::var_os(variable) {
+            candidates.push(
+                PathBuf::from(program_files)
+                    .join("NVIDIA Corporation")
+                    .join("NVSMI")
+                    .join("nvidia-smi.exe"),
+            );
+        }
+    }
+    let mut identities = HashSet::new();
+    candidates
+        .retain(|candidate| identities.insert(candidate.to_string_lossy().to_ascii_lowercase()));
+    candidates
 }
 
 fn inspect_runtime(root: &str) -> RuntimeView {
@@ -936,6 +1289,88 @@ mod tests {
         assert!(memory.0 > 0);
         assert!(memory.1 <= memory.0);
         assert!(memory.2 >= memory.0);
+        assert!(
+            !windows_native_display_adapters().is_empty(),
+            "Win32 原生显卡枚举不应依赖 CIM 服务"
+        );
+    }
+
+    #[test]
+    fn display_adapter_vendor_covers_names_and_pci_ids() {
+        assert_eq!(
+            display_adapter_vendor("本地化显卡名称", "", r"PCI\VEN_10DE&DEV_2F58"),
+            "NVIDIA"
+        );
+        assert_eq!(
+            display_adapter_vendor("AMD Radeon RX 6750 GRE", "", ""),
+            "AMD"
+        );
+        assert_eq!(
+            display_adapter_vendor("ATI FirePro", "", r"PCI\VEN_1002&DEV_73DF"),
+            "AMD"
+        );
+        assert_eq!(
+            display_adapter_vendor("本地化核显名称", "", r"PCI\VEN_8086&DEV_46A6"),
+            "Intel"
+        );
+        assert_eq!(
+            display_adapter_vendor("Microsoft Basic Display Adapter", "", "ROOT\\BASICDISPLAY"),
+            "未知"
+        );
+        assert!(
+            amd_discrete_name_score("AMD Radeon RX 6750 GRE")
+                > amd_discrete_name_score("AMD Radeon Graphics")
+        );
+        assert_eq!(
+            normalize_pnp_device_id(r"\\?\PCI#VEN_1002&DEV_73DF#{GUID}"),
+            normalize_pnp_device_id(r"PCI\VEN_1002&DEV_73DF")
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn native_and_cim_display_adapters_merge_without_losing_driver_data() {
+        let mut adapters = vec![crate::models::DisplayAdapterView {
+            name: "AMD Radeon RX 6750 GRE".into(),
+            vendor: "Advanced Micro Devices, Inc.".into(),
+            driver_version: "32.0.21045.1000".into(),
+            pnp_device_id: r"PCI\VEN_1002&DEV_73DF".into(),
+            dedicated_memory_bytes: Some(4 * 1024 * MIB),
+            supported_backends: Vec::new(),
+        }];
+        merge_display_adapters(
+            &mut adapters,
+            vec![crate::models::DisplayAdapterView {
+                name: "AMD Radeon RX 6750 GRE".into(),
+                vendor: "AMD".into(),
+                driver_version: String::new(),
+                pnp_device_id: r"PCI\VEN_1002&DEV_73DF".into(),
+                dedicated_memory_bytes: None,
+                supported_backends: vec![BACKEND_AMD_DIRECTML.into()],
+            }],
+        );
+        assert_eq!(adapters.len(), 1);
+        assert_eq!(adapters[0].vendor, "AMD");
+        assert_eq!(adapters[0].driver_version, "32.0.21045.1000");
+        assert_eq!(adapters[0].supported_backends, vec![BACKEND_AMD_DIRECTML]);
+    }
+
+    #[test]
+    fn nvidia_core_probe_survives_missing_optional_fields() {
+        let output = b"0, GPU-test, NVIDIA GeForce RTX 5070 Laptop GPU, 8188, 7600, 576.80\n";
+        let gpus = parse_nvidia_gpu_output(output, &HashMap::new(), &HashMap::new());
+        assert_eq!(gpus.len(), 1);
+        assert_eq!(gpus[0].name, "NVIDIA GeForce RTX 5070 Laptop GPU");
+        assert_eq!(gpus[0].memory_total_bytes, 8_188 * MIB);
+        assert_eq!(gpus[0].architecture_hint, None);
+        assert_eq!(gpus[0].temperature_celsius, None);
+        let unknown_memory = parse_nvidia_gpu_output(
+            b"0, GPU-test, NVIDIA RTX A5000, N/A, N/A, 576.80\n",
+            &HashMap::new(),
+            &HashMap::new(),
+        );
+        assert_eq!(unknown_memory.len(), 1);
+        assert!(!unknown_memory[0].memory_reliable);
     }
 
     #[test]

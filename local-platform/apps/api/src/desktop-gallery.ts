@@ -6,12 +6,13 @@ import { createReadStream } from "node:fs";
 import { appendFile, mkdir, rm, stat, writeFile } from "node:fs/promises";
 import { basename, extname, join, resolve } from "node:path";
 import type { IncomingMessage } from "node:http";
-import type { ExternalIdentity, Prisma } from "@prisma/client";
+import type { ExternalIdentity } from "@prisma/client";
 import { desktopGalleryUploadCreateRequestSchema, type DesktopGalleryUploadView, type GalleryPublicationCreateRequest } from "@drawhime/contracts";
 import { database } from "@drawhime/database";
 import { MainPlatformIntegrationError, publishDesktopMainGallery } from "@drawhime/main-platform-client";
 import { putObjectFile, readJsonBody, sendError, sendSuccess, type ServiceRouter } from "@drawhime/service-runtime";
 import sharp from "sharp";
+import { buildDesktopGalleryParameters } from "./desktop-gallery-loras.js";
 
 const maximumArtifactBytes = 100 * 1024 * 1024;
 const chunkSizeBytes = 4 * 1024 * 1024;
@@ -28,6 +29,7 @@ export function registerDesktopGalleryRoutes(router: ServiceRouter, findSession:
     if (!session) return sendError(response, 401, "local_session_invalid", "桌面账号授权已失效");
     try {
       const input = desktopGalleryUploadCreateRequestSchema.parse(await readJsonBody<unknown>(request));
+      const parameters = await buildDesktopGalleryParameters(input.parameters, input.loras, session.externalIdentity.id);
       await mkdir(uploadDirectory, { recursive: true });
       const existing = await database.desktopGalleryUpload.findUnique({
         where: { externalIdentityId_localTaskId_artifactSha256: { externalIdentityId: session.externalIdentity.id, localTaskId: input.localTaskId, artifactSha256: input.artifactSha256 } },
@@ -57,7 +59,7 @@ export function registerDesktopGalleryRoutes(router: ServiceRouter, findSession:
             effectivePrompt: input.effectivePrompt,
             negativePrompt: input.negativePrompt?.trim() || null,
             modelDisplayName: input.modelDisplayName,
-            parameters: input.parameters as Prisma.InputJsonObject,
+            parameters,
             expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
           },
         });
