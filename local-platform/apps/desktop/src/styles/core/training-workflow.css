@@ -1,0 +1,185 @@
+/* 本文件定义分步骤训练、导入弹窗和打标详情工作区样式。 */
+
+/* 打标与训练使用独立页面；训练步骤必须逐项通过校验后才能继续。 */
+.captioning-page,
+.lora-training-page {
+  width: 100%;
+  max-width: none;
+}
+
+.caption-dataset-library {
+  display: grid;
+  gap: 10px;
+}
+
+.caption-dataset-library > header,
+.training-trigger-editor,
+.training-trigger-editor label {
+  display: flex;
+  align-items: center;
+}
+
+.caption-dataset-library > header { justify-content: space-between; }
+
+.dataset-library-actions { display: flex; align-items: center; gap: 8px; }
+.dataset-library-actions > button { height: 30px; display: inline-flex; align-items: center; gap: 5px; padding: 0 9px; border: 1px solid var(--accent-border); border-radius: 3px; background: var(--accent-soft); color: var(--accent); font-size: 8px; font-weight: 800; }
+.dataset-library-actions > button svg { width: 13px; }
+
+/* 导入弹窗把来源选择、预检统计、异常和确认字段限制在一个稳定滚动区。 */
+.dataset-import-backdrop { position: fixed; inset: 0; z-index: 95; display: grid; place-items: center; padding: 24px; background: rgba(4, 10, 18, .58); backdrop-filter: blur(4px); }
+.dataset-import-dialog { width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 48px); display: grid; grid-template-rows: auto auto minmax(0, auto) auto; gap: 12px; overflow: auto; padding: 16px; border: 1px solid var(--border-strong); border-radius: 5px; background: var(--panel); box-shadow: 0 24px 70px rgba(0, 0, 0, .34); }
+.dataset-import-dialog > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.dataset-import-dialog > header span { color: var(--accent); font-size: 7px; font-weight: 850; letter-spacing: .12em; }
+.dataset-import-dialog > header h2 { margin: 3px 0 0; font-size: 15px; }
+.dataset-import-dialog > header p { margin: 5px 0 0; color: var(--muted); font-size: 8px; }
+.dataset-import-dialog > header > button { width: 30px; height: 30px; display: grid; place-items: center; padding: 0; border: 1px solid var(--border); border-radius: 3px; background: var(--panel-muted); color: var(--text); }
+.dataset-import-dialog > header > button svg { width: 14px; }
+.dataset-import-source { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.dataset-import-source > button { min-height: 58px; display: flex; align-items: center; gap: 10px; padding: 10px; border: 1px solid var(--border); border-radius: 3px; background: var(--panel-raised); color: var(--text); text-align: left; }
+.dataset-import-source > button:hover { border-color: var(--accent-border); background: var(--accent-soft); }
+.dataset-import-source > button > svg { width: 20px; color: var(--accent); }
+.dataset-import-source strong, .dataset-import-source small { display: block; }
+.dataset-import-source strong { font-size: 9px; }
+.dataset-import-source small { margin-top: 3px; color: var(--muted); font-size: 7px; }
+.dataset-import-loading { min-height: 54px; display: flex; align-items: center; justify-content: center; gap: 7px; border: 1px solid var(--border); background: var(--panel-muted); color: var(--muted); font-size: 8px; }
+.dataset-import-loading svg { width: 15px; }
+.dataset-import-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; }
+.dataset-import-summary > span { padding: 9px; border: 1px solid var(--border); background: var(--panel-muted); }
+.dataset-import-summary strong, .dataset-import-summary small { display: block; }
+.dataset-import-summary strong { font-size: 13px; }
+.dataset-import-summary small { margin-top: 2px; color: var(--muted); font-size: 7px; }
+.dataset-import-summary .has-anomaly { border-color: var(--warning-border); background: var(--warning-soft); }
+.dataset-import-gate { display: flex; align-items: center; gap: 8px; padding: 9px; border: 1px solid var(--border); }
+.dataset-import-gate.ready { border-color: var(--success-border); background: var(--success-soft); color: var(--success); }
+.dataset-import-gate.blocked { border-color: var(--danger-border); background: var(--danger-soft); color: var(--danger); }
+.dataset-import-gate > svg { width: 16px; }
+.dataset-import-gate strong, .dataset-import-gate small { display: block; }
+.dataset-import-gate strong { font-size: 8px; }
+.dataset-import-gate small { margin-top: 2px; color: var(--muted); font-size: 7px; }
+.dataset-import-anomalies { max-height: 150px; display: grid; gap: 5px; overflow: auto; }
+.dataset-import-anomalies > div { display: flex; align-items: center; gap: 7px; padding: 7px; border: 1px solid var(--warning-border); background: var(--warning-soft); color: var(--warning); }
+.dataset-import-anomalies > div.is-error { border-color: var(--danger-border); background: var(--danger-soft); color: var(--danger); }
+.dataset-import-anomalies svg { width: 13px; flex: 0 0 auto; }
+.dataset-import-anomalies strong, .dataset-import-anomalies small { display: block; }
+.dataset-import-anomalies strong { font-size: 8px; }
+.dataset-import-anomalies small { margin-top: 2px; color: var(--muted); font-size: 7px; }
+.dataset-import-fields { display: grid; grid-template-columns: minmax(0, 1fr) 150px; gap: 8px; }
+.dataset-import-fields label { display: grid; gap: 5px; color: var(--muted); font-size: 8px; font-weight: 750; }
+.dataset-import-fields label.wide { grid-column: 1 / -1; }
+.dataset-import-fields input, .dataset-import-fields select { width: 100%; min-width: 0; height: 32px; padding: 0 8px; border: 1px solid var(--border); border-radius: 3px; background: var(--control); color: var(--text); font-size: 8px; }
+.dataset-import-dialog > footer { display: flex; justify-content: flex-end; gap: 7px; padding-top: 12px; border-top: 1px solid var(--border); }
+.dataset-import-dialog > footer button { min-height: 32px; display: inline-flex; align-items: center; gap: 5px; padding: 0 11px; border: 1px solid var(--accent-border); border-radius: 3px; background: var(--accent); color: #fff; font-size: 8px; font-weight: 800; }
+.dataset-import-dialog > footer button.secondary { border-color: var(--border); background: var(--panel-muted); color: var(--text); }
+.dataset-import-dialog > footer button:disabled { cursor: not-allowed; opacity: .45; }
+.dataset-import-dialog > footer button svg { width: 13px; }
+
+.caption-dataset-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.caption-dataset-grid > button {
+  min-width: 0;
+  min-height: 82px;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto 14px;
+  align-items: center;
+  gap: 9px;
+  padding: 11px;
+  border: 1px solid var(--border);
+  background: var(--panel-raised);
+  color: var(--text);
+  text-align: left;
+}
+
+.caption-dataset-grid > button:hover { border-color: var(--accent-border); background: var(--accent-soft); }
+.caption-dataset-grid > button > i { width: 34px; height: 34px; display: grid; place-items: center; background: var(--panel-muted); color: var(--accent); font-style: normal; }
+.caption-dataset-grid > button > i svg,
+.caption-dataset-grid > button > svg { width: 15px; }
+.caption-dataset-grid > button > span,
+.caption-dataset-grid > button strong,
+.caption-dataset-grid > button small,
+.caption-dataset-grid > button em { min-width: 0; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.caption-dataset-grid > button strong { font-size: 9px; }
+.caption-dataset-grid > button small { margin-top: 4px; color: var(--muted); font-size: 7px; }
+.caption-dataset-grid > button em { margin-top: 4px; color: var(--subtle); font-size: 7px; font-style: normal; }
+.caption-dataset-grid > button b { padding: 4px 6px; border: 1px solid var(--warning-border); background: var(--warning-soft); color: var(--warning); font-size: 7px; }
+.caption-dataset-grid > button b.is-review_ready { border-color: var(--accent-border); background: var(--accent-soft); color: var(--accent); }
+.caption-dataset-grid > button b.is-confirmed { border-color: var(--success-border); background: var(--success-soft); color: var(--success); }
+
+.training-dataset-detail { min-width: 0; }
+.training-dataset-detail > header > div:first-child { min-width: 0; }
+
+.training-back {
+  min-height: 26px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 7px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  background: var(--panel-muted);
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.training-back:hover { border-color: var(--accent-border); color: var(--accent); }
+.training-back svg { width: 13px; }
+
+.training-trigger-editor {
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 9px;
+  padding: 9px;
+  border: 1px solid var(--border);
+  background: var(--panel-muted);
+}
+
+.training-trigger-editor label { min-width: 0; flex: 1; gap: 8px; }
+.training-trigger-editor label span { flex: 0 0 auto; color: var(--muted); font-size: 8px; font-weight: 750; }
+.training-trigger-editor input { width: 100%; min-width: 0; height: 32px; padding: 0 8px; border: 1px solid var(--border); background: var(--control); color: var(--text); font-size: 8px; }
+.training-trigger-editor button { height: 32px; display: inline-flex; align-items: center; gap: 5px; padding: 0 10px; border: 1px solid var(--accent-border); background: var(--accent); color: #fff; font-size: 8px; font-weight: 800; }
+.training-trigger-editor button:disabled { cursor: not-allowed; opacity: .48; }
+.training-trigger-editor button svg { width: 13px; }
+
+/* 打标详情拆成信息、工具和图片三个独立工作区，宽屏充分利用空间且不嵌套卡片。 */
+.captioning-detail-page { gap: 10px; }
+.caption-detail-header,
+.caption-assets-workspace {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+}
+.caption-detail-header > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.caption-detail-header > header > div:first-child { min-width: 0; }
+.caption-detail-header > header > div:first-child > span { color: var(--muted); font-size: 8px; }
+.caption-detail-header > header h2 { margin: 3px 0 0; overflow: hidden; font-size: 16px; text-overflow: ellipsis; white-space: nowrap; }
+.caption-detail-meta { display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, 320px); gap: 8px; margin-top: 10px; }
+.caption-detail-meta .training-trigger-editor,
+.caption-detail-meta .training-gate { min-width: 0; margin: 0; }
+.caption-tools-grid { min-width: 0; display: grid; grid-template-columns: minmax(320px, .9fr) minmax(440px, 1.1fr); align-items: start; gap: 10px; }
+.caption-tools-grid .caption-control { min-width: 0; height: 100%; margin: 0; background: var(--panel); }
+.caption-assets-workspace .training-batch-toolbar { position: sticky; z-index: 4; top: 0; background: var(--panel); }
+
+.ai-clean-preset-picker { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 5px; }
+.ai-clean-preset-picker button { min-width: 0; min-height: 48px; display: grid; align-content: center; gap: 3px; padding: 6px 7px; border: 1px solid var(--border); background: var(--control); color: var(--text); text-align: left; }
+.ai-clean-preset-picker button:hover { border-color: var(--accent-border); }
+.ai-clean-preset-picker button.active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); box-shadow: inset 0 -2px var(--accent); }
+.ai-clean-preset-picker strong { font-size: 8px; }
+.ai-clean-preset-picker small { overflow: hidden; color: var(--muted); font-size: 7px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
+.ai-clean-custom-goal { min-width: 0; display: grid; gap: 4px; }
+.ai-clean-custom-goal span { color: var(--muted); font-size: 8px; }
+.ai-clean-custom-goal textarea { width: 100%; min-height: 72px; resize: vertical; padding: 7px 8px; border: 1px solid var(--border); background: var(--control); color: var(--text); font-family: inherit; font-size: calc(8px * var(--desktop-content-font-scale)); line-height: 1.55; }
+.ai-clean-custom-goal textarea:focus { border-color: var(--accent); outline: 0; }
+.ai-clean-submit { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ai-clean-submit > span { min-width: 0; color: var(--muted); font-size: calc(7px * var(--desktop-content-font-scale)); line-height: 1.4; }
+.ai-clean-submit > button { min-height: 31px; flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; padding: 0 10px; border: 1px solid var(--accent-border); background: var(--accent); color: #fff; font-size: 8px; font-weight: 800; }
+.ai-clean-submit > button:disabled { cursor: not-allowed; opacity: .48; }
+.ai-clean-submit svg { width: 13px; }

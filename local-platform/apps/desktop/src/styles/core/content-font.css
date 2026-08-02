@@ -1,0 +1,225 @@
+/* 本文件定义内容字体缩放覆盖范围和阅读区域字号规则。 */
+
+/* 内容字体只放大阅读和编辑区域，不改变卡片、按钮与网格尺寸。 */
+.desktop-caption-add input,
+.training-batch-actions input { font-size: calc(8px * var(--desktop-content-font-scale)); }
+.desktop-caption-tag-list > span b { font-size: calc(8px * var(--desktop-content-font-scale)); }
+.desktop-caption-tag-list > span small,
+.desktop-caption-tag-list > span em { font-size: calc(7px * var(--desktop-content-font-scale)); }
+.training-asset-caption footer .caption-row-action.danger { border-color: var(--danger-border); background: var(--danger-soft); color: var(--danger); }
+
+.training-create > div {
+  grid-template-columns: minmax(190px, 1fr) 140px minmax(190px, 1fr) auto;
+  align-items: end;
+}
+
+.training-create label {
+  min-width: 0;
+  grid-template-rows: 16px 34px;
+}
+
+.training-create input,
+.training-create select {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  border-radius: 3px;
+}
+
+.training-stepper {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border: 1px solid var(--border);
+  background: var(--panel-muted);
+}
+
+.training-stepper button {
+  min-width: 0;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 0;
+  border-right: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 780;
+}
+
+.training-stepper button:last-child { border-right: 0; }
+.training-stepper button:disabled { cursor: not-allowed; opacity: .45; }
+.training-stepper button.active { background: var(--accent-soft); color: var(--accent); box-shadow: inset 0 -2px var(--accent); }
+.training-stepper button.complete { color: var(--success); }
+
+.training-stepper button i {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-size: 8px;
+  font-style: normal;
+}
+
+.training-stepper button i svg { width: 12px; }
+
+.training-step-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.training-step-panel > header,
+.training-step-panel > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.training-step-panel > footer {
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.training-step-panel > footer button {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 12px;
+  border: 1px solid var(--accent-border);
+  background: var(--accent);
+  color: #fff;
+  font-size: 8px;
+  font-weight: 800;
+}
+
+.training-step-panel > footer button.secondary {
+  border-color: var(--border);
+  background: var(--panel-raised);
+  color: var(--text);
+}
+
+.training-step-panel > footer button:disabled { cursor: not-allowed; opacity: .45; }
+.training-step-panel > footer button svg { width: 13px; }
+
+.training-dataset-list.is-expanded {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.training-dataset-list.is-expanded > header { grid-column: 1 / -1; }
+.training-dataset-list.is-expanded > button { min-height: 58px; border: 1px solid var(--border); background: var(--panel-raised); }
+
+.training-selection-check {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid var(--danger-border);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.training-selection-check.ready { border-color: var(--success-border); background: var(--success-soft); color: var(--success); }
+.training-selection-check > svg { width: 18px; }
+.training-selection-check span,
+.training-selection-check strong,
+.training-selection-check small { display: block; }
+.training-selection-check strong { font-size: 9px; }
+.training-selection-check small { margin-top: 2px; color: var(--muted); font-size: 8px; }
+
+.desktop-training-parameters {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.training-preset-picker {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.training-preset-picker button {
+  min-width: 0;
+  min-height: 48px;
+  display: grid;
+  align-content: center;
+  gap: 3px;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--control);
+  color: var(--text);
+  text-align: left;
+}
+
+.training-preset-picker button.active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.training-preset-picker button strong { font-size: 9px; }
+.training-preset-picker button small { overflow: hidden; color: var(--muted); font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
+.training-preset-picker > span { grid-column: 1 / -1; color: var(--warning); font-size: 7px; font-weight: 800; }
+
+.training-advanced-parameters {
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--panel-muted);
+}
+
+.training-advanced-parameters > summary { padding: 9px 11px; cursor: pointer; color: var(--text); font-size: 8px; font-weight: 800; }
+.training-advanced-parameters > .desktop-training-parameters { padding: 0 10px 10px; }
+.desktop-training-parameters label > span { display: flex; align-items: center; gap: 4px; }
+
+.training-help { position: relative; display: inline-flex; color: var(--subtle); }
+.training-help > svg { width: 12px; height: 12px; }
+.training-help > em { position: absolute; z-index: 80; left: 50%; bottom: calc(100% + 6px); width: 220px; display: none; padding: 7px 8px; border: 1px solid var(--border-strong); border-radius: 3px; background: var(--panel-raised); box-shadow: var(--shadow-lg); color: var(--text); font-size: 7px; font-style: normal; font-weight: 500; line-height: 1.5; transform: translateX(-50%); }
+.training-help:hover > em,
+.training-help:focus-visible > em { display: block; }
+
+.desktop-training-parameters label {
+  grid-template-rows: 17px 34px;
+}
+
+.desktop-training-parameters label.training-checkbox { grid-template-rows: 34px; }
+
+.desktop-training-parameters input,
+.desktop-training-parameters select {
+  height: 34px;
+  border-radius: 3px;
+}
+
+.training-review-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.training-review-grid > div {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border);
+  background: var(--panel-muted);
+}
+
+.training-review-grid span,
+.training-review-grid strong,
+.training-review-grid small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.training-review-grid span { color: var(--muted); font-size: 7px; }
+.training-review-grid strong { margin-top: 4px; font-size: 10px; }
+.training-review-grid small { margin-top: 3px; color: var(--subtle); font-size: 8px; }
+
+@media (max-width: 1180px) {
+  .generate-layout { grid-template-columns: 1fr; }
+  .training-asset-list { grid-template-columns: 1fr; }
+  .caption-dataset-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .training-create > div { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .training-dataset-list.is-expanded,
+  .desktop-training-parameters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .training-preset-picker { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

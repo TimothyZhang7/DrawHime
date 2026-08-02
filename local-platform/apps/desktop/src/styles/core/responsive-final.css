@@ -1,0 +1,394 @@
+/* 本文件定义任务确认、核心门禁、启动页和最终工作区边界规则。 */
+
+/* 确认摘要和当前训练集任务分区展示，长任务列表不再推走提交操作。 */
+.training-review-workspace {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  gap: 10px;
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-gutter: auto;
+  overscroll-behavior: contain;
+}
+
+.training-review-summary {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 9px;
+}
+
+.training-review-jobs {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 8px;
+}
+
+.training-review-jobs > header {
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 7px;
+  border-bottom: 1px solid var(--border);
+}
+
+.training-review-jobs > header strong { font-size: 9px; }
+.training-review-jobs > header small { color: var(--muted); font-size: 8px; }
+.training-review-jobs .desktop-training-jobs { min-height: 0; align-content: start; }
+
+@container (min-width: 760px) {
+  .training-primary-parameters {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .training-review-jobs .desktop-training-jobs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container (min-width: 1040px) {
+  .training-dataset-step-body {
+    grid-template-columns: minmax(0, 1fr) minmax(250px, 300px);
+    align-content: stretch;
+    overflow: hidden;
+    padding-right: 0;
+  }
+
+  .training-dataset-step-body > .training-dataset-list {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    overflow-y: auto;
+    padding-right: 4px;
+    scrollbar-gutter: stable;
+    overscroll-behavior: contain;
+  }
+
+  .training-dataset-step-body > .training-selection-check {
+    position: sticky;
+    top: 0;
+  }
+
+  .training-review-workspace {
+    grid-template-columns: minmax(360px, .82fr) minmax(460px, 1.18fr);
+    align-content: stretch;
+    overflow: hidden;
+    padding-right: 0;
+  }
+
+  .training-review-jobs {
+    padding-left: 12px;
+    border-left: 1px solid var(--border);
+  }
+
+  .training-review-jobs .desktop-training-jobs {
+    overflow-y: auto;
+    padding-right: 4px;
+    scrollbar-gutter: stable;
+    overscroll-behavior: contain;
+  }
+}
+
+@container (min-width: 1420px) {
+  .training-primary-parameters {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+
+  .training-advanced-parameters > .desktop-training-parameters {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@container (max-width: 560px) {
+  .training-stepper button {
+    justify-content: center;
+    padding: 0 8px;
+  }
+
+  .training-stepper button span { display: none; }
+  .training-primary-parameters,
+  .training-review-grid,
+  .training-review-jobs .desktop-training-jobs { grid-template-columns: minmax(0, 1fr); }
+  .training-step-panel > header { align-items: flex-start; flex-direction: column; }
+  .training-step-panel > header > small { white-space: normal; }
+}
+
+/* 未启动核心时生成和训练入口保持可辨识但不可操作，锁图标说明真实门禁原因。 */
+.desktop-sidebar nav button.core-locked,
+.desktop-sidebar nav button.core-locked:hover {
+  border-color: transparent;
+  background: transparent;
+  color: var(--subtle);
+  cursor: not-allowed;
+  opacity: .58;
+}
+
+.desktop-sidebar nav button .navigation-lock {
+  position: absolute;
+  right: 10px;
+  width: 13px;
+  height: 13px;
+  color: var(--warning);
+}
+
+/* 启动页保持正常文档流，动态依赖数量和系统缩放都不能压缩后续设备面板。 */
+.startup-page {
+  height: auto;
+  min-height: 100%;
+  grid-template-rows: auto auto;
+  align-content: start;
+  overflow: visible;
+}
+
+.startup-overview {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(300px, .5fr);
+  gap: 10px;
+}
+
+.startup-overview .startup-command {
+  min-width: 0;
+  min-height: 154px;
+  padding: 18px 20px;
+}
+
+.startup-overview .startup-primary {
+  min-height: 96px;
+}
+
+.startup-overview .startup-stages {
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.startup-overview .startup-stages article {
+  min-height: 0;
+  padding: 8px 10px;
+}
+
+.startup-detail-grid {
+  min-width: 0;
+  align-items: start;
+  overflow: visible;
+}
+
+.startup-detail-grid > .startup-panel {
+  height: auto;
+}
+
+.startup-detail-grid > .dependency-panel {
+  display: block;
+  overflow: visible;
+}
+
+.startup-detail-grid .startup-dependency-list {
+  align-content: start;
+  overflow: visible;
+}
+
+.startup-detail-grid > .environment-panel {
+  overflow: visible;
+}
+
+@container (max-width: 1100px) {
+  .startup-page {
+    height: auto;
+    grid-template-rows: auto auto;
+    align-content: start;
+    overflow-y: auto;
+  }
+
+  .startup-overview {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .startup-overview .startup-stages {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-rows: auto;
+  }
+
+  .startup-detail-grid {
+    grid-template-columns: minmax(0, 1fr);
+    overflow: visible;
+  }
+
+  .startup-detail-grid > .startup-panel {
+    height: auto;
+    overflow: visible;
+  }
+
+  .startup-detail-grid > .dependency-panel {
+    display: block;
+  }
+
+  .startup-detail-grid .startup-dependency-list {
+    overflow: visible;
+    padding-right: 0;
+  }
+}
+
+@container (max-width: 700px) {
+  .startup-overview .startup-command {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 15px;
+  }
+
+  .startup-overview .startup-command::after { display: none; }
+  .startup-overview .startup-primary { min-height: 78px; }
+  .startup-overview .startup-stages { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* 最终工作区约束统一缩放、滚动和控件状态，防止历史页面规则造成宽高回退。 */
+.desktop-shell,
+.desktop-main,
+.desktop-page-host,
+.desktop-page-host > .desktop-page,
+.desktop-page-host.workspace-page > div:not([hidden]),
+.desktop-page-host.workspace-page > div:not([hidden]) > .desktop-page {
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+/* 外层页面宿主延伸到主窗口右边缘，滚动条不再缩进到内容卡片内部。 */
+.desktop-main > .desktop-page-host {
+  width: calc(100% + var(--desktop-main-inline-gutter));
+  margin-right: calc(-1 * var(--desktop-main-inline-gutter));
+  padding-right: var(--desktop-main-inline-gutter);
+}
+
+/* 页面最外层与列表滚动条不再预留固定槽位，细窄轨道直接贴合容器边缘。 */
+.desktop-page-host,
+.desktop-page-host.workspace-page,
+.desktop-page-host > .desktop-page,
+.desktop-page-host.workspace-page > div:not([hidden]) > .desktop-page,
+.caption-dataset-grid,
+.caption-assets-workspace > .training-asset-list,
+.caption-assets-workspace > .training-batch-workspace,
+.gallery-grid {
+  scrollbar-gutter: auto;
+}
+
+.desktop-page-host > .desktop-page,
+.desktop-page-host.workspace-page > div:not([hidden]) > .desktop-page,
+.generation-form-scroll,
+.caption-dataset-grid,
+.caption-assets-workspace > .training-asset-list,
+.caption-assets-workspace > .training-batch-workspace,
+.lora-training-page > .training-step-panel,
+.gallery-grid,
+.startup-dependency-list {
+  overscroll-behavior: contain;
+  scrollbar-gutter: auto;
+}
+
+.desktop-main button,
+.desktop-main input,
+.desktop-main select,
+.desktop-main textarea {
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.desktop-main input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+.desktop-main select,
+.desktop-main textarea {
+  max-width: 100%;
+}
+
+.desktop-main button > svg {
+  flex: 0 0 auto;
+}
+
+.desktop-main button:disabled {
+  transform: none !important;
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+.desktop-main button:focus-visible,
+.desktop-main input:focus-visible,
+.desktop-main select:focus-visible,
+.desktop-main textarea:focus-visible,
+.desktop-sidebar button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* 固定区域不会随长标题和状态文本扩张，内容在自己的轨道内换行或省略。 */
+.generation-form > header > div,
+.generation-heading-actions,
+.caption-detail-header > header > div,
+.training-step-panel > header > div,
+.startup-panel > header > div,
+.gallery-detail-toolbar > div {
+  min-width: 0;
+}
+
+.generation-heading-actions > small,
+.training-step-panel > header > small,
+.startup-panel > header strong,
+.startup-panel > header span {
+  overflow-wrap: anywhere;
+}
+
+.generation-form > footer,
+.training-step-panel > footer,
+.gallery-detail-toolbar,
+.startup-panel > header {
+  flex: 0 0 auto;
+}
+
+@container (max-width: 980px) {
+  .generation-workspace {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .generation-prompt-column,
+  .generation-controls-column {
+    order: initial;
+  }
+
+  .generation-controls-column {
+    padding-left: 0;
+    border-left: 0;
+  }
+
+  .training-review-workspace,
+  .training-parameter-content {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@container (max-width: 620px) {
+  .generation-form > header,
+  .gallery-detail-toolbar,
+  .startup-panel > header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .generation-heading-actions,
+  .gallery-detail-actions,
+  .startup-panel-actions {
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .generation-heading-actions > button,
+  .gallery-detail-actions > button,
+  .startup-panel-actions > button {
+    flex: 1 1 auto;
+  }
+}

@@ -1,0 +1,403 @@
+/* 本文件定义训练集列表、逐图标签和批量打标工具栏样式。 */
+
+/* 本地训练集使用固定步骤事实源；图片、Caption 和确认状态在紧凑窗口仍保持可操作。 */
+.training-page {
+  display: grid;
+  gap: 12px;
+}
+
+.training-create > div {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.2fr) minmax(130px, 0.6fr) minmax(220px, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+}
+
+.training-create label,
+.training-asset-caption {
+  min-width: 0;
+}
+
+.training-create label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.training-create input,
+.training-create select {
+  width: 100%;
+  height: 36px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--control);
+  color: var(--text);
+}
+
+.training-create button,
+.training-editor-actions button,
+.training-asset-caption footer button {
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 12px;
+  border: 1px solid var(--accent-border);
+  border-radius: 5px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 8px;
+  font-weight: 800;
+}
+
+.training-create button:disabled,
+.training-editor-actions button:disabled,
+.training-asset-caption footer button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.training-create button svg,
+.training-editor-actions button svg,
+.training-asset-caption footer button svg {
+  width: 14px;
+}
+
+.training-workspace {
+  min-height: 520px;
+  display: grid;
+  grid-template-columns: 230px minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+}
+
+.training-dataset-list {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+}
+
+.training-dataset-list > header {
+  display: flex;
+  justify-content: space-between;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.training-dataset-list > header strong {
+  font-size: 9px;
+}
+
+.training-dataset-list > header small {
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.training-dataset-list > button {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  padding: 9px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--panel-raised);
+  color: var(--text);
+  text-align: left;
+}
+
+.training-dataset-list > button.active {
+  border-color: var(--accent-border);
+  box-shadow: inset 3px 0 var(--accent);
+}
+
+.training-dataset-list > button span,
+.training-dataset-list > button strong,
+.training-dataset-list > button small {
+  min-width: 0;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.training-dataset-list > button strong {
+  font-size: 8px;
+}
+
+.training-dataset-list > button small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 7px;
+}
+
+.training-dataset-list b,
+.training-gate > b {
+  padding: 4px 6px;
+  border: 1px solid var(--warning-border);
+  border-radius: 4px;
+  background: var(--warning-soft);
+  color: var(--warning);
+  font-size: 7px;
+}
+
+.training-dataset-list b.is-confirmed,
+.training-gate > b.is-confirmed {
+  border-color: var(--success-border);
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.training-dataset-list b.is-review_ready,
+.training-gate > b.is-review_ready {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.training-editor > header,
+.training-editor-actions,
+.training-gate,
+.training-asset-caption header,
+.training-asset-caption footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.training-editor > header {
+  margin-bottom: 9px;
+}
+
+.training-editor > header span {
+  color: var(--muted);
+  font-size: 7px;
+}
+
+.training-editor > header h2 {
+  margin: 3px 0 0;
+  font-size: 15px;
+}
+
+.training-editor-actions button:first-child {
+  border-color: var(--border);
+  background: var(--panel-raised);
+  color: var(--text);
+}
+
+.training-gate {
+  margin-bottom: 10px;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--panel-muted);
+}
+
+.training-gate span strong,
+.training-gate span small {
+  display: block;
+}
+
+/* 两种打标布局共用紧凑工具栏，批量操作只在工作区模式展开。 */
+.training-batch-toolbar {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 7px;
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel-muted);
+}
+
+.training-batch-toolbar.is-batch { grid-template-columns: auto auto minmax(0, 1fr) auto; }
+
+.training-layout-switch,
+.training-sort,
+.training-batch-selection,
+.training-batch-actions,
+.training-batch-actions label { display: flex; align-items: center; gap: 5px; }
+.training-layout-switch { padding: 2px; border: 1px solid var(--border); border-radius: 3px; background: var(--control); }
+.training-layout-switch button,
+.training-sort button,
+.training-batch-selection button,
+.training-batch-actions button { min-height: 29px; display: inline-flex; align-items: center; justify-content: center; gap: 4px; padding: 0 8px; border: 1px solid transparent; border-radius: 2px; background: transparent; color: var(--muted); font-size: 7px; font-weight: 800; }
+.training-layout-switch button.active { border-color: var(--accent-border); background: var(--accent-soft); color: var(--accent); }
+.training-layout-switch svg,
+.training-sort svg,
+.training-batch-actions svg { width: 12px; }
+.training-sort { grid-column: 3; margin-left: auto; }
+.training-batch-toolbar.is-batch .training-sort { grid-column: 4; }
+.training-sort select { width: 96px; height: 31px; padding: 0 22px 0 7px; border: 1px solid var(--border); border-radius: 3px; background: var(--control); color: var(--text); font-size: 7px; }
+.training-sort button { width: 31px; padding: 0; border-color: var(--border); background: var(--control); color: var(--text); }
+.training-batch-selection { min-width: 0; grid-column: 2; gap: 4px; white-space: nowrap; }
+.training-batch-selection button { border-color: var(--border); background: var(--control); color: var(--text); }
+.training-batch-selection span { color: var(--muted); font-size: 7px; }
+.training-batch-actions { min-width: 0; grid-column: 3; display: flex; justify-content: stretch; overflow: hidden; }
+.training-batch-actions > button { border-color: var(--border); background: var(--control); color: var(--text); }
+.training-batch-actions > button.danger { border-color: var(--danger-border); background: var(--danger-soft); color: var(--danger); }
+.training-batch-actions button:disabled { cursor: not-allowed; opacity: .45; }
+.training-batch-actions label { min-width: 180px; flex: 1 1 260px; display: grid; grid-template-columns: minmax(120px, 1fr) auto auto; justify-content: stretch; }
+.training-batch-actions input { min-width: 0; height: 29px; flex: 1; padding: 0 7px; border: 1px solid var(--border); border-radius: 2px; outline: 0; background: var(--control); color: var(--text); font-size: 7px; }
+.training-batch-actions label button { border-color: var(--accent-border); background: var(--accent-soft); color: var(--accent); }
+.training-batch-progress { width: 100%; display: grid; grid-template-columns: auto minmax(100px, 1fr); align-items: center; gap: 8px; padding-top: 6px; border-top: 1px solid var(--border); }
+.training-batch-progress { grid-column: 1 / -1; }
+.training-batch-progress strong,
+.training-batch-progress small { display: block; font-size: 7px; }
+.training-batch-progress small { margin-top: 2px; color: var(--muted); }
+.training-batch-progress i { height: 4px; overflow: hidden; border-radius: 2px; background: var(--border); }
+.training-batch-progress em { height: 100%; display: block; background: var(--accent); }
+
+.training-batch-workspace {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  align-items: start;
+  gap: 10px;
+}
+
+.training-batch-thumbnails { min-width: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); align-content: start; gap: 6px; overflow: visible; padding: 0; }
+.training-batch-thumbnails > button { min-width: 0; display: grid; grid-template-columns: auto 54px minmax(0, 1fr); align-items: center; gap: 7px; padding: 5px; border: 1px solid var(--border); border-radius: 3px; background: var(--panel-raised); color: var(--text); text-align: left; }
+.training-batch-thumbnails > button.active { border-color: var(--accent); box-shadow: inset 2px 0 var(--accent); }
+.training-batch-thumbnails > button.selected { background: var(--accent-soft); }
+.training-batch-thumbnails input { accent-color: var(--accent); }
+.training-batch-thumbnails img { width: 54px; height: 54px; display: block; object-fit: cover; border-radius: 2px; background: var(--control); }
+.training-batch-thumbnails > button > svg { width: 22px; color: var(--danger); }
+.training-batch-thumbnails span,
+.training-batch-thumbnails strong,
+.training-batch-thumbnails small { min-width: 0; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.training-batch-thumbnails strong { font-size: 7px; }
+.training-batch-thumbnails small { margin-top: 3px; color: var(--muted); font-size: 6px; }
+.training-batch-editor { min-width: 0; }
+.training-batch-editor > article { min-width: 0; height: clamp(360px, 42vh, 480px); display: grid; grid-template-columns: minmax(220px, 32%) minmax(0, 1fr); align-items: stretch; gap: 10px; overflow: hidden; padding: 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--panel-raised); }
+.training-batch-editor .training-asset-image { height: 100%; min-height: 0; }
+.training-batch-editor .training-asset-caption { min-height: 0; overflow: hidden; }
+.training-batch-editor .desktop-caption-tag-list { min-height: 0; overflow-x: hidden; overflow-y: auto; }
+
+@container (max-width: 820px) {
+  .training-batch-toolbar,
+  .training-batch-toolbar.is-batch { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .training-sort,
+  .training-batch-toolbar.is-batch .training-sort { grid-column: 3; }
+  .training-batch-selection { grid-column: 2; }
+  .training-batch-actions { grid-column: 1 / -1; overflow: visible; }
+  .training-batch-actions label { grid-column: 1 / -1; }
+  .training-batch-actions > button.danger { grid-column: auto; grid-row: auto; }
+}
+
+@container (max-width: 560px) {
+  .training-batch-toolbar,
+  .training-batch-toolbar.is-batch { grid-template-columns: minmax(0, 1fr) auto; }
+  .training-sort,
+  .training-batch-toolbar.is-batch .training-sort { grid-column: 2; }
+  .training-batch-selection { grid-column: 1 / -1; }
+  .training-batch-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .training-batch-actions > button { width: 100%; min-width: 0; }
+  .training-batch-actions label { min-width: 0; grid-column: 1 / -1; }
+  .training-batch-thumbnails { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* 离线打标控制区把组件状态、阈值和持久任务进度放在同一紧凑工作流内。 */
+.caption-control {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--accent-soft) 38%, var(--panel-raised));
+}
+
+.caption-control-title,
+.caption-control-title span,
+.caption-options,
+.caption-options label,
+.caption-job > div,
+.training-asset-caption footer > div {
+  display: flex;
+  align-items: center;
+}
+
+.caption-control-title {
+  gap: 8px;
+}
+
+.caption-control-title > svg {
+  width: 18px;
+  color: var(--accent);
+}
+
+.caption-control-title span {
+  min-width: 0;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.caption-control-title strong {
+  font-size: 9px;
+}
+
+.caption-control-title small {
+  color: var(--muted);
+  font-size: 7px;
+}
+
+.caption-options {
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.caption-options label {
+  gap: 5px;
+  color: var(--muted);
+  font-size: 7px;
+}
+
+.caption-options input[type="number"] {
+  width: 64px;
+  height: 30px;
+  padding: 0 7px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--control);
+  color: var(--text);
+}
+
+.caption-options .caption-character-toggle {
+  min-height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--control);
+  color: var(--text);
+}
+
+.caption-options .caption-character-toggle input {
+  accent-color: var(--accent);
+}
+
+.caption-options > button,
+.caption-install,
+.caption-job > button {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  margin-left: auto;
+  padding: 0 10px;
+  border: 1px solid var(--accent-border);
+  border-radius: 4px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 8px;
+  font-weight: 800;
+}

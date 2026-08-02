@@ -1,0 +1,496 @@
+/* 本文件定义生成工作台、参数帮助和 LoRA 弹窗的最终覆盖规则。 */
+
+/* 全局控件保持紧凑小圆角，清晰边界优先于装饰性胶囊外观。 */
+.section-card,
+.overview-hero,
+.runtime-control,
+.environment-banner,
+.capability-grid article,
+.metric-grid article,
+.environment-summary > div,
+.gpu-list article,
+.disk-list article,
+.sync-list article,
+.resource-list article,
+.local-job-grid article,
+.training-asset-list > article {
+  border-radius: 4px;
+}
+
+.desktop-main button,
+.desktop-main input,
+.desktop-main select,
+.desktop-main textarea,
+.theme-switch,
+.desktop-notice,
+.desktop-sidebar > .core-status,
+.desktop-mark {
+  border-radius: 3px;
+}
+
+/* 生成页只承载参数工作台，预览由可拖动和缩放的独立原生窗口负责。 */
+.generate-layout {
+  height: calc(var(--desktop-viewport-height) - 98px);
+  min-height: 0;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
+  overflow: hidden;
+}
+
+.generation-form,
+.generation-preview {
+  min-width: 0;
+  min-height: 0;
+}
+
+.generation-form {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+}
+
+/* 生成参数直接使用页面背景，不再叠加外层卡片或分组卡片。 */
+.generation-form-flat {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.generation-form > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  padding: 0 2px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.generation-form > header span {
+  color: var(--accent);
+  font-size: 7px;
+  font-weight: 900;
+  letter-spacing: .15em;
+}
+
+.generation-form > header h2 {
+  margin: 3px 0 0;
+  font-size: 14px;
+}
+
+.generation-form > header small {
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.generation-heading-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.generation-heading-actions > button {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 10px;
+  border: 1px solid var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 8px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.generation-heading-actions > button:hover { background: var(--accent); color: #fff; }
+.generation-heading-actions > button svg { width: 14px; }
+
+.generation-form-scroll {
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 2px 6px 4px 2px;
+  scrollbar-gutter: stable;
+}
+
+.generation-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.generation-parameter {
+  min-width: 0;
+  display: grid;
+  grid-template-rows: 18px 34px;
+  gap: 4px;
+}
+
+.generation-parameter > span,
+.prompt-field > span,
+.generation-switch > span {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-secondary);
+  font-size: 9px;
+  font-weight: 760;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.generation-grid input,
+.generation-grid select,
+.generation-advanced-grid input,
+.generation-advanced-grid select,
+.generation-lora-strengths input {
+  width: 100%;
+  max-width: 100%;
+  height: 34px;
+  min-width: 0;
+  padding: 0 8px;
+  border-color: var(--border);
+  border-radius: 3px;
+  background: var(--control);
+  color: var(--text);
+  font-size: 9px;
+}
+
+.generation-grid input:hover,
+.generation-grid select:hover,
+.generation-advanced-grid input:hover,
+.generation-advanced-grid select:hover,
+.generation-lora-strengths input:hover {
+  border-color: var(--border-strong);
+}
+
+/* 参数说明只在帮助图标悬浮或键盘聚焦时显示，避免长文本改变控件位置。 */
+.parameter-help {
+  position: relative;
+  width: 15px;
+  height: 15px;
+  display: inline-grid;
+  flex: 0 0 15px;
+  place-items: center;
+  color: var(--subtle);
+  cursor: help;
+}
+
+.parameter-help svg {
+  width: 13px;
+  height: 13px;
+}
+
+.parameter-tooltip {
+  position: fixed;
+  z-index: 13000;
+  width: max-content;
+  max-width: min(280px, calc(100vw - 24px));
+  padding: 7px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  background: var(--panel-raised);
+  color: var(--text);
+  box-shadow: 0 8px 22px var(--shadow);
+  font-size: 8px;
+  font-weight: 500;
+  line-height: 1.55;
+  pointer-events: none;
+  transform: translateX(-50%);
+  white-space: normal;
+}
+
+.parameter-tooltip.is-above { transform: translate(-50%, -100%); }
+
+.parameter-help:hover,
+.parameter-help:focus-visible {
+  color: var(--accent);
+  outline: 0;
+}
+
+.generation-presets {
+  gap: 7px;
+  margin-bottom: 10px;
+}
+
+.generation-presets > button {
+  min-height: 62px;
+  grid-template-columns: 26px minmax(0, 1fr);
+  align-items: center;
+  padding: 9px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+}
+
+.generation-presets > button:hover {
+  border-bottom-color: var(--accent-border);
+  background: var(--panel-muted);
+  transform: none;
+}
+
+.generation-presets > button.active {
+  border-bottom-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: none;
+}
+
+.generation-presets > button > svg:first-child {
+  width: 25px;
+  height: 25px;
+  padding: 5px;
+  border-radius: 3px;
+}
+
+.generation-presets > button > .preset-selected {
+  top: 7px;
+  right: 7px;
+}
+
+.generation-presets .parameter-help {
+  position: absolute;
+  right: 7px;
+  bottom: 6px;
+}
+
+.generation-presets strong {
+  margin-bottom: 2px;
+  font-size: 10px;
+}
+
+.generation-presets small {
+  overflow: hidden;
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.generation-custom-notice {
+  padding: 4px 8px;
+  border: 0;
+  border-left: 2px solid var(--warning);
+  border-radius: 0;
+  background: transparent;
+}
+
+.generation-advanced {
+  margin-top: 9px;
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+}
+
+.generation-advanced > summary {
+  min-height: 40px;
+  padding: 0 2px;
+}
+
+.generation-advanced-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 9px 2px;
+  border-top: 1px solid var(--border);
+}
+
+.generation-switch {
+  min-height: 56px;
+  padding: 8px 2px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+}
+
+.generation-switch > span strong {
+  font-size: 9px;
+}
+
+.generation-switch > i {
+  flex-basis: 32px;
+  width: 32px;
+  height: 18px;
+}
+
+.generation-loras {
+  padding: 9px;
+  border-radius: 3px;
+}
+
+.generation-loras > div {
+  grid-template-columns: 1fr;
+}
+
+.generation-loras article {
+  border-radius: 3px;
+}
+
+.generation-lora-summary {
+  display: grid;
+  gap: 8px;
+  margin-top: 9px;
+  padding: 9px 2px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+}
+
+.generation-lora-summary > header,
+.generation-lora-summary > header button,
+.generation-lora-summary > div,
+.generation-lora-summary > div button {
+  display: flex;
+  align-items: center;
+}
+
+.generation-lora-summary > header { justify-content: space-between; gap: 8px; }
+.generation-lora-summary > header strong,
+.generation-lora-summary > header span { display: block; }
+.generation-lora-summary > header strong { font-size: 9px; }
+.generation-lora-summary > header span { margin-top: 2px; color: var(--muted); font-size: 7px; }
+.generation-lora-summary > header button { gap: 5px; min-height: 30px; padding: 0 9px; border: 1px solid var(--accent-border); background: var(--accent-soft); color: var(--accent); font-size: 8px; font-weight: 800; }
+.generation-lora-summary > header button svg { width: 13px; }
+.generation-lora-summary > div { flex-wrap: wrap; gap: 5px; }
+.generation-lora-summary > div button { gap: 7px; padding: 6px 8px; border: 1px solid var(--border); background: var(--panel-raised); color: var(--text); }
+.generation-lora-summary > div button:hover { border-color: var(--accent-border); }
+.generation-lora-summary > div button strong { max-width: 160px; overflow: hidden; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.generation-lora-summary > div button span { color: var(--muted); font-size: 7px; }
+.generation-lora-summary > p { margin: 0; color: var(--muted); font-size: 8px; }
+
+.generation-lora-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 11500;
+  display: grid;
+  place-items: center;
+  padding: 14px;
+  background: rgba(3, 8, 14, .68);
+  backdrop-filter: blur(6px);
+}
+
+.generation-lora-dialog {
+  width: min(1360px, calc(100vw - 28px));
+  max-height: calc(100vh - 28px);
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  background: var(--panel);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .42);
+}
+
+.generation-lora-dialog > header,
+.generation-lora-dialog > header > div,
+.generation-lora-dialog > footer,
+.generation-lora-toolbar,
+.generation-lora-search-row,
+.generation-lora-filter-row,
+.generation-lora-toolbar label,
+.generation-lora-scopes,
+.generation-lora-scopes button,
+.generation-lora-categories,
+.generation-lora-categories button,
+.generation-lora-library article,
+.generation-lora-copy > header,
+.generation-lora-weights,
+.generation-lora-action button {
+  display: flex;
+  align-items: center;
+}
+
+.generation-lora-dialog > header { justify-content: space-between; gap: 10px; padding: 10px 13px; border-bottom: 1px solid var(--border); }
+.generation-lora-dialog > header > div { gap: 9px; }
+.generation-lora-dialog > header > div > svg { width: 19px; color: var(--accent); }
+.generation-lora-dialog > header strong,
+.generation-lora-dialog > header small { display: block; }
+.generation-lora-dialog > header strong { font-size: 11px; }
+.generation-lora-dialog > header small { margin-top: 2px; color: var(--muted); font-size: 8px; }
+.generation-lora-dialog > header > button { width: 30px; height: 30px; display: grid; place-items: center; padding: 0; border: 1px solid var(--border); background: var(--panel-muted); color: var(--muted); }
+.generation-lora-dialog > header > button svg { width: 14px; }
+
+.generation-lora-toolbar { display: grid; gap: 6px; padding: 8px 13px 9px; border-bottom: 1px solid var(--border); background: var(--panel-muted); }
+.generation-lora-search-row { justify-content: space-between; gap: 12px; }
+.generation-lora-toolbar label { width: min(420px, 100%); min-width: 210px; gap: 7px; height: 32px; padding: 0 9px; border: 1px solid var(--border); background: var(--control); }
+.generation-lora-toolbar label svg { width: 14px; color: var(--muted); }
+.generation-lora-toolbar input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); font-size: 9px; }
+.generation-lora-search-row > small { flex: 0 0 auto; color: var(--muted); font-size: 8px; white-space: nowrap; }
+.generation-lora-filter-row { min-width: 0; gap: 9px; }
+.generation-lora-filter-row > span { width: 50px; flex: 0 0 50px; color: var(--subtle); font-size: 7px; font-weight: 800; }
+.generation-lora-scopes,
+.generation-lora-categories { min-width: 0; flex-wrap: wrap; gap: 4px; }
+.generation-lora-scopes button,
+.generation-lora-categories button { justify-content: center; gap: 5px; min-width: 58px; height: 28px; padding: 0 8px; border: 1px solid transparent; background: transparent; color: var(--muted); font-size: 8px; font-weight: 750; }
+.generation-lora-scopes button { min-width: 86px; border-color: var(--border); background: var(--panel); }
+.generation-lora-scopes button:hover,
+.generation-lora-categories button:hover { border-color: var(--border-strong); background: var(--panel-raised); color: var(--text); }
+.generation-lora-scopes button.active,
+.generation-lora-categories button.active { border-color: var(--accent-border); background: var(--accent-soft); color: var(--accent); }
+.generation-lora-scopes button b,
+.generation-lora-categories button b { min-width: 18px; padding: 2px 4px; background: color-mix(in srgb, currentColor 10%, transparent); color: inherit; font-size: 7px; text-align: center; }
+
+.generation-lora-library { min-height: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-content: start; gap: 8px; overflow-y: auto; padding: 10px 13px; scrollbar-gutter: stable; }
+.generation-lora-library article { position: relative; min-width: 0; min-height: 140px; display: grid; grid-template-columns: 96px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; align-items: stretch; gap: 8px 10px; padding: 8px; overflow: hidden; border: 1px solid var(--border); background: var(--panel-raised); }
+.generation-lora-library article::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: transparent; }
+.generation-lora-library article:hover { border-color: var(--border-strong); background: var(--panel); }
+.generation-lora-library article.selected { border-color: var(--accent-border); background: var(--panel-raised); }
+.generation-lora-library article.selected::before { background: var(--accent); }
+.generation-lora-cover { position: relative; grid-row: 1 / 3; width: 96px; height: 124px; overflow: hidden; background: var(--panel-muted); }
+.generation-lora-cover img { width: 100%; height: 100%; display: block; object-fit: cover; }
+.generation-lora-cover > div { height: 100%; display: grid; place-items: center; align-content: center; gap: 4px; color: var(--subtle); font-size: 7px; }
+.generation-lora-cover > div svg { width: 22px; }
+.generation-lora-cover > i { position: absolute; top: 5px; right: 5px; width: 20px; height: 20px; display: grid; place-items: center; border: 1px solid rgba(255,255,255,.5); background: var(--accent); color: #fff; }
+.generation-lora-cover > i svg { width: 12px; }
+.generation-lora-copy { min-width: 0; display: grid; grid-template-rows: auto minmax(28px, auto) auto auto; align-content: start; gap: 5px; }
+.generation-lora-copy > header { position: relative; min-height: 30px; justify-content: space-between; gap: 8px; padding-right: 54px; }
+.generation-lora-copy > header span,
+.generation-lora-copy > header strong,
+.generation-lora-copy > header small { min-width: 0; display: block; }
+.generation-lora-copy > header > span { flex: 1 1 auto; overflow: hidden; }
+.generation-lora-copy > header strong { overflow: hidden; font-size: 9px; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
+.generation-lora-copy > header small { margin-top: 2px; color: var(--muted); font-size: 7px; }
+.generation-lora-copy > header b { position: absolute; top: 0; right: 0; padding: 3px 5px; border: 1px solid var(--success-border); background: var(--success-soft); color: var(--success); font-size: 7px; }
+.generation-lora-copy > header b.remote { border-color: var(--accent-border); background: var(--accent-soft); color: var(--accent); }
+.generation-lora-copy > p { min-height: 28px; margin: 0; display: -webkit-box; overflow: hidden; color: var(--text-secondary); font-size: 8px; line-height: 1.4; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.generation-lora-triggers { min-width: 0; display: flex; align-items: center; gap: 5px; height: 24px; padding: 0 6px; overflow: hidden; border: 1px solid var(--border); background: var(--panel-muted); }
+.generation-lora-triggers span { flex: 0 0 auto; color: var(--accent); font-size: 7px; font-weight: 800; }
+.generation-lora-triggers strong,
+.generation-lora-triggers small { min-width: 0; overflow: hidden; color: var(--muted); font-size: 7px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.generation-lora-weights { gap: 5px; }
+.generation-lora-weights label { min-width: 0; flex: 1; display: grid; grid-template-columns: auto minmax(42px, 1fr); align-items: center; gap: 4px; color: var(--muted); font-size: 7px; }
+.generation-lora-weights input { width: 100%; min-width: 0; height: 24px; padding: 0 5px; border: 1px solid var(--border); background: var(--control); color: var(--text); font-size: 8px; }
+.generation-lora-progress { position: relative; height: 18px; overflow: hidden; border: 1px solid var(--border); background: var(--panel-muted); }
+.generation-lora-progress i { position: absolute; inset: 0 auto 0 0; background: var(--accent-soft); }
+.generation-lora-progress span { position: relative; z-index: 1; display: block; padding: 2px 6px; color: var(--accent); font-size: 7px; }
+.generation-lora-action { min-width: 0; display: grid; place-items: stretch; }
+.generation-lora-action button { width: 100%; justify-content: center; gap: 5px; min-height: 32px; padding: 0 8px; border: 1px solid var(--accent-border); background: var(--accent); color: #fff; font-size: 8px; font-weight: 800; text-shadow: 0 1px 1px rgba(0, 0, 0, .28); }
+.generation-lora-action button.remove { border-color: var(--danger-border); background: var(--danger-soft); color: var(--danger); }
+.generation-lora-action button:disabled { cursor: wait; opacity: .55; }
+.generation-lora-action button svg { width: 13px; }
+.generation-lora-dialog > footer { justify-content: space-between; gap: 12px; padding: 8px 13px; border-top: 1px solid var(--border); background: var(--panel-muted); }
+.generation-lora-dialog > footer span { color: var(--muted); font-size: 7px; }
+.generation-lora-dialog > footer button { min-height: 32px; padding: 0 13px; border: 1px solid var(--accent-border); background: var(--accent); color: #fff; font-size: 8px; font-weight: 800; }
+.generation-lora-library > .empty-block { grid-column: 1 / -1; }
+.generation-lora-dialog > .collection-pagination { margin: 0 13px 8px; }
+
+@media (max-width: 1100px) {
+  .generation-lora-library { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 720px) {
+  .generation-lora-backdrop { padding: 8px; }
+  .generation-lora-dialog { width: calc(100vw - 16px); max-height: calc(100vh - 16px); }
+  .generation-lora-filter-row { align-items: flex-start; }
+  .generation-lora-filter-row > span { padding-top: 8px; }
+  .generation-lora-library { grid-template-columns: minmax(0, 1fr); padding: 8px; }
+  .generation-lora-dialog > footer span { display: none; }
+  .generation-lora-dialog > footer { justify-content: flex-end; }
+}

@@ -7,6 +7,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { FolderOpen, Image, Pin, PinOff, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { closeDesktopPreviewWindow, listenDesktopGalleryPreviewSelection, listenDesktopLocalJobUpdates, loadDesktopGalleryPreviewJob, loadDesktopLatestLocalJob, loadDesktopPreviewSettings, markDesktopGenerationPreviewReady, revealDesktopLocalJobArtifact, setDesktopGenerationPreviewAlwaysOnTop } from "./desktop-api";
+import { applyDesktopDisplayScaleImmediately } from "./desktop-display-scale";
 
 /** 独立窗口读取 SQLite 最近任务，并通过事件更新当前生成进度。 */
 export function GenerationPreviewWindow() {
@@ -32,9 +33,7 @@ export function GenerationPreviewWindow() {
         const resolved = settings.themeMode === "system" ? (media.matches ? "dark" : "light") : settings.themeMode;
         document.documentElement.dataset.theme = resolved;
         document.documentElement.style.colorScheme = resolved;
-        document.documentElement.style.setProperty("--desktop-font-scale", String(settings.fontScale));
-        document.documentElement.style.setProperty("--desktop-content-font-scale", String(settings.contentFontScale));
-        document.documentElement.style.setProperty("--desktop-viewport-height", `${100 / settings.fontScale}vh`);
+        await applyDesktopDisplayScaleImmediately(settings.fontScale, settings.contentFontScale).catch((reason) => messages.push(errorMessage(reason)));
         await getCurrentWindow().setTheme(resolved).catch((reason) => messages.push(errorMessage(reason)));
       } else {
         messages.push(errorMessage(settingsResult.reason));

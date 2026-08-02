@@ -1,0 +1,590 @@
+/* 本文件定义打标任务、AI 清洗、训练参数和训练任务状态样式。 */
+
+/* 持久任务控制保持紧凑横排，暂停与取消不会撑高进度卡片。 */
+.caption-job-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.caption-job-actions button {
+  min-height: 32px;
+  padding: 0 10px;
+}
+
+.caption-options > button:disabled,
+.caption-job > button:disabled {
+  cursor: not-allowed;
+  opacity: .48;
+}
+
+.caption-options button svg,
+.caption-install svg,
+.caption-job button svg {
+  width: 13px;
+}
+
+.caption-job {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 5px 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.caption-job > div {
+  grid-column: 1 / -1;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.caption-job > div span,
+.caption-job > div strong,
+.caption-job > div small {
+  display: block;
+}
+
+.caption-job > div strong {
+  font-size: 8px;
+}
+
+.caption-job > div small,
+.caption-job > small {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 7px;
+}
+
+.caption-job > div b {
+  color: var(--accent);
+  font-size: 9px;
+}
+
+.caption-job > i {
+  align-self: center;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--border);
+}
+
+.caption-job > i em {
+  height: 100%;
+  display: block;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width .2s ease;
+}
+
+.caption-job > button {
+  min-height: 26px;
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.caption-job.is-failed > div strong,
+.caption-item-error {
+  color: var(--danger);
+}
+
+.caption-translation-error { color: var(--warning); font-size: 7px; }
+
+/* AI 清洗与离线打标分开呈现，预设选择后直接写回当前训练集。 */
+.ai-clean-control {
+  background: color-mix(in srgb, var(--success-soft) 38%, var(--panel-raised));
+}
+
+.training-gate span strong {
+  font-size: 9px;
+}
+
+.training-gate span small {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 7px;
+}
+
+.training-asset-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.training-asset-list > article {
+  min-width: 0;
+  height: clamp(410px, 45vh, 520px);
+  display: grid;
+  grid-template-columns: 118px minmax(0, 1fr);
+  align-items: stretch;
+  gap: 10px;
+  overflow: hidden;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--panel-raised);
+}
+
+.training-asset-image {
+  position: relative;
+  height: 148px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--panel-muted);
+}
+
+.training-asset-image img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+}
+
+.training-asset-image > div {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  color: var(--danger);
+  font-size: 8px;
+}
+
+.training-asset-image > div svg {
+  width: 20px;
+}
+
+.training-asset-list > article.is-missing {
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+}
+
+.training-asset-image > span {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  padding: 3px 5px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.66);
+  color: #fff;
+  font-size: 7px;
+}
+
+.training-asset-caption {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  gap: 7px;
+  overflow: hidden;
+}
+
+.training-asset-caption header strong,
+.training-asset-caption header small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.training-asset-caption header strong {
+  font-size: 8px;
+}
+
+.training-asset-caption header small {
+  color: var(--muted);
+  font-size: 7px;
+}
+
+.desktop-caption-tag-list { min-height: 76px; display: flex; align-content: flex-start; align-items: flex-start; flex-wrap: wrap; gap: 5px; overflow: visible; padding: 7px; border: 1px solid var(--border); background: var(--control); }
+.training-asset-list .desktop-caption-tag-list { min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: auto; }
+.desktop-caption-tag-list > span { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 5px 5px 5px 8px; border: 1px solid color-mix(in srgb, var(--tag-color) 48%, var(--border)); background: color-mix(in srgb, var(--tag-color) 9%, var(--panel-raised)); box-shadow: inset 3px 0 var(--tag-color); }
+.desktop-caption-tag-list > span:hover,
+.desktop-caption-tag-list > span:focus-within { border-color: color-mix(in srgb, var(--tag-color) 72%, var(--border)); background: color-mix(in srgb, var(--tag-color) 15%, var(--panel-raised)); }
+.desktop-caption-tag-list b { max-width: 150px; overflow: hidden; color: var(--text); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.desktop-caption-tag-list small { padding-left: 5px; border-left: 1px solid color-mix(in srgb, var(--tag-color) 38%, var(--border)); color: var(--muted); font-size: 7px; white-space: nowrap; }
+.desktop-caption-tag-list em { padding: 2px 4px; border: 1px solid color-mix(in srgb, var(--source-color) 42%, var(--border)); border-radius: 3px; background: color-mix(in srgb, var(--source-color) 12%, var(--panel-raised)); color: color-mix(in srgb, var(--source-color) 78%, var(--text)); font-size: 7px; font-style: normal; line-height: 1; white-space: nowrap; }
+.desktop-caption-tag-list .is-source-auto { --source-color: #4f8fc8; }
+.desktop-caption-tag-list .is-source-ai_cleaned { --source-color: #8a65bd; }
+.desktop-caption-tag-list .is-source-manual { --source-color: #2f9c78; }
+.desktop-caption-tag-list .is-source-imported { --source-color: #b27a36; }
+.desktop-caption-tag-list .is-source-trigger { --source-color: #c34f67; }
+.desktop-caption-tag-list button { width: 18px; height: 18px; display: grid; place-items: center; padding: 0; border: 0; background: transparent; color: var(--muted); }
+.desktop-caption-tag-list button:hover { background: var(--danger-soft); color: var(--danger); }
+.desktop-caption-tag-list button svg { width: 10px; height: 10px; }
+.desktop-caption-tag-list > p { margin: auto; color: var(--muted); font-size: 8px; }
+.desktop-caption-tag-list > span.is-pending { border-style: dashed; }
+
+.desktop-caption-add { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px; }
+.desktop-caption-add input { min-width: 0; height: 30px; padding: 0 7px; border: 1px solid var(--border); background: var(--control); color: var(--text); font-size: 8px; }
+.desktop-caption-add button { height: 30px; display: inline-flex; align-items: center; gap: 4px; padding: 0 8px; border: 1px solid var(--border); background: var(--panel-muted); color: var(--text); font-size: 8px; }
+.desktop-caption-add button:disabled { cursor: not-allowed; opacity: .45; }
+.desktop-caption-add button svg { width: 12px; }
+
+.training-asset-caption footer span {
+  color: var(--warning);
+  font-size: 7px;
+  font-weight: 800;
+}
+
+.training-asset-caption footer span.confirmed {
+  color: var(--success);
+}
+
+.training-asset-caption footer span.missing {
+  color: var(--danger);
+}
+
+.training-asset-caption footer > div {
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.training-asset-caption footer .caption-row-action {
+  border-color: var(--border);
+  background: var(--panel-muted);
+  color: var(--text);
+}
+
+.training-asset-caption footer .caption-delete-image { border-color: var(--danger-border); background: var(--danger-soft); color: var(--danger); }
+
+.training-asset-caption .caption-item-error {
+  font-size: 7px;
+}
+
+/* 训练参数与持久任务独立于逐图 Caption，避免长列表滚动时丢失提交状态。 */
+.desktop-training-execution {
+  display: grid;
+  gap: 12px;
+}
+
+.desktop-training-execution > header,
+.desktop-training-submit,
+.desktop-training-jobs article header,
+.desktop-training-jobs article footer,
+.desktop-training-jobs article header span,
+.desktop-training-jobs article p,
+.desktop-training-parameters label > div {
+  display: flex;
+  align-items: center;
+}
+
+.desktop-training-execution > header {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.desktop-training-execution > header span {
+  color: var(--accent);
+  font-size: 7px;
+  font-weight: 900;
+  letter-spacing: .12em;
+}
+
+.desktop-training-execution > header h2 {
+  margin: 3px 0 0;
+  font-size: 15px;
+}
+
+.desktop-training-execution > header small {
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.desktop-training-parameters {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.desktop-training-parameters label {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.desktop-training-parameters label > span {
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 700;
+}
+
+.desktop-training-parameters input,
+.desktop-training-parameters select {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--control);
+  color: var(--text);
+  font-size: 9px;
+}
+
+.desktop-training-parameters label > div {
+  gap: 6px;
+}
+
+.desktop-training-parameters .training-checkbox {
+  min-height: 34px;
+  align-self: end;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--control);
+}
+
+.desktop-training-parameters .training-checkbox input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+}
+
+.desktop-training-submit {
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px;
+  border: 1px solid var(--accent-border);
+  border-radius: 5px;
+  background: var(--accent-soft);
+}
+
+.desktop-training-submit span {
+  min-width: 0;
+}
+
+.desktop-training-submit strong,
+.desktop-training-submit small {
+  display: block;
+}
+
+.desktop-training-submit strong {
+  font-size: 9px;
+}
+
+.desktop-training-submit small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 7px;
+}
+
+.desktop-training-submit button,
+.desktop-training-jobs article footer button {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 11px;
+  border: 1px solid var(--accent-border);
+  border-radius: 4px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 8px;
+  font-weight: 800;
+}
+
+.desktop-training-submit button svg,
+.desktop-training-jobs article footer button svg {
+  width: 13px;
+}
+
+.desktop-training-submit button:disabled,
+.desktop-training-jobs article footer button:disabled {
+  cursor: not-allowed;
+  opacity: .48;
+}
+
+.desktop-training-jobs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.desktop-training-jobs article {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--panel-muted);
+}
+
+.desktop-training-jobs article header,
+.desktop-training-jobs article footer {
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.desktop-training-jobs article header span {
+  min-width: 0;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.desktop-training-jobs article header b {
+  color: var(--accent);
+  font-size: 7px;
+}
+
+.desktop-training-jobs article header strong {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.desktop-training-jobs article header small,
+.desktop-training-jobs article footer span {
+  color: var(--muted);
+  font-size: 7px;
+}
+
+.desktop-training-jobs article header em {
+  color: var(--accent);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.desktop-training-jobs article > i {
+  height: 4px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--border);
+}
+
+.desktop-training-jobs article > i u {
+  height: 100%;
+  display: block;
+  border-radius: inherit;
+  background: var(--accent);
+  text-decoration: none;
+  transition: width .2s ease;
+}
+
+.desktop-training-jobs article footer button {
+  min-height: 26px;
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.desktop-training-jobs article p {
+  gap: 5px;
+  margin: 0;
+  color: var(--warning);
+  font-size: 7px;
+  line-height: 1.55;
+}
+
+.desktop-training-jobs article p svg {
+  width: 14px;
+  flex: 0 0 auto;
+}
+
+.local-job-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.local-job-grid article {
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-raised);
+}
+
+.local-job-preview {
+  aspect-ratio: 1;
+  overflow: hidden;
+  background: var(--panel-muted);
+}
+
+.local-job-preview img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.local-job-preview > div {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.local-job-preview svg {
+  width: 24px;
+}
+
+.local-job-preview b {
+  color: var(--accent);
+  font-size: 11px;
+}
+
+.local-job-copy {
+  min-height: 70px;
+  padding: 9px;
+}
+
+.local-job-copy strong {
+  min-height: 30px;
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 9px;
+  line-height: 1.55;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.local-job-copy span,
+.local-job-copy small {
+  display: block;
+  margin-top: 4px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 7px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.local-job-copy small {
+  color: var(--danger);
+}
+
+.local-job-grid article > button {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--panel);
+  color: var(--text);
+}
+
+.local-job-grid article > button svg {
+  width: 13px;
+}

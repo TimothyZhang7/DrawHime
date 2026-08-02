@@ -1,0 +1,457 @@
+/* 本文件定义本地图库、作品详情和任务记录展示样式。 */
+
+/* 本机图库直接占用页面内容区，方形卡片完整展示原图并以同图模糊背景填补留白。 */
+
+.gallery-page {
+  height: 100%;
+  min-height: 0;
+  grid-template-rows: minmax(0, 1fr);
+  gap: 0;
+  overflow: hidden;
+}
+
+.gallery-grid {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-auto-rows: max-content;
+  align-content: start;
+  gap: 10px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 0 4px 10px 0;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+}
+
+.gallery-card {
+  width: 100%;
+  height: auto;
+  min-width: 0;
+  min-height: 0;
+  aspect-ratio: 1 / 1;
+  align-self: start;
+  display: block;
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel-raised);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.gallery-card:hover { border-color: var(--accent-border); transform: translateY(-1px); box-shadow: 0 10px 24px var(--shadow-card); }
+
+.gallery-cover {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--panel-muted);
+}
+
+.gallery-cover-media {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: var(--panel-muted);
+}
+
+.gallery-cover-media img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.gallery-cover-backdrop {
+  object-fit: cover;
+  opacity: .38;
+  filter: blur(16px) saturate(.82);
+  transform: scale(1.12);
+}
+
+.gallery-cover-image {
+  position: relative !important;
+  inset: auto !important;
+  z-index: 1;
+  width: auto !important;
+  height: auto !important;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  object-position: center;
+}
+
+.gallery-cover-empty {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 6px;
+  color: var(--muted);
+  background: linear-gradient(135deg, var(--panel-muted), var(--panel-raised));
+}
+.gallery-cover-empty svg { width: 28px; height: 28px; color: var(--subtle); }
+.gallery-cover-empty strong { color: var(--accent); font-size: 15px; }
+.gallery-cover-empty span { font-size: 8px; }
+.gallery-cover-empty.large { min-height: 360px; }
+.gallery-cover-empty.large svg { width: 42px; height: 42px; }
+.gallery-cover-empty.large strong { font-size: 20px; }
+
+.gallery-cover > i,
+.gallery-source {
+  position: absolute;
+  top: 7px;
+  z-index: 1;
+  min-height: 22px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 7px;
+  border: 1px solid color-mix(in srgb, currentColor 42%, transparent);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  font-size: 7px;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.gallery-cover > em {
+  position: absolute;
+  inset: auto 8px 8px;
+  z-index: 2;
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  color: var(--text);
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 800;
+  opacity: 0;
+  transform: translateY(5px);
+  transition: opacity 130ms ease, transform 130ms ease;
+}
+.gallery-cover > em svg { width: 12px; }
+.gallery-card:hover .gallery-cover > em,
+.gallery-card:focus-visible .gallery-cover > em { opacity: 1; transform: translateY(0); }
+
+.gallery-source { left: 7px; }
+.gallery-cover > i { right: 7px; color: var(--text); }
+.gallery-cover > i.is-succeeded,
+.gallery-detail-tags i.is-succeeded { border-color: var(--success-border); background: color-mix(in srgb, var(--success-soft) 92%, transparent); color: var(--success); }
+.gallery-cover > i.is-running,
+.gallery-cover > i.is-queued,
+.gallery-detail-tags i.is-running,
+.gallery-detail-tags i.is-queued { border-color: var(--accent-border); background: color-mix(in srgb, var(--accent-soft) 92%, transparent); color: var(--accent); }
+.gallery-cover > i.is-failed,
+.gallery-detail-tags i.is-failed { border-color: var(--danger-border); background: color-mix(in srgb, var(--danger-soft) 92%, transparent); color: var(--danger); }
+.gallery-source.is-local { color: var(--success); }
+.gallery-source svg { width: 11px; }
+
+/* 本机作品详情沿用网页图库的信息层级，同时保留本地文件和任务快照。 */
+.gallery-detail {
+  display: grid;
+  gap: 10px;
+}
+
+.gallery-detail-back {
+  width: max-content;
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--panel-raised);
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 800;
+}
+.gallery-detail-back:hover { border-color: var(--accent-border); color: var(--accent); }
+.gallery-detail-back svg { width: 14px; }
+
+.gallery-detail-toolbar { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.gallery-detail-actions { min-width: 0; display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 6px; }
+.gallery-detail-actions > button { min-height: 32px; display: inline-flex; align-items: center; gap: 5px; padding: 0 10px; border: 1px solid var(--border); border-radius: 3px; background: var(--panel-raised); color: var(--muted); font-size: 8px; font-weight: 800; }
+.gallery-detail-actions > button:hover { border-color: var(--accent-border); background: var(--accent-soft); color: var(--accent); }
+.gallery-detail-actions > button.danger { border-color: var(--danger-border); background: var(--danger-soft); color: var(--danger); }
+.gallery-detail-actions > button svg { width: 13px; }
+
+.gallery-detail-hero {
+  min-height: 430px;
+  display: grid;
+  grid-template-columns: minmax(380px, 62%) minmax(280px, 38%);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel);
+}
+
+.gallery-detail-image {
+  position: relative;
+  min-height: 430px;
+  display: grid;
+  place-items: center;
+  isolation: isolate;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-right: 1px solid var(--border);
+  background: var(--panel-muted);
+}
+.gallery-detail-image.has-preview { width: 100%; color: inherit; cursor: zoom-in; }
+.gallery-detail-image.has-preview:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
+.gallery-detail-image-backdrop {
+  position: absolute;
+  inset: -18px;
+  z-index: -1;
+  width: calc(100% + 36px);
+  height: calc(100% + 36px);
+  display: block;
+  object-fit: cover;
+  filter: blur(18px) saturate(.86) brightness(.9);
+  opacity: .56;
+}
+.gallery-detail-image-main {
+  position: relative;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+  display: block;
+  object-fit: contain;
+  object-position: center;
+  transition: transform 150ms ease;
+}
+.gallery-detail-image > .gallery-cover-empty { min-height: 400px; }
+.gallery-detail-summary { min-width: 0; display: flex; flex-direction: column; padding: 22px; }
+.gallery-detail-tags { display: flex; flex-wrap: wrap; gap: 5px; }
+.gallery-detail-tags b,
+.gallery-detail-tags i { padding: 4px 6px; border: 1px solid var(--border); border-radius: 3px; background: var(--panel-muted); color: var(--muted); font-size: 7px; font-style: normal; }
+.gallery-detail-tags b { border-color: var(--success-border); background: var(--success-soft); color: var(--success); }
+.gallery-detail-summary h1 { margin: 14px 0 0; display: -webkit-box; overflow: hidden; font-size: 16px; line-height: 1.55; -webkit-box-orient: vertical; -webkit-line-clamp: 7; }
+.gallery-detail-summary > p { margin: 9px 0 0; color: var(--accent); font-size: 8px; }
+.gallery-detail-summary dl { display: grid; gap: 0; margin: auto 0 0; }
+.gallery-detail-summary dl > div,
+.job-detail-overview dl > div { min-width: 0; display: grid; grid-template-columns: 82px minmax(0, 1fr); gap: 9px; padding: 7px 0; border-bottom: 1px solid var(--border); }
+.gallery-detail-summary dt,
+.job-detail-overview dt { color: var(--muted); font-size: 7px; }
+.gallery-detail-summary dd,
+.job-detail-overview dd { min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap: 5px; margin: 0; overflow: hidden; font-size: 7px; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.gallery-detail-summary dd button,
+.job-detail-overview dd button { width: 20px; height: 20px; display: grid; place-items: center; flex: 0 0 auto; border: 0; background: transparent; color: var(--accent); }
+.gallery-detail-summary dd button svg,
+.job-detail-overview dd button svg { width: 11px; }
+
+.gallery-detail-section,
+.job-parameter-panel,
+.job-detail-section {
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel);
+}
+.gallery-detail-section > header,
+.job-parameter-panel > header,
+.job-detail-section > header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.gallery-detail-section > header > svg,
+.job-parameter-panel > header > svg,
+.job-detail-section > header > svg { width: 16px; color: var(--accent); }
+.gallery-detail-section > header span,
+.job-parameter-panel > header span { display: block; color: var(--accent); font-size: 7px; font-weight: 850; letter-spacing: .1em; }
+.gallery-detail-section > header h2,
+.job-parameter-panel > header h2 { margin: 2px 0 0; font-size: 11px; }
+.gallery-detail-section > header small,
+.job-detail-section > header small { margin-left: auto; color: var(--muted); font-size: 8px; }
+
+.job-prompt-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.job-prompt-grid > article { min-width: 0; padding: 13px; border: 1px solid var(--accent-border); border-left: 3px solid var(--accent); border-radius: 4px; background: var(--accent-soft); }
+.job-prompt-grid > article.negative { border-color: var(--warning-border); border-left-color: var(--warning); background: var(--warning-soft); }
+.job-prompt-grid header { display: flex; align-items: center; gap: 6px; }
+.job-prompt-grid header svg { width: 13px; color: var(--accent); }
+.job-prompt-grid header strong { font-size: 9px; }
+.job-prompt-grid header button { margin-left: auto; min-height: 25px; padding: 0 7px; border: 1px solid currentColor; border-radius: 3px; background: transparent; color: var(--accent); font-size: 7px; }
+.job-prompt-grid p { max-height: 156px; margin: 9px 0 0; overflow: auto; color: var(--text); font-size: 8px; line-height: 1.75; white-space: pre-wrap; }
+
+.job-parameter-panel > div { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.job-parameter-panel > div > article { min-width: 0; padding: 9px; border: 1px solid var(--border); border-radius: 3px; background: var(--panel-raised); }
+.job-parameter-panel article span,
+.job-parameter-panel article strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.job-parameter-panel article span { color: var(--muted); font-size: 7px; }
+.job-parameter-panel article strong { margin-top: 4px; font-size: 9px; }
+
+.job-lora-gallery { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+.job-lora-card { min-width: 0; display: grid; grid-template-columns: 54px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 7px; border: 1px solid var(--border); border-radius: 3px; background: var(--panel-raised); }
+.job-lora-cover { width: 54px; height: 54px; display: grid; place-items: center; overflow: hidden; border-radius: 2px; background: var(--panel-muted); }
+.job-lora-cover img { width: 100%; height: 100%; object-fit: cover; }
+.job-lora-cover svg { width: 19px; color: var(--accent); }
+.job-lora-card > div:nth-child(2) { min-width: 0; }
+.job-lora-card span,
+.job-lora-card strong,
+.job-lora-card small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.job-lora-card span { color: var(--accent); font-size: 7px; }
+.job-lora-card strong { margin-top: 3px; font-size: 9px; }
+.job-lora-card small { margin-top: 3px; color: var(--muted); font-size: 7px; }
+.job-lora-card > b { padding: 4px 6px; border-radius: 3px; background: var(--accent-soft); color: var(--accent); font-size: 8px; }
+
+/* 记录采用单列全宽长条，状态、时间和操作保持固定位置。 */
+.local-record-list { display: grid; gap: 7px; }
+.local-record-list > article { position: relative; min-width: 0; min-height: 94px; display: grid; grid-template-columns: 74px minmax(0, 1fr) 150px 70px; align-items: center; gap: 11px; padding: 9px 46px 9px 9px; border: 1px solid var(--border); border-left: 3px solid var(--border-strong); border-radius: 4px; background: var(--panel-raised); cursor: pointer; }
+.local-record-list > article:hover { border-color: var(--accent-border); background: color-mix(in srgb, var(--accent-soft) 34%, var(--panel-raised)); }
+.local-record-list > article.is-running { border-left-color: var(--accent); }
+.local-record-list > article.is-succeeded { border-left-color: var(--success); }
+.local-record-list > article.is-failed { border-left-color: var(--danger); }
+.local-record-list > article.is-cancelled { border-left-color: var(--muted); }
+.local-record-preview { width: 74px; height: 74px; overflow: hidden; border-radius: 3px; background: var(--panel-muted); }
+.local-record-preview img { width: 100%; height: 100%; display: block; object-fit: cover; }
+.local-record-preview > div { width: 100%; height: 100%; display: grid; place-items: center; align-content: center; gap: 4px; color: var(--muted); }
+.local-record-preview svg { width: 18px; }
+.local-record-preview span { font-size: 8px; font-weight: 850; }
+.local-record-copy { min-width: 0; }
+.local-record-copy > div { display: flex; align-items: center; gap: 7px; }
+.local-record-copy > div > span { color: var(--subtle); font-family: Consolas, monospace; font-size: 7px; }
+.local-record-copy > strong { min-height: 30px; display: -webkit-box; margin-top: 7px; overflow: hidden; font-size: 9px; line-height: 1.55; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.local-record-copy > small { display: block; margin-top: 5px; overflow: hidden; color: var(--muted); font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
+.local-record-copy > em { display: block; margin-top: 4px; overflow: hidden; color: var(--danger); font-size: 7px; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
+.job-status { padding: 3px 5px; border-radius: 3px; background: var(--panel-muted); color: var(--muted); font-size: 7px; font-weight: 850; }
+.job-status.is-running,
+.job-status.is-queued { background: var(--accent-soft); color: var(--accent); }
+.job-status.is-succeeded { background: var(--success-soft); color: var(--success); }
+.job-status.is-failed { background: var(--danger-soft); color: var(--danger); }
+.local-record-time { min-width: 0; text-align: right; }
+.local-record-time span,
+.local-record-time small { display: block; }
+.local-record-time span { font-size: 8px; }
+.local-record-time small { margin-top: 5px; color: var(--muted); font-size: 7px; }
+.local-record-detail { min-height: 31px; border: 1px solid var(--border); border-radius: 3px; background: var(--panel-muted); color: var(--text); font-size: 8px; font-weight: 800; }
+.local-record-detail:hover { border-color: var(--accent-border); color: var(--accent); }
+.local-record-cancel { position: absolute; top: 50%; right: 10px; width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border: 1px solid var(--danger-border); border-radius: 3px; background: var(--danger-soft); color: var(--danger); transform: translateY(-50%); }
+.local-record-cancel svg { width: 13px; }
+
+/* 任务详情弹窗固定头尾，长参数和尝试时间线只在内容区滚动。 */
+.job-detail-backdrop { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; padding: 24px; background: rgba(4, 10, 18, .62); backdrop-filter: blur(5px); }
+.job-detail-dialog { width: min(920px, calc(100vw - 48px)); max-height: min(840px, calc(100vh - 48px)); display: grid; grid-template-rows: auto minmax(0, 1fr) auto; overflow: hidden; border: 1px solid var(--border-strong); border-radius: 5px; background: var(--panel); box-shadow: 0 25px 80px rgba(0, 0, 0, .38); }
+.job-detail-dialog > header { min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 15px; border-bottom: 1px solid var(--border); background: var(--panel-raised); }
+.job-detail-dialog > header > div { display: flex; align-items: center; gap: 8px; }
+.job-detail-dialog > header span { font-size: 10px; font-weight: 850; }
+.job-detail-dialog > header > button { width: 31px; height: 31px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 3px; background: var(--panel-muted); color: var(--muted); }
+.job-detail-dialog > header > button svg { width: 14px; }
+.job-detail-body { display: grid; align-content: start; gap: 10px; padding: 13px; overflow-y: auto; scrollbar-gutter: stable; }
+.job-detail-overview { min-width: 0; display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 15px; padding: 13px; border: 1px solid var(--border); border-radius: 4px; background: var(--panel-raised); }
+.job-detail-preview { width: 210px; height: 210px; display: grid; place-items: center; overflow: hidden; border-radius: 3px; background: var(--panel-muted); }
+.job-detail-preview img { width: 100%; height: 100%; object-fit: contain; }
+.job-detail-preview > div { display: grid; place-items: center; gap: 5px; color: var(--muted); }
+.job-detail-preview svg { width: 27px; }
+.job-detail-preview strong { font-size: 17px; }
+.job-detail-preview span { font-size: 8px; }
+.job-detail-overview > div:last-child { min-width: 0; display: flex; flex-direction: column; }
+.job-detail-overview h2 { max-height: 105px; margin: 0; overflow: auto; font-size: 12px; line-height: 1.6; }
+.job-detail-overview p { margin: 7px 0 0; color: var(--accent); font-size: 8px; }
+.job-detail-overview dl { margin: auto 0 0; }
+.job-detail-section > header strong { font-size: 9px; }
+.job-attempt-list { display: grid; gap: 6px; }
+.job-attempt-list article { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 9px; padding: 8px; border: 1px solid var(--border); border-radius: 3px; background: var(--panel-raised); }
+.job-attempt-list article > i { width: 8px; height: 8px; margin-top: 3px; border-radius: 50%; background: var(--muted); }
+.job-attempt-list article > i.is-succeeded { background: var(--success); }
+.job-attempt-list article > i.is-running { background: var(--accent); }
+.job-attempt-list article > i.is-failed { background: var(--danger); }
+.job-attempt-list strong,
+.job-attempt-list span,
+.job-attempt-list small { display: block; }
+.job-attempt-list strong { font-size: 8px; }
+.job-attempt-list span { margin-top: 3px; color: var(--muted); font-size: 7px; }
+.job-attempt-list small { margin-top: 4px; color: var(--danger); font-size: 7px; }
+.job-detail-error { display: flex; align-items: flex-start; gap: 7px; padding: 9px; border: 1px solid var(--danger-border); border-radius: 3px; background: var(--danger-soft); color: var(--danger); font-size: 8px; line-height: 1.5; }
+.job-detail-error svg { width: 14px; flex: 0 0 auto; }
+.job-detail-dialog > footer { display: flex; justify-content: flex-end; gap: 7px; padding: 11px 14px; border-top: 1px solid var(--border); background: var(--panel-raised); }
+.job-detail-dialog > footer button { min-height: 32px; padding: 0 11px; border: 1px solid var(--border); border-radius: 3px; background: var(--panel-muted); color: var(--text); font-size: 8px; font-weight: 800; }
+.job-detail-dialog > footer button.danger { border-color: var(--danger-border); background: var(--danger-soft); color: var(--danger); }
+
+@media (max-width: 1100px) {
+  .gallery-detail-hero { grid-template-columns: minmax(300px, 55%) minmax(260px, 45%); }
+  .job-lora-gallery { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .local-record-list > article { grid-template-columns: 74px minmax(0, 1fr) 112px 62px; }
+}
+
+@media (max-width: 760px) {
+  .gallery-detail-hero { grid-template-columns: 1fr; }
+  .gallery-detail-image { min-height: 320px; border-right: 0; border-bottom: 1px solid var(--border); }
+  .job-prompt-grid,
+  .job-lora-gallery { grid-template-columns: 1fr; }
+  .job-parameter-panel > div { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .local-record-list > article { grid-template-columns: 64px minmax(0, 1fr); padding-right: 42px; }
+  .local-record-preview { width: 64px; height: 64px; }
+  .local-record-time,
+  .local-record-detail { grid-column: 2; text-align: left; }
+  .local-record-detail { width: 72px; }
+  .job-detail-backdrop { padding: 10px; }
+  .job-detail-dialog { width: calc(100vw - 20px); max-height: calc(100vh - 20px); }
+  .job-detail-overview { grid-template-columns: 1fr; }
+  .job-detail-preview { width: 100%; height: 280px; }
+}
+
+.resource-unconfigured,
+.resource-channel-status {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 13px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-raised);
+}
+
+.resource-unconfigured > svg {
+  color: var(--warning);
+}
+
+.resource-channel-status > svg {
+  color: var(--success);
+}
+
+.resource-unconfigured strong,
+.resource-unconfigured span,
+.resource-unconfigured small,
+.resource-channel-status strong,
+.resource-channel-status small {
+  display: block;
+}
+
+.resource-unconfigured strong,
+.resource-channel-status strong {
+  font-size: 10px;
+}
+
+.resource-unconfigured span,
+.resource-channel-status small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.resource-unconfigured small {
+  margin-top: 6px;
+  color: var(--warning);
+  font-size: 8px;
+}
+
+.resource-list {
+  display: grid;
+  gap: 7px;
+  margin-top: 10px;
+}

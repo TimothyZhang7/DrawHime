@@ -1,0 +1,35 @@
+/* 本文件定义长列表通用分页控件，保持仓库与选择弹窗的翻页体验一致。 */
+
+.collection-pagination {
+  min-width: 0;
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--panel-raised);
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 700;
+}
+
+.collection-pagination > div { display: flex; gap: 5px; }
+
+.collection-pagination button {
+  width: 30px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--control);
+  color: var(--text);
+}
+
+.collection-pagination button:hover:not(:disabled) { border-color: var(--accent-border); background: var(--accent-soft); color: var(--accent); }
+.collection-pagination button:disabled { cursor: not-allowed; opacity: .42; }
+.collection-pagination svg { width: 14px; height: 14px; }

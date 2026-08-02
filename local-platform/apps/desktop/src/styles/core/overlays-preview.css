@@ -1,0 +1,286 @@
+/* 本文件定义全局浮层、独立预览窗口和瞬时通知样式。 */
+
+/* 固定浮层直接覆盖缩放后的逻辑视口，四边安全区不随字体倍率重复缩小。 */
+.job-detail-backdrop,
+.resource-dialog-backdrop,
+.generation-lora-backdrop {
+  inset: 0;
+  width: auto;
+  height: auto;
+  padding: 18px;
+  overflow: hidden;
+}
+
+.job-detail-dialog,
+.resource-dialog,
+.generation-lora-dialog {
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.job-detail-dialog { width: min(920px, 100%); }
+.resource-dialog { width: min(920px, 100%); }
+.generation-lora-dialog { width: min(1360px, 100%); }
+
+/* 逐图打标卡片按可用宽度自动在一列和两列间切换，操作区不再越过卡片边界。 */
+.training-asset-list {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 520px), 1fr));
+}
+
+.training-asset-list > article {
+  grid-template-columns: clamp(112px, 24%, 148px) minmax(0, 1fr);
+  align-items: stretch;
+}
+
+.training-asset-caption {
+  min-width: 0;
+}
+
+.training-asset-caption header {
+  min-width: 0;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.training-asset-caption footer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
+  gap: 6px;
+}
+
+.training-asset-caption footer > div {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.training-asset-caption footer button {
+  min-width: 0;
+  justify-content: center;
+  white-space: nowrap;
+}
+
+.desktop-caption-tag-list {
+  max-height: none;
+  scrollbar-gutter: auto;
+}
+
+@media (max-width: 1180px) {
+  .generate-layout { grid-template-columns: 1fr; }
+}
+
+.generation-lora-strengths {
+  grid-template-columns: repeat(2, 112px);
+}
+
+.generation-lora-strengths .generation-parameter {
+  grid-template-columns: minmax(0, 1fr) 54px;
+  grid-template-rows: 30px;
+  align-items: center;
+}
+
+.generation-lora-strengths .generation-parameter > span {
+  overflow: visible;
+}
+
+.prompt-field {
+  grid-template-rows: 18px auto;
+}
+
+.prompt-field textarea {
+  min-height: 112px;
+  border-radius: 3px;
+  font-size: calc(10px * var(--desktop-content-font-scale));
+  line-height: 1.6;
+}
+
+.prompt-field.negative textarea {
+  min-height: 68px;
+}
+
+.generation-form > footer {
+  margin-top: 9px;
+  padding-top: 9px;
+}
+
+.generation-preview {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+}
+
+.generation-preview > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.generation-preview > header b {
+  padding: 4px 7px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.generation-preview > header b.is-running,
+.generation-preview > header b.is-queued { border-color: var(--accent-border); background: var(--accent-soft); color: var(--accent); }
+.generation-preview > header b.is-succeeded { border-color: var(--success-border); background: var(--success-soft); color: var(--success); }
+.generation-preview > header b.is-failed,
+.generation-preview > header b.is-cancelled { border-color: var(--danger-border); background: var(--danger-soft); color: var(--danger); }
+
+.generation-preview-stage {
+  position: relative;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background:
+    linear-gradient(45deg, var(--accent-grid) 25%, transparent 25% 75%, var(--accent-grid) 75%),
+    linear-gradient(45deg, var(--accent-grid) 25%, transparent 25% 75%, var(--accent-grid) 75%),
+    var(--panel-muted);
+  background-position: 0 0, 10px 10px;
+  background-size: 20px 20px;
+}
+
+.generation-preview-stage > img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+}
+
+.generation-preview-empty {
+  max-width: 310px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  padding: 20px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.generation-preview-empty svg { width: 34px; height: 34px; color: var(--subtle); }
+.generation-preview-empty strong { color: var(--text); font-size: 11px; }
+.generation-preview-empty span { font-size: 9px; line-height: 1.55; }
+
+.generation-preview-stage > i {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  left: 18px;
+  height: 5px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--border);
+}
+
+.generation-preview-stage > i em {
+  height: 100%;
+  display: block;
+  background: var(--accent);
+  transition: width .2s ease;
+}
+
+.generation-preview > footer {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  padding-top: 10px;
+}
+
+.generation-preview > footer div {
+  min-width: 0;
+  padding: 7px;
+  border-left: 2px solid var(--border-strong);
+  background: var(--panel-muted);
+}
+
+.generation-preview > footer span,
+.generation-preview > footer strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.generation-preview > footer span { color: var(--muted); font-size: 7px; }
+.generation-preview > footer strong { margin-top: 3px; font-size: 8px; }
+
+/* 独立预览仅包含轻量任务订阅，系统标题栏负责拖动、缩放、最小化与关闭。 */
+.preview-window-body {
+  width: 100%;
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+/* 主窗口为页面切换预留滚动条槽，独立预览没有滚动条，必须释放右侧保留宽度。 */
+html.preview-window-document {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  scrollbar-gutter: auto;
+}
+
+.preview-window-document #root {
+  width: 100%;
+  height: var(--desktop-viewport-height);
+  min-height: 0;
+}
+
+.preview-window-root {
+  position: relative;
+  width: 100%;
+  height: var(--desktop-viewport-height);
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 8px;
+  overflow: hidden;
+  padding: 9px;
+}
+
+.preview-window-root > header {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 2px;
+}
+
+.preview-window-root > header span,
+.preview-window-root > header strong { display: block; }
+.preview-window-root > header span { color: var(--accent); font-size: 7px; font-weight: 900; letter-spacing: .12em; }
+.preview-window-root > header strong { margin-top: 2px; font-size: 11px; }
+
+.preview-window-root > header button {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  background: var(--panel-raised);
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 800;
+}
+
+.preview-window-root > header button:hover,
+.preview-window-root > header button.active { border-color: var(--accent-border); background: var(--accent-soft); color: var(--accent); }
+.preview-window-root > header button svg { width: 13px; }
+.preview-window-actions { display: flex; align-items: center; gap: 5px; }
+.preview-window-root > header .preview-window-close:hover { border-color: var(--danger-border); background: var(--danger-soft); color: var(--danger); }
+.preview-window-root .generation-preview { min-height: 0; grid-template-rows: minmax(0, 1fr) auto; }
+.preview-window-root .generation-preview > footer { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.preview-window-root .generation-preview-stage > img { width: auto; height: auto; max-width: 100%; max-height: 100%; object-fit: contain; }
+/* 错误横幅脱离网格高度计算，避免出现时把图片区域推到窗口底部之外。 */
+.preview-window-error { position: absolute; z-index: 8; top: 46px; right: 9px; left: 9px; max-height: 72px; margin: 0; overflow: auto; padding: 7px 9px; border: 1px solid var(--danger-border); background: color-mix(in srgb, var(--danger-soft) 94%, transparent); box-shadow: 0 8px 20px var(--shadow); color: var(--danger); font-size: 8px; }
+
+@media (max-width: 430px) {
+  .preview-window-root > header button { width: 30px; padding: 0; }
+  .preview-window-actions button > span { display: none; }
+}

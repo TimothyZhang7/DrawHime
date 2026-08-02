@@ -1,0 +1,415 @@
+/* 本文件定义 Runtime 控制、环境检测和依赖操作布局。 */
+
+/* Runtime 控制区保持单行高信息密度，窄窗口下自动拆分为安全操作区。 */
+.runtime-control {
+  min-height: 82px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 15px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--muted);
+  border-radius: 6px;
+  background: var(--panel);
+}
+
+.runtime-control.is-ready {
+  border-color: var(--success-border);
+  border-left-color: var(--success);
+}
+
+.runtime-control.is-failed {
+  border-color: var(--danger-border);
+  border-left-color: var(--danger);
+}
+
+.runtime-control-icon {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--panel-raised);
+  color: var(--muted);
+}
+
+.runtime-control.is-ready .runtime-control-icon {
+  border-color: var(--success-border);
+  color: var(--success);
+}
+
+.runtime-control-copy {
+  min-width: 0;
+}
+
+.runtime-control-copy span,
+.runtime-control-copy strong,
+.runtime-control-copy small {
+  display: block;
+}
+
+.runtime-control-copy span {
+  color: var(--accent);
+  font-size: 7px;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+}
+
+.runtime-control-copy strong {
+  margin-top: 3px;
+  font-size: 11px;
+}
+
+.runtime-control-copy small {
+  margin-top: 3px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtime-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.runtime-actions button {
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--panel-raised);
+  color: var(--text);
+  font-size: 8px;
+  font-weight: 760;
+}
+
+.runtime-actions button:hover:not(:disabled) {
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+.runtime-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.runtime-actions svg {
+  width: 13px;
+  height: 13px;
+}
+
+.metric-grid svg {
+  width: 16px;
+  color: var(--accent);
+}
+
+.metric-grid small {
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.metric-grid strong {
+  margin-top: 2px;
+  overflow: hidden;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.section-card {
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--panel);
+  box-shadow: 0 8px 24px var(--shadow-card);
+}
+
+.section-card > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 13px;
+}
+
+.section-card > header span {
+  color: var(--accent);
+  font-size: 7px;
+  font-weight: 900;
+  letter-spacing: 0.15em;
+}
+
+.section-card > header h2 {
+  margin: 3px 0 0;
+  font-size: 14px;
+}
+
+.section-card > header small {
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.environment-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.environment-summary > div,
+.gpu-list article,
+.disk-list article,
+.sync-list article {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--panel-raised);
+}
+
+.environment-summary > div {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px;
+}
+
+.environment-summary svg,
+.disk-list svg,
+.sync-list svg {
+  width: 16px;
+  color: var(--accent);
+}
+
+.environment-summary span,
+.environment-summary small,
+.environment-summary strong {
+  min-width: 0;
+  display: block;
+}
+
+.environment-summary small {
+  color: var(--muted);
+  font-size: 7px;
+}
+
+.environment-summary strong {
+  margin-top: 2px;
+  overflow: hidden;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.issue-list,
+.gpu-list,
+.disk-list,
+.sync-list {
+  display: grid;
+  gap: 7px;
+}
+
+.issue-list article {
+  display: flex;
+  gap: 9px;
+  padding: 11px;
+  border: 1px solid var(--warning-border);
+  border-left: 3px solid var(--warning);
+  border-radius: 5px;
+  background: var(--warning-soft);
+}
+
+.issue-list article.is-critical {
+  border-color: var(--danger-border);
+  border-left-color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.issue-list svg {
+  width: 16px;
+  color: var(--warning);
+}
+
+.issue-list .is-critical svg {
+  color: var(--danger);
+}
+
+.issue-list strong {
+  font-size: 10px;
+}
+
+.issue-list p {
+  margin: 3px 0;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.issue-list span {
+  color: var(--warning);
+  font-size: 8px;
+}
+
+.gpu-list article {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(420px, 1.4fr);
+  align-items: center;
+  gap: 18px;
+  padding: 12px;
+}
+
+.gpu-list article > div strong,
+.gpu-list article > div span {
+  display: block;
+}
+
+.gpu-list article > div strong {
+  font-size: 11px;
+}
+
+.gpu-list article > div span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.gpu-list dl {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+}
+
+.gpu-list dl div {
+  padding: 7px;
+  border-left: 1px solid var(--border);
+}
+
+.gpu-list dt {
+  color: var(--muted);
+  font-size: 7px;
+}
+
+.gpu-list dd {
+  margin: 2px 0 0;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.disk-list article,
+.sync-list article {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px;
+}
+
+.disk-list span,
+.sync-list div {
+  min-width: 0;
+  flex: 1;
+}
+
+.disk-list strong,
+.disk-list small,
+.sync-list strong,
+.sync-list span {
+  display: block;
+}
+
+.disk-list strong,
+.sync-list strong,
+.disk-list b {
+  font-size: 9px;
+}
+
+.disk-list small,
+.sync-list span,
+.sync-list small {
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.empty-block {
+  min-height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed var(--border);
+  border-radius: 5px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.resource-card > header {
+  align-items: flex-start;
+}
+
+.resource-reload,
+.resource-install-all,
+.resource-item-actions button,
+.dependency-row-tail > button,
+.queue-resource > footer > button {
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--panel-raised);
+  color: var(--text);
+  font-size: 9px;
+  font-weight: 750;
+}
+
+.resource-reload svg,
+.resource-install-all svg,
+.resource-item-actions button svg,
+.dependency-row-tail > button svg,
+.queue-resource > footer > button svg {
+  width: 14px;
+  height: 14px;
+}
+
+.resource-reload:disabled,
+.resource-install-all:disabled,
+.resource-item-actions button:disabled,
+.dependency-row-tail > button:disabled,
+.queue-resource > footer > button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.resource-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.resource-install-all {
+  border-color: var(--accent-border);
+  background: var(--accent);
+  color: #fff;
+}
+
+.resource-item-actions button.secondary,
+.dependency-row-tail > button.secondary,
+.queue-resource > footer > button.secondary {
+  border-color: var(--border);
+  background: var(--panel-muted);
+  color: var(--muted);
+}
+
+.resource-item-actions button.secondary:hover,
+.dependency-row-tail > button.secondary:hover,
+.queue-resource > footer > button.secondary:hover {
+  border-color: var(--warning-border);
+  color: var(--warning);
+}

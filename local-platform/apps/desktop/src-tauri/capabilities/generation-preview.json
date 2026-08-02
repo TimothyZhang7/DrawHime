@@ -5,6 +5,7 @@
   "windows": ["generation-preview"],
   "permissions": [
     "core:default",
+    "core:webview:allow-set-webview-zoom",
     "core:window:allow-close",
     "core:window:allow-set-theme",
     "core:event:allow-listen",

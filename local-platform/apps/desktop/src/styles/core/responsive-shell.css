@@ -1,0 +1,361 @@
+/* 本文件定义中小窗口下外壳、图库和训练集列表响应式规则。 */
+
+/* 中等宽度改为两列，并允许筛选工具栏自然换行，避免卡片内容被压缩。 */
+@media (max-width: 1100px) and (min-width: 761px) {
+  .generation-lora-toolbar { flex-wrap: wrap; }
+  .generation-lora-toolbar label { flex-grow: 1; }
+  .generation-lora-categories { order: 3; width: 100%; }
+  .generation-lora-library { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 760px) {
+  .generation-grid,
+  .generation-advanced-grid,
+  .training-create > div,
+  .training-dataset-list.is-expanded,
+  .desktop-training-parameters,
+  .training-review-grid { grid-template-columns: 1fr; }
+  .training-preset-picker { grid-template-columns: 1fr; }
+
+  .generation-heading-actions > small { display: none; }
+  .caption-dataset-grid { grid-template-columns: 1fr; }
+  .dataset-library-actions > small { display: none; }
+  .dataset-import-backdrop { padding: 7px; }
+  .dataset-import-dialog { width: 100%; max-height: 100%; padding: 12px; }
+  .dataset-import-source, .dataset-import-fields { grid-template-columns: 1fr; }
+  .dataset-import-fields label.wide { grid-column: auto; }
+  .dataset-import-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .training-trigger-editor { align-items: stretch; flex-direction: column; }
+  .training-batch-thumbnails { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* 紧凑窗口仍限制单图编辑器总高度，图片与标签区在卡片内部共享空间。 */
+  .training-batch-editor > article { height: min(500px, 76vh); min-height: 380px; grid-template-columns: 1fr; grid-template-rows: minmax(150px, 42%) minmax(0, 1fr); }
+  .training-batch-editor .training-asset-image { height: 100%; min-height: 0; }
+  .training-batch-actions label { min-width: 0; }
+  .caption-detail-header > header { align-items: stretch; flex-direction: column; }
+  .caption-detail-meta,
+  .caption-tools-grid { grid-template-columns: 1fr; }
+  .ai-clean-preset-picker { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .generation-lora-backdrop { padding: 7px; }
+  .generation-lora-dialog { width: 100%; max-height: 100%; }
+  .generation-lora-toolbar { align-items: stretch; flex-wrap: wrap; }
+  .generation-lora-toolbar label { width: 100%; min-width: 0; flex-basis: 100%; }
+  .generation-lora-categories { width: 100%; overflow-x: auto; padding-bottom: 2px; }
+  .generation-lora-categories button { flex: 0 0 auto; }
+  .generation-lora-toolbar > small { display: none; }
+  .generation-lora-library { grid-template-columns: 1fr; }
+  .generation-lora-library article { grid-template-columns: 74px minmax(0, 1fr); min-height: 112px; }
+  .generation-lora-cover { width: 74px; height: 98px; }
+  .generation-lora-dialog > footer { align-items: stretch; flex-direction: column; }
+  .preview-window-root .generation-preview > footer { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .training-stepper button span { display: none; }
+}
+
+@media (max-width: 760px) {
+  .environment-banner { width: min(68%, 420px); height: 36px; padding: 4px 7px; }
+  .environment-banner small { display: none; }
+}
+
+/* 主窗口只保留标题栏和页面两行，环境状态并入标题栏以释放内容高度。 */
+.desktop-main {
+  height: var(--desktop-viewport-height);
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 70px minmax(0, 1fr);
+  align-content: stretch;
+  overflow: hidden;
+  padding-bottom: 14px;
+}
+
+.desktop-topbar { grid-row: 1; }
+
+.desktop-page-host {
+  grid-row: 2;
+  min-width: 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: auto;
+  overscroll-behavior: contain;
+  container-type: inline-size;
+}
+
+.desktop-page-host > .desktop-page {
+  height: auto;
+  min-height: 100%;
+  margin-top: 10px;
+  padding: 0 0 10px;
+  overflow: visible;
+}
+
+.desktop-page-host.workspace-page {
+  height: auto;
+  min-height: 100%;
+  grid-template-rows: auto auto;
+  align-content: start;
+  gap: 8px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: auto;
+}
+
+.desktop-page-host.workspace-page > .workspace-tabs {
+  margin-top: 8px;
+}
+
+.desktop-page-host.workspace-page > div:not([hidden]) {
+  min-width: 0;
+  min-height: 0;
+  overflow: visible;
+}
+
+.desktop-page-host.workspace-page > div:not([hidden]) > .desktop-page {
+  height: auto;
+  min-height: 0;
+  margin-top: 0;
+  padding: 0 0 10px;
+  overflow: visible;
+}
+
+/* 固定工具栏与大列表工作区保留局部滚动，避免外层滚动破坏操作位置和长列表性能。 */
+.desktop-page-host:has(> .generate-layout),
+.desktop-page-host:has(> .captioning-library-page),
+.desktop-page-host:has(> .lora-training-page),
+.desktop-page-host:has(> .repository-page),
+.desktop-page-host:has(> .gallery-page) {
+  overflow: hidden;
+  scrollbar-gutter: auto;
+}
+
+.desktop-page-host > .generate-layout,
+.desktop-page-host > .captioning-library-page,
+.desktop-page-host > .lora-training-page,
+.desktop-page-host > .repository-page,
+.desktop-page-host > .gallery-page {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.desktop-page-host > .generate-layout { height: 100%; }
+
+.captioning-library-page {
+  grid-template-columns: minmax(320px, .7fr) minmax(0, 1.3fr);
+  align-items: stretch;
+  overflow: hidden;
+}
+
+.captioning-library-page > .training-create,
+.captioning-library-page > .caption-dataset-library {
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+}
+
+.captioning-library-page > .caption-dataset-library {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.caption-dataset-grid {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 290px), 1fr));
+  align-content: start;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
+}
+
+.captioning-detail-page {
+  height: auto;
+  min-height: 100%;
+  grid-template-rows: auto;
+  align-content: start;
+  overflow: visible;
+}
+
+.caption-detail-header,
+.caption-tools-grid,
+.caption-assets-workspace {
+  min-height: 0;
+}
+
+.caption-assets-workspace {
+  display: grid;
+  grid-template-rows: auto auto;
+  overflow: visible;
+}
+
+.caption-assets-workspace > .training-asset-list,
+.caption-assets-workspace > .training-batch-workspace {
+  min-height: 0;
+  overflow: visible;
+  padding-right: 0;
+  scrollbar-gutter: auto;
+}
+
+.training-asset-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
+}
+
+.lora-training-page {
+  grid-template-rows: auto minmax(0, 1fr);
+  align-content: stretch;
+}
+
+.lora-training-page > .training-step-panel {
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+}
+
+/* 图库不再使用额外标题卡片，只滚动直接占满页面的作品网格。 */
+.gallery-grid {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 168px), 1fr));
+}
+
+.gallery-detail,
+.repository-detail,
+.settings-page,
+.updates-page,
+.account-page {
+  align-content: start;
+}
+
+.settings-grid,
+.ai-settings-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+}
+
+/* 宽屏提升信息密度，常规窗口仍保持足够的控件宽度。 */
+@container (min-width: 1320px) {
+  .generation-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .generation-advanced-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .settings-page { grid-template-columns: minmax(0, 2fr) minmax(300px, .72fr); }
+  .caption-tools-grid { grid-template-columns: minmax(420px, .8fr) minmax(600px, 1.2fr); }
+  .desktop-training-parameters { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+@media (max-width: 1180px) {
+  .captioning-library-page { grid-template-columns: 1fr; overflow-y: auto; }
+  .captioning-library-page > .caption-dataset-library { overflow: visible; }
+  .caption-dataset-grid { overflow: visible; }
+  .training-asset-list { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 900px) {
+  .desktop-main {
+    height: calc(var(--desktop-viewport-height) - 62px);
+    grid-template-rows: 64px minmax(0, 1fr);
+    padding-bottom: 10px;
+  }
+}
+
+@media (max-width: 760px) {
+  .desktop-page-host > .desktop-page,
+  .desktop-page-host.workspace-page > div:not([hidden]) > .desktop-page {
+    padding-right: 2px;
+  }
+
+  .captioning-library-page { display: grid; }
+  .caption-dataset-grid { grid-template-columns: 1fr; }
+  .gallery-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* 低高度窗口收紧固定区域，把垂直空间优先留给用户内容。 */
+@media (max-height: 760px) and (min-width: 901px) {
+  .desktop-main { grid-template-rows: 56px minmax(0, 1fr); }
+  .desktop-topbar { height: 56px; }
+  .desktop-page-host > .desktop-page { margin-top: 8px; }
+  .workspace-tabs { min-height: 34px; margin-top: 6px; padding-bottom: 6px; }
+  .workspace-tabs button { min-height: 32px; }
+  .startup-command { padding: 16px 18px; }
+  .startup-primary { min-height: 88px; }
+  .startup-stages article { padding: 8px 10px; }
+  .section-card { padding: 12px; }
+  .section-card > header { margin-bottom: 9px; }
+  .caption-detail-header,
+  .caption-assets-workspace { padding: 9px; }
+  .caption-tools-grid { gap: 8px; }
+}
+
+/* 打标列表页使用全宽创建栏，训练集列表独占剩余高度，避免窄侧栏压坏输入控件。 */
+.captioning-library-page {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  align-content: stretch;
+  overflow: hidden;
+}
+
+.captioning-library-page .training-create {
+  padding: 11px 12px;
+}
+
+.captioning-library-page .training-create > header {
+  margin-bottom: 8px;
+}
+
+.captioning-library-page .training-create > div {
+  grid-template-columns: minmax(150px, 1fr) 120px minmax(180px, 1fr) auto;
+  gap: 8px;
+}
+
+.captioning-library-page .caption-dataset-library {
+  height: 100%;
+}
+
+.caption-dataset-grid > button {
+  min-height: 72px;
+  padding: 9px;
+}
+
+/* 详情标题把返回操作和标题并排，首屏为图片与标签释放更多垂直空间。 */
+.caption-detail-header {
+  padding: 10px 12px;
+}
+
+.caption-detail-header > header > div:first-child {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  align-items: center;
+  gap: 2px 8px;
+}
+
+.caption-detail-header .training-back {
+  grid-row: 1 / 3;
+  margin: 0;
+}
+
+.caption-detail-header > header > div:first-child > span,
+.caption-detail-header > header h2 {
+  grid-column: 2;
+}
+
+.caption-detail-meta {
+  margin-top: 8px;
+}
+
+.caption-detail-meta .training-trigger-editor,
+.caption-detail-meta .training-gate {
+  padding: 7px 8px;
+}
+
+.caption-tools-grid {
+  gap: 8px;
+}
+
+.caption-tools-grid .caption-control {
+  padding: 8px 9px;
+  border-radius: 3px;
+}
+
+.ai-clean-preset-picker button {
+  min-height: 40px;
+}
+
+.caption-assets-workspace {
+  padding: 9px;
+}

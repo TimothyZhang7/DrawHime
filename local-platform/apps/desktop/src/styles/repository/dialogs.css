@@ -1,0 +1,111 @@
+/* 本文件定义本机模型与 LoRA 导入弹窗和文件字段样式。 */
+
+/* Anima 默认导入只突出主文件，高级组件按需展开并保持成对选择。 */
+.repository-model-import {
+  display: grid;
+  gap: 11px;
+  margin-top: 14px;
+}
+
+.repository-model-import > label {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.repository-model-import > label > span {
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 700;
+}
+
+.repository-model-import input {
+  width: 100%;
+  min-width: 0;
+  height: 35px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  outline: 0;
+  background: var(--control);
+  color: var(--text);
+  font-size: 9px;
+}
+
+.repository-model-import input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+
+.repository-advanced-toggle {
+  min-height: 36px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  background: var(--panel-muted);
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 800;
+  text-align: left;
+}
+
+.repository-advanced-toggle svg { width: 14px; }
+.repository-advanced-toggle svg:last-child { transition: transform 160ms ease; }
+.repository-advanced-toggle.active { border-color: var(--accent-border); background: var(--accent-soft); color: var(--accent); }
+.repository-advanced-toggle.active svg:last-child { transform: rotate(90deg); }
+
+.repository-advanced-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 11px;
+  border: 1px solid var(--border);
+  background: var(--panel-muted);
+}
+
+.repository-advanced-fields > p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--muted);
+  font-size: 8px;
+  line-height: 1.6;
+}
+
+.repository-advanced-fields .wide { grid-column: auto; }
+
+.repository-dialog-actions { justify-content: flex-end; gap: 7px; margin-top: 16px; padding-top: 13px; border-top: 1px solid var(--border); }
+.repository-dialog-actions button:disabled { cursor: not-allowed; opacity: .45; }
+
+.path-field > div { min-width: 0; gap: 6px; }
+.path-field > div input { flex: 1; }
+.path-field button { min-height: 36px; flex: 0 0 auto; }
+.path-field button svg { width: 13px; }
+
+@media (max-width: 1100px) {
+  .repository-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (max-width: 900px) {
+  .repository-toolbar { top: 0; }
+  .repository-controls { flex-wrap: wrap; }
+  .repository-search { flex-basis: 100%; }
+  .repository-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .repository-detail-hero { grid-template-columns: minmax(220px, 38%) minmax(0, 1fr); }
+}
+
+@media (max-width: 760px) {
+  .repository-controls select,
+  .repository-local-filter,
+  .repository-controls > button { flex: 1; }
+  .repository-grid,
+  .repository-detail-grid,
+  .repository-form-grid { grid-template-columns: 1fr; }
+  .repository-form-grid label.wide { grid-column: 1; }
+  .repository-detail-hero { grid-template-columns: 1fr; }
+  .repository-detail-hero > .repository-cover { height: 260px; min-height: 260px; border-right: 0; border-bottom: 1px solid var(--border); }
+  .repository-detail-summary { padding: 20px; }
+  .repository-training-summary,
+  .repository-training-snapshot > div { grid-template-columns: 1fr; }
+  .repository-dialog-backdrop { padding: 10px; }
+  .repository-advanced-fields { grid-template-columns: 1fr; }
+}

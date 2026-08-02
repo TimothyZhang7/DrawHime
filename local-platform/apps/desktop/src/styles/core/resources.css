@@ -1,0 +1,256 @@
+/* 本文件定义必需依赖、下载队列和资源进度弹窗样式。 */
+
+/* 必需依赖摘要与下载队列分离，状态数量和传输细节各自保持清晰。 */
+.dependency-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.dependency-summary article {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel-raised);
+}
+
+.dependency-summary span,
+.dependency-summary small {
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.dependency-summary strong {
+  margin-left: auto;
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+.dependency-summary article.is-loaded strong { color: var(--accent); }
+.dependency-summary article.is-downloading strong { color: var(--success); }
+.dependency-summary article.is-waiting strong { color: var(--warning); }
+
+.resource-list article {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 11px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-raised);
+}
+
+.resource-list article > svg {
+  width: 18px;
+  color: var(--accent);
+}
+
+.resource-info {
+  min-width: 0;
+}
+
+.resource-info > strong,
+.resource-info > span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resource-info > strong {
+  font-size: 10px;
+}
+
+.resource-info > span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.dependency-row-tail {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dependency-state {
+  min-width: 52px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--panel-muted);
+  color: var(--muted);
+  font-size: 8px;
+  text-align: center;
+}
+
+.dependency-state.is-loaded { border-color: var(--accent-border); background: var(--accent-soft); color: var(--accent); }
+.dependency-state.is-downloading { border-color: var(--success-border); background: var(--success-soft); color: var(--success); }
+.dependency-state.is-waiting { border-color: var(--warning-border); background: var(--warning-soft); color: var(--warning); }
+
+.resource-switch-reason {
+  display: block;
+  margin-top: 5px;
+  color: var(--warning);
+  font-size: 7px;
+  line-height: 1.5;
+}
+
+/* 下载弹窗使用独立遮罩和滚动区，长队列不挤压主工作区。 */
+.resource-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  background: rgba(4, 10, 18, 0.58);
+  backdrop-filter: blur(4px);
+}
+
+.resource-dialog {
+  width: min(920px, calc(100vw - 40px));
+  max-height: min(760px, calc(100vh - 56px));
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  background: var(--panel);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+}
+
+.resource-dialog > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 15px 17px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-raised);
+}
+
+.resource-dialog > header span {
+  color: var(--accent);
+  font-size: 7px;
+  font-weight: 850;
+  letter-spacing: .12em;
+}
+
+.resource-dialog > header h2 {
+  margin: 3px 0 0;
+  font-size: 15px;
+}
+
+.resource-dialog-close {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel-muted);
+  color: var(--muted);
+}
+
+.resource-dialog-close:hover { border-color: var(--accent-border); color: var(--accent); }
+.resource-dialog-close svg { width: 15px; }
+
+.resource-dialog-body {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr));
+  align-content: start;
+  gap: 9px;
+  min-height: 180px;
+  padding: 13px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.queue-resource {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel-raised);
+}
+
+.queue-resource > header,
+.resource-progress-head,
+.resource-progress-meta,
+.queue-resource > footer {
+  display: flex;
+  align-items: center;
+}
+
+.queue-resource > header {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.queue-resource > header div { min-width: 0; }
+.queue-resource > header strong,
+.queue-resource > header span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.queue-resource > header strong { font-size: 10px; }
+.queue-resource > header span { margin-top: 3px; color: var(--muted); font-size: 7px; }
+.queue-resource > header b { color: var(--accent); font-size: 13px; font-variant-numeric: tabular-nums; }
+
+.resource-progress-head {
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+.resource-progress-head strong { color: var(--text); }
+
+.resource-progress-track {
+  height: 9px;
+  margin-top: 6px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--panel-muted);
+}
+
+.resource-progress-track i {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--accent), #4f9bea);
+  transition: width 220ms ease;
+}
+
+.resource-progress-track.is-paused i,
+.resource-progress-track.is-failed i { background: var(--warning); }
+.resource-progress-track.is-verifying i,
+.resource-progress-track.is-installing i { background: var(--success); }
+
+.resource-progress-meta {
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+.queue-resource > footer {
+  justify-content: flex-end;
+  margin-top: 9px;
+}
+
+.queue-resource > footer .resource-item-actions,
+.queue-resource > footer button {
+  min-width: 78px;
+}
+
+.settings-card > header > svg {
+  color: var(--success);
+}

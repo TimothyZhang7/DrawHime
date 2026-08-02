@@ -1,0 +1,174 @@
+/* 本文件定义仓库滚动边界、详情高度和响应式基础布局。 */
+
+/* 仓库列表固定筛选区并只滚动媒体网格，窗口和全屏都按真实可用宽度排布。 */
+.desktop-page-host > .repository-page {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  overflow: hidden;
+}
+
+.repository-toolbar,
+.repository-hint {
+  flex: 0 0 auto;
+}
+
+.repository-grid {
+  min-height: 0;
+  flex: 1 1 auto;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 218px), 1fr));
+  align-content: start;
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+}
+
+/* 仓库页面会在隐藏状态持续挂载以保留筛选条件，卡片必须始终参与真实布局。 */
+.repository-card {
+  min-height: 260px;
+}
+
+.repository-empty {
+  flex: 1 1 auto;
+}
+
+.repository-page > .collection-pagination {
+  flex: 0 0 auto;
+  margin-top: 8px;
+}
+
+/* 详情页限制首屏展示高度，信息卡和示例区继续按可用宽度扩展。 */
+.desktop-page-host > .repository-detail {
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+}
+
+.repository-detail-hero {
+  min-height: clamp(280px, 42vh, 390px);
+  grid-template-columns: minmax(280px, min(38%, 460px)) minmax(0, 1fr);
+}
+
+.repository-detail-hero > .repository-cover {
+  min-height: clamp(280px, 42vh, 390px);
+}
+
+.repository-detail-summary {
+  padding: clamp(18px, 2.6vw, 34px);
+}
+
+.repository-example-grid {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 180px), 1fr));
+}
+
+.repository-related-jobs > div:not(.repository-detail-empty) {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
+}
+
+@container (min-width: 1180px) {
+  .repository-toolbar {
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 14px;
+    padding: 9px 10px;
+  }
+
+  .repository-heading {
+    min-width: 150px;
+  }
+
+  .repository-heading h2 {
+    font-size: 15px;
+  }
+
+  .repository-controls {
+    justify-content: flex-end;
+  }
+
+  .repository-search {
+    max-width: 560px;
+  }
+}
+
+@media (max-width: 900px) {
+  .repository-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 190px), 1fr)); }
+  .repository-detail-hero { grid-template-columns: minmax(220px, 38%) minmax(0, 1fr); }
+}
+
+@media (max-width: 760px) {
+  .desktop-page-host > .repository-page { overflow-y: auto; }
+  .repository-grid { flex: 0 0 auto; grid-template-columns: repeat(2, minmax(0, 1fr)); overflow: visible; }
+  .repository-detail-hero { grid-template-columns: 1fr; }
+  .repository-detail-hero > .repository-cover { min-height: 240px; }
+  .repository-example-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* 仓库末端约束减少长列表合成开销，并保证筛选栏和卡片在缩放后不溢出。 */
+.desktop-page-host > .repository-page,
+.desktop-page-host > .repository-detail,
+.repository-toolbar,
+.repository-controls,
+.repository-grid {
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.repository-controls > *,
+.repository-toolbar input,
+.repository-toolbar select {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.repository-card {
+  border-radius: 4px;
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--shadow) 42%, transparent);
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.repository-card:hover,
+.repository-card:focus-visible {
+  transform: none;
+  box-shadow: 0 5px 14px color-mix(in srgb, var(--shadow) 58%, transparent);
+}
+
+.repository-card > button:disabled {
+  transform: none;
+  box-shadow: none;
+}
+
+.repository-card-copy strong,
+.repository-card-copy span,
+.repository-card-copy p {
+  overflow-wrap: anywhere;
+}
+
+@container (max-width: 620px) {
+  .repository-toolbar,
+  .repository-controls {
+    align-items: stretch;
+  }
+
+  .repository-controls > button,
+  .repository-controls > label,
+  .repository-controls > select {
+    flex: 1 1 auto;
+  }
+
+  .repository-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container (max-width: 420px) {
+  .repository-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

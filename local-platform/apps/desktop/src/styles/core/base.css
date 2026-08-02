@@ -1,0 +1,565 @@
+/* 本文件定义桌面主题令牌、基础元素、外壳和通用工作区结构。 */
+
+/* 本文件定义桌面工作站的亮暗主题、可访问状态和窗口自适应布局。 */
+:root {
+  color-scheme: dark;
+  font-family: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Source Han Sans SC", system-ui, sans-serif;
+  --bg: #080d14;
+  --bg-glow: #17375f;
+  --sidebar: rgba(10, 16, 25, 0.97);
+  --panel: #111a27;
+  --panel-raised: #182536;
+  --panel-muted: #0d1622;
+  --border: #314157;
+  --border-strong: #4a607a;
+  --text: #f3f6fb;
+  --muted: #a2afc0;
+  --subtle: #74859a;
+  --accent: #68a7ff;
+  --accent-soft: #142d4b;
+  --accent-border: #3d73ae;
+  --success: #46d49b;
+  --success-soft: #142d27;
+  --warning: #f2b650;
+  --warning-soft: #2a2117;
+  --danger: #ff7178;
+  --danger-soft: #2b1b21;
+  --shadow: rgba(0, 0, 0, 0.24);
+  --shadow-sidebar: rgba(0, 0, 0, 0.17);
+  --shadow-card: rgba(0, 0, 0, 0.13);
+  --control: #0d1521;
+  --accent-grid: rgba(119, 170, 255, 0.04);
+  --accent-line: rgba(119, 170, 255, 0.2);
+  --accent-inset: rgba(119, 170, 255, 0.05);
+  --danger-ring: rgba(255, 113, 120, 0.14);
+  --warning-border: #806034;
+  --danger-border: #773c43;
+  --warning-control: #302419;
+  --success-border: #2c644f;
+  --success-border-strong: #2b805f;
+  /* 默认提升到 110%，用户可在设置中选择 100%–130%。 */
+  --desktop-font-scale: 1.1;
+  /* 内容字体独立于页面缩放，避免为了看清提示词而放大全部控件。 */
+  --desktop-content-font-scale: 1.2;
+  /* 页面缩放由原生 WebView 负责，布局始终使用真实视口高度。 */
+  --desktop-viewport-height: 100vh;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #edf1f5;
+  --bg-glow: #c4d8ee;
+  --sidebar: rgba(248, 250, 252, 0.98);
+  --panel: #ffffff;
+  --panel-raised: #f1f5f9;
+  --panel-muted: #f7f9fb;
+  --border: #bcc8d6;
+  --border-strong: #94a7bd;
+  --text: #101a29;
+  --muted: #53647a;
+  --subtle: #718096;
+  --accent: #165fa9;
+  --accent-soft: #e5f0fc;
+  --accent-border: #78a8d8;
+  --success: #147855;
+  --success-soft: #e4f3ed;
+  --warning: #9d6410;
+  --warning-soft: #fff4df;
+  --danger: #bd3843;
+  --danger-soft: #fbeaec;
+  --shadow: rgba(25, 43, 66, 0.1);
+  --shadow-sidebar: rgba(25, 43, 66, 0.08);
+  --shadow-card: rgba(25, 43, 66, 0.06);
+  --control: #ffffff;
+  --accent-grid: rgba(30, 100, 173, 0.04);
+  --accent-line: rgba(30, 100, 173, 0.2);
+  --accent-inset: rgba(30, 100, 173, 0.06);
+  --danger-ring: rgba(189, 56, 67, 0.12);
+  --warning-border: #d3b37c;
+  --danger-border: #dba7ac;
+  --warning-control: #fff0d5;
+  --success-border: #98c9b6;
+  --success-border-strong: #67a98e;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+#root {
+  /* 原生 WebView 缩放会同步调整逻辑视口，根节点无需反向补偿。 */
+  width: 100%;
+  min-height: var(--desktop-viewport-height);
+}
+
+html {
+  /* 滚动条覆盖内容边缘显示，不为长短页面切换额外预留空白槽位。 */
+  scrollbar-gutter: auto;
+}
+
+/* 全部可滚动区域使用细窄透明轨道，减少工作区宽度损耗并保持亮暗主题一致。 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted) 58%, transparent) transparent;
+}
+
+*::-webkit-scrollbar { width: 6px; height: 6px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  border: 1px solid transparent;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--muted) 58%, transparent);
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--text) 64%, transparent); background-clip: padding-box; }
+*::-webkit-scrollbar-corner { background: transparent; }
+
+body {
+  /* 原生窗口负责最小宽度，页面本身不得因垂直滚动条额外产生横向溢出。 */
+  min-width: 0;
+  min-height: 100vh;
+  margin: 0;
+  overflow-x: hidden;
+  background:
+    linear-gradient(135deg, transparent 0 62%, var(--accent-grid) 62% 63%, transparent 63%),
+    radial-gradient(circle at 82% -18%, var(--bg-glow), transparent 39%),
+    var(--bg);
+  color: var(--text);
+  transition: background-color 160ms ease, color 160ms ease;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.spin {
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.desktop-loading {
+  min-height: var(--desktop-viewport-height);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--muted);
+}
+
+.desktop-loading svg {
+  width: 34px;
+  height: 34px;
+  color: var(--accent);
+}
+
+.desktop-loading strong {
+  color: var(--text);
+  font-size: 16px;
+}
+
+.desktop-loading span {
+  font-size: 11px;
+}
+
+.desktop-shell {
+  min-height: var(--desktop-viewport-height);
+  display: grid;
+  grid-template-columns: 214px minmax(0, 1fr);
+}
+
+.desktop-sidebar {
+  position: fixed;
+  inset: 0 auto 0 0;
+  z-index: 10;
+  width: 214px;
+  display: flex;
+  flex-direction: column;
+  padding: 18px 12px;
+  border-right: 1px solid var(--border);
+  background: var(--sidebar);
+  box-shadow: 8px 0 26px var(--shadow-sidebar);
+  /* 侧栏底色已经接近不透明，取消持续模糊可减少生成期间的 GPU 合成压力。 */
+  backdrop-filter: none;
+}
+
+.desktop-sidebar > header {
+  height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 8px;
+}
+
+.desktop-mark {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--accent-border);
+  border-radius: 7px;
+  background: linear-gradient(145deg, #2c67bf, #173453);
+  color: #fff;
+  font-family: Georgia, serif;
+  font-size: 20px;
+  font-weight: 900;
+}
+
+.desktop-sidebar > header strong,
+.desktop-sidebar > header span {
+  display: block;
+}
+
+.desktop-sidebar > header strong {
+  font-family: Bahnschrift, "Microsoft YaHei UI", sans-serif;
+  font-size: 15px;
+  letter-spacing: 0.01em;
+}
+
+.desktop-sidebar > header span {
+  margin-top: 1px;
+  color: var(--accent);
+  font-size: 7px;
+  font-weight: 900;
+  letter-spacing: 0.18em;
+}
+
+.desktop-sidebar nav {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  margin-top: 24px;
+  padding-right: 2px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.desktop-sidebar nav button {
+  position: relative;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 720;
+  text-align: left;
+  transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
+}
+
+.desktop-sidebar nav button:hover {
+  background: var(--panel-raised);
+  color: var(--text);
+}
+
+.desktop-sidebar nav button.active {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.desktop-sidebar nav button i {
+  position: absolute;
+  right: 10px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--danger);
+  box-shadow: 0 0 0 3px var(--danger-ring);
+}
+
+.desktop-sidebar > .core-status {
+  position: relative;
+  width: 100%;
+  margin-top: auto;
+  padding: 11px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-muted);
+  color: var(--muted);
+  box-shadow: inset 3px 0 0 currentColor;
+  text-align: left;
+  transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
+}
+
+.sidebar-theme-switch {
+  width: 100%;
+  flex: 0 0 auto;
+  justify-content: space-between;
+  margin: 0 0 8px;
+}
+
+.sidebar-theme-switch button {
+  flex: 1;
+}
+
+.core-status-icon {
+  position: absolute;
+  top: 9px;
+  right: 9px;
+  width: 14px;
+  height: 14px;
+}
+
+.desktop-sidebar > .core-status:hover {
+  border-color: currentColor;
+  background: var(--panel-raised);
+  transform: translateY(-1px);
+}
+
+.desktop-sidebar > .core-status span,
+.desktop-sidebar > .core-status strong,
+.desktop-sidebar > .core-status small {
+  display: block;
+}
+
+.desktop-sidebar > .core-status span {
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.desktop-sidebar > .core-status strong {
+  margin-top: 3px;
+  font-size: 10px;
+}
+
+.desktop-sidebar > .core-status small {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 7px;
+  line-height: 1.45;
+}
+
+.desktop-sidebar > .core-status.is-ready { color: var(--accent); }
+.desktop-sidebar > .core-status.is-starting { color: var(--success); }
+.desktop-sidebar > .core-status.is-missing { color: var(--warning); }
+.desktop-sidebar > .core-status.is-error { color: var(--danger); }
+
+.desktop-sidebar > .core-status strong,
+.desktop-sidebar > .core-status small { color: inherit; }
+
+.desktop-main {
+  --desktop-main-inline-gutter: 22px;
+  grid-column: 2;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: clip;
+  padding: 0 22px 30px;
+}
+
+.desktop-topbar {
+  height: 70px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.desktop-title span,
+.desktop-title strong {
+  display: block;
+}
+
+.desktop-title span {
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+}
+
+.desktop-title strong {
+  margin-top: 2px;
+  font-size: 15px;
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.theme-switch {
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+}
+
+.theme-switch button {
+  width: 26px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+}
+
+.theme-switch button:hover {
+  color: var(--text);
+}
+
+.theme-switch button.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent-border);
+}
+
+.theme-switch svg,
+.recheck-button svg {
+  width: 13px;
+  height: 13px;
+}
+
+.recheck-button {
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 9px;
+  font-weight: 750;
+}
+
+.recheck-button:hover {
+  border-color: var(--border-strong);
+  background: var(--panel-raised);
+}
+
+.recheck-button:disabled,
+.theme-switch button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.environment-banner {
+  width: min(660px, 68%);
+  min-width: 0;
+  height: 42px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 5px 9px;
+  border: 1px solid var(--warning-border);
+  border-left: 3px solid var(--warning);
+  border-radius: 3px;
+  background: var(--warning-soft);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.environment-banner:hover { border-color: var(--warning); background: color-mix(in srgb, var(--warning-soft) 82%, var(--panel)); }
+
+.environment-banner.is-critical {
+  border-color: var(--danger-border);
+  border-left-color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.environment-banner > svg {
+  color: var(--warning);
+}
+
+.environment-banner.is-critical > svg {
+  color: var(--danger);
+}
+
+.environment-banner > span,
+.environment-banner strong,
+.environment-banner small {
+  min-width: 0;
+  display: block;
+}
+
+.environment-banner strong {
+  overflow: hidden;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.environment-banner small {
+  margin-top: 1px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 7px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.desktop-notice {
+  position: fixed;
+  top: 16px;
+  right: 18px;
+  z-index: 12000;
+  width: min(360px, calc(100vw - 36px));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--accent-border);
+  border-radius: 5px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 9px;
+  box-shadow: 0 12px 34px var(--shadow);
+}
+
+.desktop-notice span { min-width: 0; line-height: 1.5; }
+
+.desktop-notice button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+}
+
+.desktop-page {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}

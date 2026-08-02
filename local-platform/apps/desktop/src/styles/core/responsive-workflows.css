@@ -1,0 +1,348 @@
+/* 本文件定义打标、生成和训练工作区的宽屏及窄屏布局规则。 */
+
+/* 图片卡片提高标签区域占比，操作按钮在宽屏使用三列以减少卡片高度。 */
+.training-asset-list > article {
+  gap: 9px;
+  padding: 7px;
+}
+
+.training-asset-image {
+  height: auto;
+  min-height: 178px;
+}
+
+.training-asset-caption {
+  grid-template-rows: auto auto auto auto;
+}
+
+@container (min-width: 1240px) {
+  .caption-control {
+    grid-template-columns: 132px minmax(0, 1fr);
+    align-content: start;
+    column-gap: 10px;
+  }
+
+  .caption-control-title {
+    grid-row: 1 / span 4;
+    align-items: flex-start;
+    padding: 3px 9px 3px 0;
+    border-right: 1px solid var(--border);
+  }
+
+  .caption-options,
+  .caption-translation-error,
+  .caption-job,
+  .ai-clean-preset-picker,
+  .ai-clean-custom-goal,
+  .ai-clean-submit {
+    grid-column: 2;
+  }
+
+  .training-asset-caption footer > div {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@container (min-width: 1420px) {
+  .training-batch-actions {
+    grid-template-columns: auto auto minmax(360px, 1fr) auto;
+  }
+
+  .training-batch-actions label {
+    min-width: 320px;
+  }
+}
+
+@container (max-width: 760px) {
+  .caption-tools-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .caption-assets-workspace {
+    min-height: 0;
+  }
+}
+
+@container (max-width: 700px) {
+  .captioning-library-page .training-create > div {
+    grid-template-columns: minmax(0, 1fr) 120px;
+  }
+
+  .captioning-library-page .training-create label:nth-child(3),
+  .captioning-library-page .training-create > div > button {
+    grid-column: 1 / -1;
+  }
+
+  .caption-detail-header > header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .training-editor-actions {
+    justify-content: flex-start;
+  }
+}
+
+@container (max-width: 480px) {
+  .captioning-library-page .training-create > div {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .captioning-library-page .training-create label,
+  .captioning-library-page .training-create > div > button {
+    grid-column: 1;
+  }
+
+  .caption-detail-meta {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* 生成工作台在宽屏并排提示词与参数，窄窗口保持无额外卡片的顺序式布局。 */
+.generation-workspace {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+}
+
+.generation-prompt-column,
+.generation-controls-column {
+  min-width: 0;
+  min-height: 0;
+}
+
+.generation-prompt-column {
+  display: grid;
+  grid-template-rows: minmax(168px, 1fr) minmax(96px, .58fr);
+  gap: 10px;
+  order: 2;
+}
+
+.generation-controls-column {
+  order: 1;
+}
+
+.generation-controls-column .generation-grid,
+.generation-controls-column .generation-advanced-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.generation-prompt-column .prompt-field {
+  min-height: 0;
+  grid-template-rows: 18px minmax(0, 1fr);
+  margin: 0;
+}
+
+.generation-prompt-column .prompt-field textarea {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  resize: vertical;
+}
+
+@container (min-width: 620px) {
+  .generation-controls-column .generation-grid,
+  .generation-controls-column .generation-advanced-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container (min-width: 1020px) {
+  .generation-workspace {
+    min-height: max(390px, calc(100% - 78px));
+    grid-template-columns: minmax(340px, .88fr) minmax(560px, 1.32fr);
+    align-items: stretch;
+    gap: 16px;
+  }
+
+  .generation-prompt-column {
+    order: 1;
+  }
+
+  .generation-controls-column {
+    order: 2;
+    padding-left: 16px;
+    border-left: 1px solid var(--border);
+  }
+
+  .generation-controls-column .generation-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .generation-prompt-column .prompt-field textarea {
+    resize: none;
+  }
+}
+
+@container (min-width: 1680px) {
+  .generation-workspace {
+    grid-template-columns: minmax(430px, .82fr) minmax(760px, 1.38fr);
+    gap: 20px;
+  }
+
+  .generation-controls-column {
+    padding-left: 20px;
+  }
+
+  .generation-controls-column .generation-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .generation-controls-column .generation-advanced-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* LoRA 训练页保持步骤导航、内容工作区和底部操作稳定，滚动只发生在当前步骤内部。 */
+.lora-training-page {
+  grid-template-rows: 44px minmax(0, 1fr);
+  gap: 9px;
+}
+
+.training-stepper {
+  min-width: 0;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+}
+
+.training-stepper button {
+  min-height: 44px;
+  justify-content: flex-start;
+  padding: 0 14px;
+  border-right: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  transition: border-color 140ms ease, background 140ms ease, color 140ms ease;
+}
+
+.training-stepper button:hover:not(:disabled) {
+  background: var(--panel-muted);
+  color: var(--text);
+}
+
+.training-stepper button.active {
+  border-bottom-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: none;
+  color: var(--accent);
+}
+
+.training-stepper button.complete {
+  border-bottom-color: var(--success-border);
+}
+
+.training-stepper button i {
+  width: 21px;
+  height: 21px;
+  flex: 0 0 21px;
+  border-radius: 3px;
+}
+
+.lora-training-page > .training-step-panel {
+  height: 100%;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  align-content: stretch;
+  gap: 10px;
+  overflow: hidden;
+  padding: 12px;
+}
+
+.training-step-panel > header {
+  min-width: 0;
+  margin-bottom: 0;
+  padding-bottom: 9px;
+  border-bottom: 1px solid var(--border);
+}
+
+.training-step-panel > header > div,
+.training-step-panel > header > small {
+  min-width: 0;
+}
+
+.training-step-panel > header h2 {
+  margin: 3px 0 0;
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.training-step-panel > header > div > span {
+  color: var(--accent);
+  font-size: 7px;
+  font-weight: 900;
+  letter-spacing: .12em;
+}
+
+.training-step-panel > header > small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.training-step-panel > footer {
+  min-height: 43px;
+  margin: 0;
+  padding-top: 9px;
+}
+
+/* 训练集选择在宽屏并列显示数据集和权威校验状态，列表独立滚动。 */
+.training-dataset-step-body {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  gap: 10px;
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+}
+
+.training-dataset-step-body > .training-dataset-list {
+  min-width: 0;
+  min-height: 0;
+  align-content: start;
+}
+
+.training-dataset-step-body > .training-selection-check {
+  min-width: 0;
+  align-self: start;
+  margin: 0;
+}
+
+/* 参数内容独立滚动，预设和常用参数保持靠前，高级参数按需展开。 */
+.training-parameter-content {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+}
+
+.training-primary-parameters {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.training-advanced-parameters {
+  min-width: 0;
+  margin: 0;
+}
+
+.training-advanced-parameters > summary {
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+}

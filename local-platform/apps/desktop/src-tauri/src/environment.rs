@@ -509,7 +509,7 @@ $disks = @(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' -ErrorAction 
             .filter(|result| result.status.success())
             .and_then(|result| serde_json::from_slice::<WindowsSystemProbe>(&result.stdout).ok())
         {
-            stabilize_windows_identity(&mut probe);
+            complete_windows_probe(&mut probe);
             if probe.os_version.is_some() && probe.os_build.is_some() {
                 return probe;
             }
@@ -520,8 +520,111 @@ $disks = @(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' -ErrorAction 
         }
     }
     let mut probe = last_probe.unwrap_or_else(empty_windows_system_probe);
-    stabilize_windows_identity(&mut probe);
+    complete_windows_probe(&mut probe);
     probe
+}
+
+/** 使用不依赖 WMI/CIM 的 Windows 接口补全关键字段，系统信息服务异常时仍返回真实版本和内存。 */
+fn complete_windows_probe(probe: &mut WindowsSystemProbe) {
+    #[cfg(target_os = "windows")]
+    {
+        if probe.os_version.is_none() || probe.os_build.is_none() {
+            if let Some(identity) = windows_registry_identity() {
+                probe.os_name = probe.os_name.clone().or(identity.name);
+                probe.os_version = Some(identity.version);
+                probe.os_build = Some(identity.build);
+            }
+        }
+        if probe.total_memory_bytes.is_none()
+            || probe.available_memory_bytes.is_none()
+            || probe.virtual_total_bytes.is_none()
+        {
+            if let Some(memory) = windows_native_memory() {
+                probe.total_memory_bytes = probe.total_memory_bytes.or(Some(memory.0));
+                probe.available_memory_bytes = probe.available_memory_bytes.or(Some(memory.1));
+                probe.virtual_total_bytes = probe.virtual_total_bytes.or(Some(memory.2));
+            }
+        }
+    }
+    stabilize_windows_identity(probe);
+}
+
+/** 直接读取 64 位系统注册表中的 Windows 版本，避免 PowerShell 或 CIM 瞬时故障阻塞启动。 */
+#[cfg(target_os = "windows")]
+fn windows_registry_identity() -> Option<WindowsIdentity> {
+    use winreg::{
+        enums::{HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_64KEY},
+        RegKey,
+    };
+
+    let key = RegKey::predef(HKEY_LOCAL_MACHINE)
+        .open_subkey_with_flags(
+            r"SOFTWARE\Microsoft\Windows NT\CurrentVersion",
+            KEY_READ | KEY_WOW64_64KEY,
+        )
+        .ok()?;
+    let build_text: String = key.get_value("CurrentBuildNumber").ok()?;
+    let build = build_text
+        .trim()
+        .parse::<u64>()
+        .ok()
+        .filter(|value| *value > 0)?;
+    let major = key
+        .get_value::<u32, _>("CurrentMajorVersionNumber")
+        .unwrap_or(10);
+    let minor = key
+        .get_value::<u32, _>("CurrentMinorVersionNumber")
+        .unwrap_or(0);
+    let name = key
+        .get_value::<String, _>("ProductName")
+        .ok()
+        .filter(|value| !value.trim().is_empty());
+    Some(WindowsIdentity {
+        name,
+        version: format!("{major}.{minor}.{build}"),
+        build,
+    })
+}
+
+/** 调用 Win32 内存状态接口，避免 WMI 不可用时把真实内存错误显示为 0 GB。 */
+#[cfg(target_os = "windows")]
+fn windows_native_memory() -> Option<(u64, u64, u64)> {
+    #[repr(C)]
+    struct MemoryStatusEx {
+        length: u32,
+        memory_load: u32,
+        total_physical: u64,
+        available_physical: u64,
+        total_page_file: u64,
+        available_page_file: u64,
+        total_virtual: u64,
+        available_virtual: u64,
+        available_extended_virtual: u64,
+    }
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GlobalMemoryStatusEx(status: *mut MemoryStatusEx) -> i32;
+    }
+
+    let mut status = MemoryStatusEx {
+        length: std::mem::size_of::<MemoryStatusEx>() as u32,
+        memory_load: 0,
+        total_physical: 0,
+        available_physical: 0,
+        total_page_file: 0,
+        available_page_file: 0,
+        total_virtual: 0,
+        available_virtual: 0,
+        available_extended_virtual: 0,
+    };
+    // Win32 只写入固定布局结构体，返回零时不采用其中的未完成数据。
+    let succeeded = unsafe { GlobalMemoryStatusEx(&mut status) } != 0;
+    (succeeded && status.total_physical > 0).then_some((
+        status.total_physical,
+        status.available_physical,
+        status.total_page_file,
+    ))
 }
 
 /** 可信版本写入进程缓存；当前探测缺失时沿用缓存而不产生瞬时错误结论。 */
@@ -817,6 +920,22 @@ mod tests {
             windows_build_support(Some("10.0.26100"), None),
             WindowsBuildSupport::Unknown
         );
+    }
+
+    /** Windows 发布门禁必须验证不依赖 CIM 的注册表与内存回退确实能读取当前主机。 */
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn native_windows_fallback_reads_real_host() {
+        let identity =
+            windows_registry_identity().expect("应能从 64 位系统注册表读取 Windows 版本");
+        assert_eq!(
+            windows_build_support(Some(&identity.version), Some(identity.build)),
+            WindowsBuildSupport::Supported
+        );
+        let memory = windows_native_memory().expect("应能从 Win32 API 读取系统内存");
+        assert!(memory.0 > 0);
+        assert!(memory.1 <= memory.0);
+        assert!(memory.2 >= memory.0);
     }
 
     #[test]

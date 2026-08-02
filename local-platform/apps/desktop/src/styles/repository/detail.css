@@ -1,0 +1,154 @@
+/* 本文件定义底模与 LoRA 详情页首屏、信息区和操作区样式。 */
+
+.repository-detail {
+  display: grid;
+  gap: 12px;
+}
+
+.repository-back {
+  width: max-content;
+  gap: 6px;
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel-raised);
+  color: var(--text);
+  font-size: 8px;
+  font-weight: 800;
+}
+
+.repository-detail-hero {
+  min-height: 330px;
+  display: grid;
+  grid-template-columns: minmax(280px, 42%) minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--panel-raised);
+  box-shadow: 0 14px 34px var(--shadow);
+}
+
+.repository-detail-hero > .repository-cover {
+  height: 100%;
+  min-height: 330px;
+  aspect-ratio: auto;
+  border-right: 1px solid var(--border);
+}
+
+.repository-detail-summary {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: clamp(20px, 4vw, 44px);
+}
+
+.repository-detail-tags { flex-wrap: wrap; gap: 5px; }
+.repository-detail-tags b,
+.repository-detail-tags i { border-color: var(--border); background: var(--panel-muted); color: var(--muted); backdrop-filter: none; }
+.repository-detail-tags b { border-color: var(--success-border); background: var(--success-soft); color: var(--success); }
+
+.repository-detail-summary h1 {
+  margin: 14px 0 0;
+  font-size: clamp(23px, 3vw, 38px);
+  line-height: 1.08;
+  letter-spacing: -.045em;
+}
+
+.repository-detail-summary > p {
+  max-width: 720px;
+  margin: 14px 0 0;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.85;
+  white-space: pre-wrap;
+}
+
+.repository-detail-actions {
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 20px;
+}
+
+.repository-detail-actions button,
+.repository-source-list button,
+.repository-trigger-list button,
+.repository-dialog-actions button,
+.repository-file-field button,
+.path-field button {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 11px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel-muted);
+  color: var(--text);
+  font-size: 8px;
+  font-weight: 800;
+}
+
+.repository-detail-actions button:disabled { border-color: var(--success-border); background: var(--success-soft); color: var(--success); }
+
+/* 删除操作保持独立危险语义，避免与“已安装”状态按钮混淆。 */
+.repository-detail-actions .danger {
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.repository-detail-actions .danger:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger-soft) 78%, var(--danger) 22%);
+}
+
+.repository-detail-actions .danger:disabled {
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+  color: var(--danger);
+  cursor: wait;
+  opacity: .58;
+}
+
+.repository-detail-progress {
+  position: relative;
+  height: 22px;
+  margin-top: 12px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel-muted);
+}
+
+.repository-detail-progress i { position: absolute; inset: 0 auto 0 0; opacity: .24; }
+.repository-detail-progress span { position: relative; z-index: 1; display: block; padding: 4px 7px; font-size: 7px; font-weight: 800; }
+
+.repository-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.repository-detail-grid > article,
+.repository-detail-copy {
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-raised);
+}
+
+.repository-detail article header { gap: 7px; margin-bottom: 10px; }
+.repository-detail article header svg { width: 16px; color: var(--accent); }
+.repository-detail article header strong,
+.repository-detail-copy h3 { margin: 0; font-size: 10px; }
+.repository-detail dl { display: grid; gap: 7px; margin: 0; }
+.repository-detail dl > div { min-width: 0; display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 10px; padding-bottom: 7px; border-bottom: 1px solid var(--border); }
+.repository-detail dl > div:last-child { padding-bottom: 0; border-bottom: 0; }
+.repository-detail dt { color: var(--muted); font-size: 8px; }
+.repository-detail dd { margin: 0; overflow: hidden; font-size: 8px; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.repository-detail-copy p { margin: 9px 0 0; color: var(--muted); font-size: 8px; line-height: 1.75; white-space: pre-wrap; }
+.repository-source-list,
+.repository-trigger-list { flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.repository-trigger-list button { min-height: 30px; color: var(--accent); }

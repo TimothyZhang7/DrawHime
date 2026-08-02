@@ -1,0 +1,225 @@
+/* 本文件定义底模密度网格、LoRA 横向卡片和下载状态样式。 */
+
+/* 底模仓库以竖向大封面为主，在常规宽度固定六列并随可用空间逐级收敛。 */
+.repository-model-grid {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.repository-card.is-model {
+  min-height: 0;
+  grid-template-rows: auto auto;
+}
+
+/* 长仓库仅渲染视口附近卡片，保留稳定占位避免切换页面时跳动。 */
+.repository-card {
+}
+
+.repository-card.is-model .repository-card-media {
+  aspect-ratio: 3 / 4;
+}
+
+.repository-card.is-model .repository-cover {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  aspect-ratio: auto;
+}
+
+.repository-card.is-model .repository-card-copy {
+  min-height: 82px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 9px 9px;
+}
+
+.repository-card.is-model .repository-card-copy p {
+  min-height: 0;
+  margin: 0;
+  font-size: calc(7.5px * var(--desktop-content-font-scale));
+  line-height: 1.45;
+  -webkit-line-clamp: 2;
+}
+
+/* LoRA 使用三列横向资产卡，封面、关键信息和操作在单屏中保持稳定尺寸。 */
+.repository-lora-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-auto-rows: max-content;
+  gap: 8px;
+  scroll-snap-type: y proximity;
+}
+
+.repository-card.is-lora {
+  min-height: calc(122px + 34px * var(--desktop-content-font-scale));
+  display: grid;
+  grid-template-columns: clamp(104px, 9vw, 132px) minmax(0, 1fr);
+  grid-template-rows: auto;
+  align-self: start;
+  scroll-snap-align: start;
+}
+
+.repository-card.is-lora .repository-card-media {
+  min-height: 100%;
+  border-right: 1px solid var(--border);
+}
+
+.repository-card.is-lora .repository-cover {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  aspect-ratio: auto;
+}
+
+.repository-lora-content {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  background: var(--panel-raised);
+}
+
+.repository-card.is-lora .repository-card-title {
+  position: static;
+  padding: 0;
+  background: none;
+  color: var(--text);
+}
+
+.repository-card.is-lora .repository-card-title strong {
+  font-size: calc(10px * var(--desktop-content-font-scale));
+  line-height: 1.35;
+}
+
+.repository-card.is-lora .repository-card-title span {
+  color: var(--accent);
+  font-size: calc(7px * var(--desktop-content-font-scale));
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.repository-lora-description {
+  min-height: calc(21.75px * var(--desktop-content-font-scale));
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 0;
+  color: var(--muted);
+  font-size: calc(7.5px * var(--desktop-content-font-scale));
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.repository-lora-triggers {
+  min-width: 0;
+  min-height: calc(22px + 8px * var(--desktop-content-font-scale));
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 5px;
+  padding: 5px 6px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--control);
+  font-size: calc(7px * var(--desktop-content-font-scale));
+}
+
+.repository-lora-triggers b {
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.repository-lora-triggers span {
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 下载动作固定在内容区，明确区分可下载、处理中和已安装状态。 */
+.repository-card-action {
+  width: 100%;
+  min-width: 0;
+  min-height: calc(22px + 8px * var(--desktop-content-font-scale));
+  height: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 4px 8px;
+  margin-top: auto;
+  border: 1px solid var(--accent-border);
+  border-radius: 3px;
+  background: var(--accent);
+  color: #fff;
+  font-size: calc(7px * var(--desktop-content-font-scale));
+  font-weight: 800;
+  line-height: 1.25;
+  text-align: center;
+  white-space: normal;
+}
+
+.repository-card-action svg {
+  width: 12px;
+  flex: 0 0 auto;
+}
+
+.repository-card-action.is-download:not(:disabled),
+.repository-card-action.is-view:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 70%, #fff);
+  background: color-mix(in srgb, var(--accent) 90%, #0c1622);
+  color: #fff;
+}
+
+.repository-card-action.is-local {
+  border-color: color-mix(in srgb, var(--success) 58%, #fff);
+  background: color-mix(in srgb, var(--success) 82%, #0c1712);
+  color: #fff;
+  cursor: default;
+  opacity: 1;
+}
+
+.repository-card .repository-card-action:disabled:not(.is-local) {
+  border-color: color-mix(in srgb, var(--accent) 62%, #fff);
+  background: color-mix(in srgb, var(--accent) 78%, #14283c);
+  color: #fff;
+  cursor: progress;
+  opacity: .82;
+}
+
+.repository-card-progress {
+  position: relative;
+  inset: auto;
+  width: 100%;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--border);
+}
+
+.repository-card.is-model .repository-card-title {
+  padding-right: 9px;
+}
+
+@container (max-width: 760px) {
+  .repository-model-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .repository-lora-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .repository-card.is-lora { grid-template-columns: 112px minmax(0, 1fr); }
+}
+
+@container (max-width: 620px) {
+  .repository-model-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@container (max-width: 520px) {
+  .repository-model-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .repository-lora-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+@container (max-width: 380px) {
+  .repository-model-grid { grid-template-columns: minmax(0, 1fr); }
+}

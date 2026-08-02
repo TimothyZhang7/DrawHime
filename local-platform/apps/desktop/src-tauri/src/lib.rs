@@ -119,11 +119,17 @@ fn desktop_bootstrap(state: State<'_, DesktopState>) -> Result<DesktopBootstrapV
 }
 
 #[tauri::command]
-fn desktop_inspect_environment(
-    state: State<'_, DesktopState>,
+async fn desktop_inspect_environment(
+    app: tauri::AppHandle,
 ) -> Result<DesktopEnvironmentReport, String> {
-    let settings = state.load_settings()?;
-    inspect_and_store(&state, &settings)
+    // CIM、nvidia-smi 和磁盘探测属于阻塞系统调用，必须离开 IPC 主执行线程以保证页面交互流畅。
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<DesktopState>();
+        let settings = state.load_settings()?;
+        inspect_and_store(&state, &settings)
+    })
+    .await
+    .map_err(|error| format!("环境检测任务异常：{error}"))?
 }
 
 #[tauri::command]

@@ -1,0 +1,102 @@
+/* 本文件定义 LoRA 来源训练集快照和复制操作样式。 */
+
+/* LoRA 来源训练区明确区分只读快照和可编辑副本，图片列表按需展开。 */
+.repository-training-source {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel-raised);
+}
+
+.repository-training-source > header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.repository-training-source > header > svg { width: 17px; color: var(--accent); }
+.repository-training-source > header > div { min-width: 0; flex: 1; }
+.repository-training-source > header span { color: var(--accent); font-size: 7px; font-weight: 800; }
+.repository-training-source > header h3 { margin: 1px 0 0; font-size: 10px; }
+.repository-training-source > header small { color: var(--muted); font-size: 8px; }
+
+.repository-training-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, .72fr);
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.repository-training-summary > div { min-width: 0; }
+.repository-training-summary > div > strong,
+.repository-training-summary label > span { display: block; color: var(--muted); font-size: 8px; }
+.repository-training-summary p { margin: 5px 0 11px; color: var(--text); font-size: 8px; line-height: 1.6; }
+.repository-training-summary label { display: grid; gap: 5px; }
+.repository-training-summary input { width: 100%; min-width: 0; height: 34px; padding: 0 9px; border: 1px solid var(--border); border-radius: 3px; outline: 0; background: var(--control); color: var(--text); font-size: 8px; }
+.repository-training-summary input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.repository-training-summary button { min-height: 34px; margin-top: 7px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 0 10px; border: 1px solid var(--accent-border); border-radius: 3px; background: var(--accent); color: #fff; font-size: 8px; font-weight: 800; }
+.repository-training-summary button:disabled { cursor: not-allowed; opacity: .5; }
+.repository-training-summary button svg { width: 13px; }
+
+.repository-training-snapshot { margin-top: 12px; border-top: 1px solid var(--border); }
+.repository-training-snapshot > summary { padding: 11px 2px 0; cursor: pointer; color: var(--accent); font-size: 8px; font-weight: 800; }
+.repository-training-snapshot > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; margin-top: 10px; }
+.repository-training-snapshot article { min-width: 0; display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 9px; padding: 7px; border: 1px solid var(--border); border-radius: 3px; background: var(--panel-muted); }
+.repository-training-snapshot img { width: 72px; height: 72px; display: block; object-fit: cover; border-radius: 2px; background: var(--control); }
+.repository-training-snapshot article > div { min-width: 0; }
+.repository-training-snapshot strong,
+.repository-training-snapshot small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.repository-training-snapshot strong { font-size: 8px; }
+.repository-training-snapshot small { margin-top: 3px; color: var(--muted); font-size: 7px; }
+.repository-training-snapshot p { max-height: 42px; margin: 5px 0 0; overflow: auto; color: var(--muted); font-size: 7px; line-height: 1.5; }
+
+.repository-dialog-backdrop {
+  position: fixed;
+  z-index: 120;
+  inset: 0;
+  width: auto;
+  height: auto;
+  display: grid;
+  place-items: center;
+  /* 弹窗直接使用缩放后的逻辑视口，并在四边保留稳定的可点击距离。 */
+  padding: 18px;
+  overflow: hidden;
+  background: rgba(5, 8, 12, .7);
+  backdrop-filter: blur(10px);
+}
+
+.repository-dialog {
+  width: min(720px, 100%);
+  max-height: min(720px, 100%);
+  overflow: auto;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--panel);
+  box-shadow: 0 26px 70px rgba(0, 0, 0, .38);
+}
+
+.repository-dialog > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding-bottom: 13px; border-bottom: 1px solid var(--border); }
+.repository-dialog > header h2 { margin: 0; font-size: 16px; }
+.repository-dialog > header p { margin: 5px 0 0; color: var(--muted); font-size: 8px; line-height: 1.55; }
+.repository-dialog > header > button { width: 31px; height: 31px; display: grid; place-items: center; flex: 0 0 auto; padding: 0; border: 1px solid var(--border); border-radius: 4px; background: var(--panel-muted); color: var(--text); }
+.repository-dialog > header > button svg { width: 14px; }
+
+.repository-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.repository-form-grid label { min-width: 0; display: grid; gap: 5px; }
+.repository-form-grid label.wide { grid-column: 1 / -1; }
+.repository-form-grid label > span { color: var(--muted); font-size: 8px; font-weight: 700; }
+.repository-form-grid input,
+.repository-form-grid select { width: 100%; min-width: 0; height: 35px; padding: 0 9px; border: 1px solid var(--border); border-radius: 4px; outline: 0; background: var(--control); color: var(--text); font-size: 9px; }
+.repository-form-grid input:focus,
+.repository-form-grid select:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.repository-file-field > div { min-width: 0; gap: 6px; }
+.repository-file-field input { flex: 1; }
+.repository-file-field button { min-height: 35px; flex: 0 0 auto; }

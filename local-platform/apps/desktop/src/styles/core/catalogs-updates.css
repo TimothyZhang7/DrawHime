@@ -1,0 +1,148 @@
+/* 本文件定义旧资源目录兼容区和软件更新卡片样式。 */
+
+/* 本机 LoRA 仓库使用紧凑资料卡，文件异常时保持清晰的红色终态。 */
+.lora-library-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.lora-library-grid article {
+  position: relative;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--panel-raised);
+}
+
+.lora-library-grid article > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.lora-library-grid svg {
+  width: 17px;
+  color: var(--accent);
+}
+
+.lora-library-grid b {
+  padding: 3px 6px;
+  border-radius: 3px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 7px;
+}
+
+.lora-library-grid strong,
+.lora-library-grid span,
+.lora-library-grid small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lora-library-grid strong {
+  font-size: 10px;
+}
+
+.lora-library-grid span,
+.lora-library-grid small {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 7px;
+}
+
+.lora-library-grid article > i {
+  display: block;
+  margin-top: 9px;
+  color: var(--success);
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.lora-library-grid .is-missing > i {
+  color: var(--danger);
+}
+
+/* 网站 LoRA 目录突出一键安装、权限和真实断点进度，窄窗口自动收敛列数。 */
+.website-lora-section > header > button,
+.website-lora-grid article > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--accent);
+  color: var(--button-text);
+  font-size: 8px;
+  font-weight: 800;
+}
+
+.website-lora-section > header > button svg,
+.website-lora-grid article > button svg { width: 14px; }
+.website-lora-section > header > button:disabled,
+.website-lora-grid article > button:disabled { cursor: not-allowed; opacity: .55; }
+
+.website-lora-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.website-lora-grid article {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--panel-raised);
+}
+
+.website-lora-grid article > div:first-child { display: flex; align-items: center; gap: 5px; }
+.website-lora-grid article > div:first-child b,
+.website-lora-grid article > div:first-child i { padding: 3px 6px; border-radius: 3px; background: var(--accent-soft); color: var(--accent); font-size: 7px; font-style: normal; }
+.website-lora-grid article > div:first-child i { background: var(--danger-soft); color: var(--danger); }
+.website-lora-grid strong,
+.website-lora-grid span,
+.website-lora-grid > article > small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.website-lora-grid strong { font-size: 10px; }
+.website-lora-grid span,
+.website-lora-grid > article > small { color: var(--muted); font-size: 7px; }
+
+/* 软件更新把版本、签名状态、在线操作和离线恢复拆成清晰的两张响应式卡片。 */
+.updates-page { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(300px, .65fr); gap: 12px; }
+.update-overview > header > b { padding: 5px 8px; border-radius: 4px; background: var(--accent-soft); color: var(--accent); font-size: 8px; }
+.update-overview > header > b.is-up_to_date { background: var(--success-soft); color: var(--success); }
+.update-overview > header > b.is-failed,
+.update-overview > header > b.is-unavailable { background: var(--danger-soft); color: var(--danger); }
+.update-version { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 16px; padding: 18px; border: 1px solid var(--border); border-radius: 5px; background: var(--panel-raised); }
+.update-version > div { display: grid; gap: 4px; }
+.update-version > div:last-child { text-align: right; }
+.update-version span { color: var(--muted); font-size: 8px; }
+.update-version strong { font-size: clamp(19px, 2.4vw, 30px); letter-spacing: -.03em; }
+.update-version > svg { width: 19px; color: var(--accent); }
+.update-overview > section { margin-top: 12px; padding: 12px; border-left: 3px solid var(--accent); background: var(--accent-soft); }
+.update-overview > section strong { font-size: 9px; }
+.update-overview > section p,
+.update-recovery > p { margin: 6px 0 0; color: var(--muted); font-size: 8px; line-height: 1.7; white-space: pre-wrap; }
+.update-warning { display: flex; align-items: center; gap: 8px; margin-top: 10px; color: var(--danger); font-size: 8px; }
+.update-warning svg { width: 16px; flex: none; }
+.update-actions,
+.update-recovery > div { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.update-actions button,
+.update-recovery button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 34px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: 4px; background: var(--panel-raised); color: var(--text); font-size: 8px; font-weight: 800; }
+.update-actions button.primary { background: var(--accent); color: var(--button-text); }
+.update-recovery button.danger { color: var(--danger); }
+.update-actions button:disabled,
+.update-recovery button:disabled { cursor: not-allowed; opacity: .5; }
+.update-actions svg,
+.update-recovery button svg { width: 14px; }
+.update-recovery > header > svg { color: var(--success); }
